@@ -9,7 +9,6 @@ export default function FechamentoLojas() {
   const [carregando, setCarregando] = useState(true);
 
   const [lojaExpandida, setLojaExpandida] = useState(null);
-
   const [lojaEmEdicao, setLojaEmEdicao] = useState(null);
   const [itensEditados, setItensEditados] = useState([]);
 
@@ -56,36 +55,57 @@ export default function FechamentoLojas() {
       (pedData || []).forEach(p => {
         if (p.status_compra === 'pendente') return;
 
-        // FORNECEDORES
+        // --- FORNECEDORES ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
           const fNome = p.fornecedor_compra ? p.fornecedor_compra.toUpperCase() : 'SEM FORNECEDOR';
           const isBoleto = p.status_compra === 'boleto';
+          
           let baseVal = p.custo_unit;
-          if (String(p.custo_unit).includes('BONIFICAÇÃO |')) baseVal = p.custo_unit.split('|')[1].trim();
+          let qtdBonifFornecedor = 0;
+          
+          if (String(p.custo_unit).includes('BONIFICAÇÃO |')) {
+             const partes = p.custo_unit.split('|');
+             qtdBonifFornecedor = parseInt(partes[0]) || 0;
+             baseVal = partes[1].trim();
+          }
 
           const valNum = tratarPrecoNum(baseVal);
-          const totalItemForn = p.qtd_atendida * valNum;
+          
+          // Total cobrado pelo fornecedor (deduzindo bonificação)
+          const qtdCobradaForn = Math.max(0, p.qtd_atendida - qtdBonifFornecedor);
+          const totalItemFornCobrado = qtdCobradaForn * valNum;
 
           if (!mapaForn[fNome]) {
             mapaForn[fNome] = { nome: fNome, totalPix: 0, totalBoleto: 0, itens: [], statusPagamento: 'pendente' };
           }
 
-          mapaForn[fNome].itens.push({ 
-            nomeItem: p.nome_produto, 
-            qtd: p.qtd_atendida, 
-            valUnit: baseVal, 
-            totalItem: totalItemForn, 
-            isBoleto 
-          });
+          // Busca item já existente para não duplicar linhas no fornecedor
+          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => i.nomeItem === p.nome_produto && i.isBoleto === isBoleto);
+
+          if (itemExistenteIndex >= 0) {
+              const itEx = mapaForn[fNome].itens[itemExistenteIndex];
+              itEx.qtd += p.qtd_atendida;
+              itEx.qtdBonificada += qtdBonifFornecedor;
+              itEx.totalItem += totalItemFornCobrado;
+          } else {
+              mapaForn[fNome].itens.push({ 
+                nomeItem: p.nome_produto, 
+                qtd: p.qtd_atendida,
+                qtdBonificada: qtdBonifFornecedor,
+                valUnit: baseVal, 
+                totalItem: totalItemFornCobrado, 
+                isBoleto 
+              });
+          }
 
           if (isBoleto) {
-            mapaForn[fNome].totalBoleto += totalItemForn;
+            mapaForn[fNome].totalBoleto += totalItemFornCobrado;
           } else {
-            mapaForn[fNome].totalPix += totalItemForn;
+            mapaForn[fNome].totalPix += totalItemFornCobrado;
           }
         }
 
-        // LOJAS
+        // --- LOJAS ---
         const idLoja = extrairNum(p.loja_id);
         if (!idLoja || idLoja <= 1) return;
 
@@ -109,30 +129,48 @@ export default function FechamentoLojas() {
         let totalDisplay = '';
         let precoOriginal = p.custo_unit || 'R$ 0,00';
         let isBonif = false;
+        let qtdBonificadaLoja = 0;
 
+        // 💡 LÓGICA DE BONIFICAÇÃO (APLICAÇÃO VISUAL DA PLANILHA)
         if (isFalta) {
           unitDisplay = 'FALTA';
           totalDisplay = 'FALTA';
-        } else if (isBoleto) {
-          unitDisplay = 'BOLETO';
-          totalDisplay = 'BOLETO';
         } else if (p.custo_unit === 'BONIFICAÇÃO') {
           isBonif = true;
           unitDisplay = 'BONIFICAÇÃO';
           totalDisplay = 'BONIFICAÇÃO';
           totalItem = 0;
           qtdDisplay = p.qtd_atendida;
+          qtdBonificadaLoja = p.qtd_atendida;
         } else if (String(p.custo_unit).includes('BONIFICAÇÃO |')) {
           isBonif = true;
           const parts = p.custo_unit.split('|');
-          unitDisplay = p.custo_unit;
           precoOriginal = parts[1] ? parts[1].trim() : 'R$ 0,00';
           const pUnit = tratarPrecoNum(precoOriginal);
-          const numB = parseInt(parts[0]) || 0;
+          qtdBonificadaLoja = parseInt(parts[0]) || 0;
           qtdDisplay = p.qtd_atendida;
-          const rest = qtdDisplay - numB;
-          totalItem = rest > 0 ? rest * pUnit : 0;
+          
+          const restCobrado = qtdDisplay - qtdBonificadaLoja;
+          totalItem = restCobrado > 0 ? restCobrado * pUnit : 0;
           totalDisplay = formatarMoeda(totalItem);
+
+          // 💡 REGRAS DE EXIBIÇÃO SOLICITADAS
+          if (qtdBonificadaLoja >= qtdDisplay) {
+              // Total do item pedido = BONIFICAÇÃO NOS DOIS QUADRADOS
+              unitDisplay = 'BONIFICAÇÃO';
+              totalDisplay = 'BONIFICAÇÃO';
+          } else if (isBoleto) {
+              // Boleto + Bonificação Parcial
+              unitDisplay = `${qtdBonificadaLoja} BONIF.`;
+              totalDisplay = 'BOLETO';
+          } else {
+              // Bonificação Parcial Normal (Mostra Quantidade Bonificada no Unitário)
+              unitDisplay = `${qtdBonificadaLoja} BONIF. | ${precoOriginal}`;
+          }
+
+        } else if (isBoleto) {
+          unitDisplay = 'BOLETO';
+          totalDisplay = 'BOLETO';
         } else {
           qtdDisplay = p.qtd_atendida; 
           const valNum = tratarPrecoNum(p.custo_unit);
@@ -143,9 +181,10 @@ export default function FechamentoLojas() {
         const nomeUpper = p.nome_produto.toUpperCase();
         const idxExistente = mapaLojas[idLoja].itens.findIndex(i => i.nome === nomeUpper);
 
+        // Agrupamento Loja
         if (idxExistente >= 0) {
           const it = mapaLojas[idLoja].itens[idxExistente];
-          if (!isFalta && !isBoleto && !it.isFalta && !it.isBoleto) {
+          if (!isFalta && !isBoleto && !it.isFalta && !it.isBoleto && !isBonif && !it.isBonif) {
              const novaQtd = Number(it.qtdEntregue) + Number(qtdDisplay);
              const novoTotalNum = it.valorNumerico + totalItem;
              it.qtdEntregue = novaQtd;
@@ -160,6 +199,7 @@ export default function FechamentoLojas() {
             unidade: p.unidade_medida || 'UN',
             qtdOriginal: p.quantidade,
             qtdEntregue: qtdDisplay,
+            qtdBonificada: qtdBonificadaLoja,
             unitDisplay: unitDisplay,
             totalDisplay: totalDisplay,
             valorNumerico: totalItem,
@@ -214,7 +254,7 @@ export default function FechamentoLojas() {
   };
 
   const handleBlurPreco = (idPedido, campo, valorAtual) => {
-    if (!valorAtual || valorAtual === 'FALTA' || valorAtual === 'BOLETO' || valorAtual.includes('BONIFICAÇÃO')) return;
+    if (!valorAtual || valorAtual === 'FALTA' || valorAtual === 'BOLETO' || valorAtual.includes('BONIF')) return;
     let v = String(valorAtual).replace(/[^\d,.]/g, '');
     if (!v.includes(',') && !v.includes('.')) { v = v + ',00'; }
     if(v.includes('.') && !v.includes(',')) v = v.replace('.', ',');
@@ -230,47 +270,7 @@ export default function FechamentoLojas() {
     handleChangeEdicao(idPedido, campo, finalStr);
   };
 
-  const aplicarBonificacao = (item) => {
-    const val = prompt(`Quantos itens serão bonificados? (Máximo: ${item.qtdEntregue})\n*Deixe em branco para bonificar TUDO.`, item.qtdEntregue);
-    if (val === null) return;
-    
-    const qtdBonificada = parseInt(val) || parseInt(item.qtdEntregue);
-    const qtdTotalEntregue = parseInt(item.qtdEntregue);
-
-    if (qtdBonificada > qtdTotalEntregue) {
-       alert(`Ação bloqueada! Você não pode colocar mais bonificações (${qtdBonificada}) do que a quantidade entregue (${qtdTotalEntregue}).`);
-       return;
-    }
-    
-    if (qtdBonificada <= 0) return;
-
-    setItensEditados(prev => prev.map(i => {
-       if(i.id_pedido === item.id_pedido) {
-          const base = i.precoOriginal && !i.precoOriginal.includes('BONIF') ? i.precoOriginal : 'R$ 0,00';
-          const isTotal = qtdBonificada === qtdTotalEntregue;
-          
-          const novoUnit = isTotal ? 'BONIFICAÇÃO' : `${qtdBonificada} = BONIFICAÇÃO | ${base}`;
-          const calcRestante = isTotal ? 0 : (qtdTotalEntregue - qtdBonificada) * tratarPrecoNum(base);
-          
-          return {
-             ...i,
-             isFalta: false,
-             isBoleto: false,
-             isBonif: true,
-             unitDisplay: novoUnit,
-             totalDisplay: isTotal ? 'BONIFICAÇÃO' : formatarMoeda(calcRestante),
-             valorNumerico: calcRestante
-          };
-       }
-       return i;
-    }));
-  };
-
-  const setStatusRapido = (idPedido, tipo, objItem) => {
-    if (tipo === 'bonificacao') {
-       aplicarBonificacao(objItem);
-       return;
-    }
+  const setStatusRapido = (idPedido, tipo) => {
     setItensEditados(prev => prev.map(item => {
       if (item.id_pedido === idPedido) {
         if (tipo === 'boleto') return { ...item, isBoleto: true, isFalta: false, isBonif: false, unitDisplay: 'BOLETO', totalDisplay: 'BOLETO', valorNumerico: 0 };
@@ -306,7 +306,7 @@ export default function FechamentoLojas() {
   };
 
   const totalAoVivoEdicao = itensEditados.reduce((acc, item) => {
-     if(item.isFalta || item.isBoleto || (item.isBonif && item.unitDisplay === 'BONIFICAÇÃO')) return acc;
+     if(item.isFalta || item.isBoleto || (item.isBonif && item.unitDisplay.includes('BONIF'))) return acc;
      const val = tratarPrecoNum(item.totalDisplay);
      return acc + (isNaN(val) ? 0 : val);
   }, 0);
@@ -334,20 +334,39 @@ export default function FechamentoLojas() {
     }));
   };
 
-  const baixarPDF = () => {
+  // 💡 MUDANÇA: COMPARTILHAMENTO DIRETO WHATSAPP + NOME NO PDF
+  const processarPDF = (modo = 'baixar', lojaObj = null) => {
     const elemento = document.getElementById('area-impressao');
     if (!elemento) return;
 
+    let nomeArquivo = `Fechamentos_${dataBr.replace(/\//g, '-')}.pdf`;
+    
+    // Se for impressão de uma loja única
+    if (lojaObj) {
+       nomeArquivo = `${lojaObj.nome_fantasia} - ${dataBr.replace(/\//g, '-')}.pdf`;
+    }
+
     const gerar = () => {
       const opt = {
-        margin:       10,
-        filename:     `Fechamento_${dataBr.replace(/\//g, '-')}.pdf`,
+        margin:       [10, 5, 10, 5],
+        filename:     nomeArquivo,
         image:        { type: 'jpeg', quality: 0.98 },
         html2canvas:  { scale: 2, useCORS: true },
-        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }, 
+        // 💡 MUDANÇA: PORTRAIT (RETRATO) PARA AS LOJAS
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }, 
         pagebreak:    { mode: 'css', after: '.print-break' }
       };
-      window.html2pdf().set(opt).from(elemento).save();
+
+      if (modo === 'whatsapp') {
+         // O html2pdf não tem uma função nativa de 'share file' direta e fácil via web
+         // O mais seguro é forçar o download com o nome correto e instruir o envio
+         window.html2pdf().set(opt).from(elemento).save().then(() => {
+            alert(`O arquivo "${nomeArquivo}" foi baixado. Agora é só enviar no WhatsApp da loja!`);
+            window.open('https://web.whatsapp.com', '_blank');
+         });
+      } else {
+         window.html2pdf().set(opt).from(elemento).save();
+      }
     };
 
     if (!window.html2pdf) {
@@ -372,15 +391,15 @@ export default function FechamentoLojas() {
 
   const formatarTextoTabela = (texto) => {
     if (typeof texto !== 'string') return texto;
-    const txtVisivel = texto.split('|')[0].trim();
-    if (txtVisivel.includes('BONIFICAÇÃO')) {
-        return <span style={{ color: '#16a34a', fontWeight: '900' }}>{txtVisivel}</span>;
+    if (texto.includes('BONIF')) {
+        return <span style={{ color: '#16a34a', fontWeight: '900' }}>{texto}</span>;
     }
-    return txtVisivel;
+    return texto;
   };
 
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Processando...</div>;
 
+  // 💡 MUDANÇA DESIGN DA TABELA E FONTE 
   const renderTabelaDupla = (itensLoja, isMotorista) => {
     const half = Math.ceil(itensLoja.length / 2);
     const rows = [];
@@ -388,25 +407,27 @@ export default function FechamentoLojas() {
       rows.push({ left: itensLoja[i], right: itensLoja[i + half] });
     }
 
-    const thStyle = { border: '1px solid black', padding: '6px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#e5e7eb', color: 'black' };
-    const tdStyle = { border: '1px solid black', padding: '6px', textAlign: 'center', fontSize: '11px', fontWeight: '500' };
-    const tdDesc = { ...tdStyle, textAlign: 'left', fontWeight: 'bold' }; 
+    const thStyle = { border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#e5e7eb', color: 'black' };
+    const tdStyle = { border: '1px solid black', padding: '4px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold' };
+    
+    // Diminui o quadrado dos nomes (width menor) e aumenta a fonte + negrito
+    const tdDesc = { ...tdStyle, textAlign: 'left', fontWeight: '900', fontSize: '12px' }; 
 
     return (
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
-            <th style={{...thStyle, width: '8%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '27%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '10%'}}>VAL. UNIT.</th>
-            <th style={{...thStyle, width: '10%'}}>VAL. TOTAL.</th>
+            <th style={{...thStyle, width: '6%'}}>QUANT.</th>
+            <th style={{...thStyle, width: '25%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '13%'}}>VAL. UNIT.</th>
+            <th style={{...thStyle, width: '13%'}}>VAL. TOTAL.</th>
             
-            <th style={{ border: 'none', width: '30px', backgroundColor: 'transparent' }}></th>
+            <th style={{ border: 'none', width: '10px', backgroundColor: 'transparent' }}></th>
 
-            <th style={{...thStyle, width: '8%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '27%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '10%'}}>VAL. UNIT.</th>
-            <th style={{...thStyle, width: '10%'}}>VAL. TOTAL.</th>
+            <th style={{...thStyle, width: '6%'}}>QUANT.</th>
+            <th style={{...thStyle, width: '25%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '13%'}}>VAL. UNIT.</th>
+            <th style={{...thStyle, width: '13%'}}>VAL. TOTAL.</th>
           </tr>
         </thead>
         <tbody>
@@ -419,8 +440,8 @@ export default function FechamentoLojas() {
 
                const corValores = isFa ? 'red' : isBo ? '#d97706' : 'black';
 
-               let uDisp = isBo ? 'BOLETO' : isFa ? 'FALTA' : item.unitDisplay;
-               let tDisp = isBo ? 'BOLETO' : isFa ? 'FALTA' : item.totalDisplay;
+               let uDisp = item.unitDisplay;
+               let tDisp = item.totalDisplay;
 
                if (isMotorista) {
                   uDisp = isFa ? 'FALTA' : '';
@@ -433,7 +454,8 @@ export default function FechamentoLojas() {
                return (
                  <>
                    <td style={{...tdStyle, color: 'black'}}>{item.qtdEntregue}</td>
-                   <td style={{...tdDesc, color: 'red'}}>{formatarNomeItem(item.nome)}</td>
+                   {/* Nome com fonte maior, sem cor vermelha e em negrito */}
+                   <td style={{...tdDesc, color: 'black'}}>{formatarNomeItem(item.nome)}</td>
                    <td style={{...tdStyle, color: corValores}}>{uDisp}</td>
                    <td style={{...tdStyle, color: corValores}}>{tDisp}</td>
                  </>
@@ -443,7 +465,7 @@ export default function FechamentoLojas() {
              return (
                <tr key={idx}>
                  {renderCell(row.left)}
-                 <td style={{ border: 'none', width: '30px' }}></td>
+                 <td style={{ border: 'none', width: '10px' }}></td>
                  {renderCell(row.right)}
                </tr>
              )
@@ -454,8 +476,8 @@ export default function FechamentoLojas() {
   };
 
   if (modoVisualizacaoImp) {
-    const isMotGlobal = (tipoImpressao === 'motorista_todos' || tipoImpressao === 'motorista_unico');
-    const lojasParaRenderizar = (tipoImpressao === 'motorista_todos') ? fechamentos : [lojaParaImprimir];
+    const isMotGlobal = (tipoImpressao === 'motorista_todos');
+    const lojasParaRenderizar = isMotGlobal ? fechamentos : [lojaParaImprimir];
 
     return (
       <div style={{ backgroundColor: '#525659', minHeight: '100vh', padding: '10px', fontFamily: 'Arial, sans-serif' }}>
@@ -463,45 +485,52 @@ export default function FechamentoLojas() {
         <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', backgroundColor: '#333', padding: '15px', borderRadius: '8px', marginBottom: '20px', position: 'sticky', top: '10px', zIndex: 1000, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
            <button onClick={() => setModoVisualizacaoImp(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬅ VOLTAR</button>
            <div style={{ display: 'flex', gap: '10px', flex: '1 1 auto', flexWrap: 'wrap' }}>
-             <button onClick={baixarPDF} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
+             
+             {!isMotGlobal && (
+               <button onClick={() => processarPDF('whatsapp', lojaParaImprimir)} style={{ background: '#25d366', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🟢 COMPARTILHAR WHATSAPP</button>
+             )}
+             
+             <button onClick={() => processarPDF('baixar', isMotGlobal ? null : lojaParaImprimir)} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
              <button onClick={() => window.print()} style={{ background: '#22c55e', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🖨️ IMPRIMIR</button>
            </div>
         </div>
 
         <div style={{ overflowX: 'auto', paddingBottom: '20px' }}>
-            <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', minWidth: '950px', maxWidth: '1050px', margin: '0 auto' }}>
+            <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', width: '100%', maxWidth: '800px', margin: '0 auto' }}>
                
                {lojasParaRenderizar.map((loja, idx) => (
-                  <div key={loja.loja_id} className="print-break" style={{ padding: '20px', position: 'relative', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+                  <div key={loja.loja_id} className="print-break" style={{ padding: '15px', position: 'relative', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
                      
-                     <div style={{ border: '2px solid black', boxSizing: 'border-box' }}>
+                     <div style={{ border: '2px solid black', boxSizing: 'border-box', height: '100%' }}>
                          
-                         <div style={{ display: 'flex', flexDirection: 'row', width: '100%', borderBottom: '2px solid black' }}>
+                         <div style={{ display: 'flex', flexDirection: 'row', width: '100%', borderBottom: '2px solid black', minHeight: '80px' }}>
                             
-                            <div style={{ flex: '1.2', borderRight: '2px solid black', padding: '10px', display: 'flex', alignItems: 'center' }}>
+                            <div style={{ flex: '1.5', borderRight: '2px solid black', padding: '10px', display: 'flex', alignItems: 'center' }}>
                                 <span style={{ fontWeight: '900', fontSize: '18px', color: 'black', marginRight: '5px' }}>LOJA:</span>
-                                <span style={{ fontWeight: '900', fontSize: '18px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
+                                <span style={{ fontWeight: '900', fontSize: '20px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia} [cite: 2]</span>
                             </div>
 
-                            <div style={{ flex: '1', borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px' }}>
-                                <img src="https://i.imgur.com/uRjM2rG.png" alt="Frazão Frutas & Cia" style={{ maxHeight: '60px', width: 'auto' }} />
+                            <div style={{ flex: '1.2', borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', overflow: 'hidden' }}>
+                                {/* 💡 INSIRA O LINK DA SUA IMAGEM HOSPEDADA ABAIXO */}
+                                <img src="https://i.postimg.cc/zX8QYXbG/frazao-logo-black.png" alt="Frazão Frutas & Cia [cite: 3]" style={{ maxHeight: '70px', maxWidth: '100%', objectFit: 'contain' }} />
+                                {/* Caso a imagem acima falhe, coloque a sua aqui trocando o src */}
                             </div>
 
                             <div style={{ flex: '0.8', display: 'flex', flexDirection: 'column' }}>
                                 <div style={{ display: 'flex', flex: 1, borderBottom: '2px solid black' }}>
-                                    <div style={{ flex: 1, borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '14px', color: 'black', padding: '5px' }}>
-                                        VALOR TOTAL:
+                                    <div style={{ flex: 1, borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '14px', color: 'black', padding: '5px', textAlign: 'center' }}>
+                                        VALOR TOTAL: [cite: 4]
                                     </div>
-                                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '14px', color: 'red', padding: '5px' }}>
-                                        {!isMotGlobal ? formatarMoeda(loja.totalFatura) : ''}
+                                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '16px', color: 'black', padding: '5px' }}>
+                                        {!isMotGlobal ? formatarMoeda(loja.totalFatura) : ''} [cite: 5]
                                     </div>
                                 </div>
                                 <div style={{ display: 'flex', flex: 1 }}>
-                                    <div style={{ flex: 1, borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px', color: 'black', padding: '5px' }}>
-                                        DATA:
+                                    <div style={{ flex: 1, borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '16px', color: 'black', padding: '5px' }}>
+                                        DATA: 
                                     </div>
-                                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px', color: 'black', padding: '5px' }}>
-                                        {dataBr}
+                                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '16px', color: 'black', padding: '5px' }}>
+                                        {dataBr} 
                                     </div>
                                 </div>
                             </div>
@@ -521,8 +550,10 @@ export default function FechamentoLojas() {
             .print-break { page-break-after: always !important; break-after: page !important; }
             html, body { height: auto !important; overflow: visible !important; background: white; margin: 0; padding: 0; }
             #root, div { overflow: visible !important; height: auto !important; }
+            
+            /* 💡 MUDANÇA: IMPRESSÃO EM RETRATO (PORTRAIT) */
             .print-section { box-shadow: none !important; min-width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; }
-            @page { margin: 10mm; size: landscape; }
+            @page { margin: 10mm; size: portrait; } 
           }
         `}</style>
       </div>
@@ -685,16 +716,30 @@ export default function FechamentoLojas() {
                         )}
 
                         <div style={{ marginBottom: '15px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          {forn.itens.map((i, k) => (
-                            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: i.isBoleto ? '#3b82f6' : '#333' }}>
-                              <span>{i.qtd}x {formatarNomeItem(i.nomeItem)}</span>
-                              <b style={{ color: i.isBoleto ? '#2563eb' : '#111' }}>{i.isBoleto ? 'BOLETO' : `${i.valUnit} = ${formatarMoeda(i.totalItem)}`}</b>
-                            </div>
-                          ))}
+                          {forn.itens.map((i, k) => {
+                             let displayValue = `${i.valUnit} = ${formatarMoeda(i.totalItem)}`;
+                             if (i.qtdBonificada > 0) displayValue = `R$ B. ${i.valUnit} = ${formatarMoeda(i.totalItem)}`;
+
+                             return (
+                              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: i.isBoleto ? '#3b82f6' : '#333' }}>
+                                <span>{i.qtd}x {formatarNomeItem(i.nomeItem)}</span>
+                                <b style={{ color: i.isBoleto ? '#2563eb' : '#111' }}>{i.isBoleto ? `(B) ${displayValue}` : displayValue}</b>
+                              </div>
+                             );
+                          })}
                         </div>
 
                         <div style={{ paddingTop: '10px', borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '12px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#111' }}><span>Total PIX:</span> <b>{formatarMoeda(forn.totalPix)}</b></div>
+                          
+                          {/* 💡 SOMA AGRUPADA NOS FORNECEDORES COM DEDUÇÃO */}
+                          {forn.totalDescontoBonif > 0 && (
+                            <>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b' }}><span>Valor Bruto:</span> <b>{formatarMoeda(forn.totalBruto)}</b></div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#16a34a', fontWeight: 'bold' }}><span>🎁 Bonificações ({forn.qtdBonificadaGeral}):</span> <b>- {formatarMoeda(forn.totalDescontoBonif)}</b></div>
+                            </>
+                          )}
+                          
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#111', marginTop: '5px', borderTop: forn.totalDescontoBonif > 0 ? '1px solid #ccc' : 'none', paddingTop: forn.totalDescontoBonif > 0 ? '5px' : '0' }}><span>Total PIX:</span> <b>{formatarMoeda(forn.totalPix)}</b></div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#3b82f6' }}><span>Total Boleto:</span> <b>{formatarMoeda(forn.totalBoleto)}</b></div>
                         </div>
 
@@ -739,14 +784,13 @@ export default function FechamentoLojas() {
                       </strong>
                       
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '6px' }}>
-                        <button onClick={() => setStatusRapido(item.id_pedido, 'bonificacao', item)} style={{ fontSize: '10px', background: item.isBonif ? '#16a34a' : '#dcfce7', color: item.isBonif ? '#fff' : '#16a34a', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>🎁 BONIFICAÇÃO</button>
-
-                        <button onClick={() => setStatusRapido(item.id_pedido, 'boleto', item)} style={{ fontSize: '10px', background: item.isBoleto ? '#d97706' : '#fef3c7', color: item.isBoleto ? '#fff' : '#d97706', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>BOLETO</button>
                         
-                        <button onClick={() => setStatusRapido(item.id_pedido, 'falta', item)} style={{ fontSize: '10px', background: item.isFalta ? '#ef4444' : '#fef2f2', color: item.isFalta ? '#fff' : '#ef4444', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>FALTA</button>
+                        <button onClick={() => setStatusRapido(item.id_pedido, 'boleto')} style={{ fontSize: '10px', background: item.isBoleto ? '#d97706' : '#fef3c7', color: item.isBoleto ? '#fff' : '#d97706', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>BOLETO</button>
+                        
+                        <button onClick={() => setStatusRapido(item.id_pedido, 'falta')} style={{ fontSize: '10px', background: item.isFalta ? '#ef4444' : '#fef2f2', color: item.isFalta ? '#fff' : '#ef4444', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>FALTA</button>
                         
                         {(item.isFalta || item.isBoleto || item.isBonif) && (
-                          <button onClick={() => setStatusRapido(item.id_pedido, 'normal', item)} style={{ fontSize: '10px', background: '#e2e8f0', color: '#333', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>🔙 DESFAZER</button>
+                          <button onClick={() => setStatusRapido(item.id_pedido, 'normal')} style={{ fontSize: '10px', background: '#e2e8f0', color: '#333', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>🔙 DESFAZER</button>
                         )}
                       </div>
                     </div>
