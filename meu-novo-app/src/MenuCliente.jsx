@@ -10,6 +10,7 @@ export default function MenuCliente({ usuario }) {
     },
     cores: {
       fundoGeral: '#f8fafc',
+      fundoCards: '#ffffff',    // Nova variável para controlar o fundo branco dos cards
       primaria: '#f97316',      // Laranja Frazão
       textoForte: '#111111',
       textoSuave: '#64748b',
@@ -19,7 +20,6 @@ export default function MenuCliente({ usuario }) {
       alerta: '#ef4444'         // Vermelho
     },
     cards: {
-      fundo: '#ffffff',
       raioBorda: '16px',
       sombra: '0 4px 12px rgba(0,0,0,0.03)',
       alturaImgDestaque: '220px', 
@@ -59,7 +59,6 @@ export default function MenuCliente({ usuario }) {
   const [notificacoes, setNotificacoes] = useState([]);
   const [permissaoPush, setPermissaoPush] = useState('default');
 
-  // --- NOVOS ESTADOS PARA NOTIFICAÇÕES E PWA ---
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [historicoNotificacoes, setHistoricoNotificacoes] = useState(() => {
     const salvo = localStorage.getItem('historico_notif_virtus');
@@ -71,6 +70,13 @@ export default function MenuCliente({ usuario }) {
     precos: true, edicao: true, promocoes: true, novidades: true
   });
   
+  // --- NOVOS ESTADOS PARA SENHA ---
+  const [modalSenhaAberto, setModalSenhaAberto] = useState(false);
+  const [dadosSenha, setDadosSenha] = useState({ antiga: '', nova: '', confirma: '' });
+  const [mostrarSenha, setMostrarSenha] = useState(false);
+  const [erroSenha, setErroSenha] = useState('');
+  const [carregandoSenha, setCarregandoSenha] = useState(false);
+
   const prevPrecosRef = useRef(false);
   const carrinhoRef = useRef(carrinho);
   const listaHojeRef = useRef(listaEnviadaHoje);
@@ -92,6 +98,14 @@ export default function MenuCliente({ usuario }) {
       setDeferredPrompt(e);
     });
   }, [configDesign.cores.fundoGeral]);
+
+  // 💡 AVISO PARA TROCAR SENHA
+  useEffect(() => {
+    // Aqui assumimos que a senha padrão inicial do sistema é '123456' ou igual ao código da loja
+    if (usuario?.senha === '123456' || usuario?.senha === usuario?.codigo_loja?.toString()) {
+      alert("⚠️ Aviso de Segurança: Detectamos que você está usando uma senha padrão. Por favor, clique na engrenagem no topo da tela e altere sua senha para proteger sua conta.");
+    }
+  }, [usuario]);
 
   const instalarApp = async () => {
     if (!deferredPrompt) return;
@@ -127,13 +141,48 @@ export default function MenuCliente({ usuario }) {
     }
   };
 
+  // 💡 LÓGICA DE CLIQUE NA NOTIFICAÇÃO (VAI DIRETO AO PRODUTO)
+  const lidarComCliqueNotificacao = (msg) => {
+    const nomeProduto = msg.match(/"([^"]+)"/) || msg.match(/PROMOÇÃO: (.*?) por/);
+    if (nomeProduto && nomeProduto[1]) {
+      const prod = produtos.find(p => p.nome.toLowerCase().includes(nomeProduto[1].toLowerCase()));
+      if (prod) {
+        setModalNotificacoesAberto(false);
+        abrirProduto(prod);
+      }
+    }
+  };
+
   const dispararPushNotification = (titulo, mensagem) => {
     if ("Notification" in window && Notification.permission === "granted") {
       try { 
-        new Notification(titulo, { body: mensagem, icon: banners.logo || 'https://cdn-icons-png.flaticon.com/512/3143/3143636.png' });
+        const options = {
+          body: mensagem,
+          icon: banners.logo || 'https://cdn-icons-png.flaticon.com/512/3143/3143636.png',
+          badge: banners.logo,
+          vibrate: [200, 100, 200],
+        };
+
+        let notification;
+        // Tenta usar ServiceWorker para notificações externas robustas (Android/iOS)
+        if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.ready.then(reg => {
+            reg.showNotification(titulo, options);
+          });
+        } else {
+           notification = new Notification(titulo, options);
+           notification.onclick = (e) => {
+             e.preventDefault();
+             window.focus();
+             lidarComCliqueNotificacao(mensagem);
+             notification.close();
+           };
+        }
+        
+        // Toca o som (se o navegador não bloquear auto-play)
         const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
         audio.play().catch(() => {});
-      } catch (e) {}
+      } catch (e) { console.error("Erro ao disparar notificação:", e); }
     }
   };
 
@@ -199,10 +248,10 @@ export default function MenuCliente({ usuario }) {
           pData.forEach(novo => {
             const antigo = produtosAntigosRef.current.find(a => a.id === novo.id);
             if (novo.promocao && !antigo?.promocao && configNotif.promocoes) {
-              mostrarNotificacao(`🔥 PROMOÇÃO: ${novo.nome} por apenas ${novo.preco}!`, 'promocao', 'Nova Oferta');
+              mostrarNotificacao(`🔥 PROMOÇÃO: "${novo.nome}" por apenas ${novo.preco}!`, 'promocao', 'Nova Oferta');
             }
             if (novo.novidade && !antigo?.novidade && configNotif.novidades) {
-              mostrarNotificacao(`✨ NOVIDADE: Chegou ${novo.nome}!`, 'novidade', 'Chegou Novidade');
+              mostrarNotificacao(`✨ NOVIDADE: Chegou "${novo.nome}"!`, 'novidade', 'Chegou Novidade');
             }
           });
         }
@@ -366,6 +415,33 @@ export default function MenuCliente({ usuario }) {
     } catch (err) { alert("Erro ao importar: " + err.message); }
   };
 
+  // 💡 MUDANÇA DE SENHA
+  const salvarNovaSenha = async () => {
+    if(!dadosSenha.antiga || !dadosSenha.nova || !dadosSenha.confirma) return setErroSenha("Preencha todos os campos.");
+    if(dadosSenha.nova !== dadosSenha.confirma) return setErroSenha("A nova senha não confere com a repetição.");
+    if(dadosSenha.nova.length < 6) return setErroSenha("A nova senha deve ter no mínimo 6 caracteres.");
+    
+    setCarregandoSenha(true);
+    setErroSenha('');
+    try {
+      // Verifica senha antiga
+      const { data: userAtual } = await supabase.from('usuarios').select('senha').eq('id', usuario.id).single();
+      if(userAtual.senha !== dadosSenha.antiga) throw new Error("A senha antiga está incorreta.");
+      
+      // Atualiza senha
+      const { error } = await supabase.from('usuarios').update({ senha: dadosSenha.nova }).eq('id', usuario.id);
+      if(error) throw error;
+      
+      mostrarNotificacao("🔒 Senha alterada com sucesso!", 'sucesso');
+      setModalSenhaAberto(false);
+      setDadosSenha({ antiga: '', nova: '', confirma: '' });
+    } catch (err) {
+      setErroSenha(err.message);
+    } finally {
+      setCarregandoSenha(false);
+    }
+  };
+
   // --- TELA DE SUCESSO PÓS-ENVIO ---
   if (listaEnviadaHoje && !modoVisualizacao) {
     const aguardandoLiberacao = listaEnviadaHoje.some(item => item.solicitou_refazer === true);
@@ -376,7 +452,7 @@ export default function MenuCliente({ usuario }) {
         
         <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 99999, display: 'flex', flexDirection: 'column', gap: '10px', width: '90%', maxWidth: '400px' }}>
           {notificacoes.map(notif => (
-            <div key={notif.id} style={{ background: notif.tipo === 'alerta' ? configDesign.cores.alerta : notif.tipo === 'sucesso' ? configDesign.cores.sucesso : configDesign.cores.primaria, color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px', animation: 'fadeInDown 0.4s ease-out' }}>
+            <div key={notif.id} onClick={() => lidarComCliqueNotificacao(notif.mensagem)} style={{ background: notif.tipo === 'alerta' ? configDesign.cores.alerta : notif.tipo === 'sucesso' ? configDesign.cores.sucesso : configDesign.cores.primaria, color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px', animation: 'fadeInDown 0.4s ease-out', cursor: 'pointer' }}>
               <span>{notif.mensagem}</span>
             </div>
           ))}
@@ -389,24 +465,24 @@ export default function MenuCliente({ usuario }) {
           <p style={{ margin: 0, opacity: 0.9, marginTop: '10px' }}>{edicaoLiberada ? 'Sua lista foi devolvida para o carrinho.' : (aguardandoLiberacao ? 'Aguarde a central liberar a edição da sua lista.' : 'Sua loja já enviou a lista de hoje com sucesso.')}</p>
         </div>
 
-        <div style={{ textAlign: 'left', marginTop: '25px', background: '#fff', padding: '20px', borderRadius: '20px', border: '1px solid #eee', maxHeight: '40vh', overflowY: 'auto' }}>
-          <h3 style={{ fontSize: '14px', color: '#666', marginBottom: '15px', marginTop: 0 }}>RESUMO DO PEDIDO:</h3>
+        <div style={{ textAlign: 'left', marginTop: '25px', background: configDesign.cores.fundoCards, padding: '20px', borderRadius: '20px', border: '1px solid #eee', maxHeight: '40vh', overflowY: 'auto' }}>
+          <h3 style={{ fontSize: '14px', color: configDesign.cores.textoSuave, marginBottom: '15px', marginTop: 0 }}>RESUMO DO PEDIDO:</h3>
           {listaEnviadaHoje.map((item, i) => (
             <div key={i} style={{ padding: '12px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between' }}>
-              <span><b>{item.quantidade}x</b> {item.nome_produto}</span><small style={{ color: '#999' }}>{item.unidade_medida}</small>
+              <span style={{color: configDesign.cores.textoForte}}><b>{item.quantidade}x</b> {item.nome_produto}</span><small style={{ color: configDesign.cores.textoSuave }}>{item.unidade_medida}</small>
             </div>
           ))}
         </div>
 
         <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-          <button onClick={() => carregarDados(false)} style={{ background: '#f1f5f9', border: 'none', padding: '18px', borderRadius: '15px', color: configDesign.cores.textoForte, fontWeight: 'bold', cursor: 'pointer' }}>🔄 ATUALIZAR STATUS AGORA</button>
+          <button onClick={() => carregarDados(false)} style={{ background: '#f1f5f9', border: 'none', padding: '18px', borderRadius: '15px', color: '#111', fontWeight: 'bold', cursor: 'pointer' }}>🔄 ATUALIZAR STATUS AGORA</button>
           
           {edicaoLiberada ? (
             <button onClick={importarParaCarrinho} style={{ background: configDesign.cores.sucesso, border: 'none', padding: '18px', borderRadius: '15px', color: '#fff', fontWeight: '900', cursor: 'pointer', boxShadow: '0 5px 15px rgba(34,197,94,0.3)' }}>
               📥 PUXAR PARA O CARRINHO E EDITAR
             </button>
           ) : (
-            <button onClick={aguardandoLiberacao ? null : pedirParaEditar} style={{ background: '#fff', border: `2px solid ${aguardandoLiberacao ? '#ccc' : configDesign.cores.textoForte}`, padding: '18px', borderRadius: '15px', color: aguardandoLiberacao ? '#ccc' : configDesign.cores.textoForte, fontWeight: 'bold', cursor: aguardandoLiberacao ? 'not-allowed' : 'pointer' }}>
+            <button onClick={aguardandoLiberacao ? null : pedirParaEditar} style={{ background: configDesign.cores.fundoCards, border: `2px solid ${aguardandoLiberacao ? '#ccc' : configDesign.cores.textoForte}`, padding: '18px', borderRadius: '15px', color: aguardandoLiberacao ? '#ccc' : configDesign.cores.textoForte, fontWeight: 'bold', cursor: aguardandoLiberacao ? 'not-allowed' : 'pointer' }}>
               {aguardandoLiberacao ? '⏳ SOLICITAÇÃO PENDENTE...' : '✏️ SOLICITAR EDIÇÃO DE LISTA'}
             </button>
           )}
@@ -425,14 +501,14 @@ export default function MenuCliente({ usuario }) {
       {/* TOASTS DE NOTIFICAÇÃO (ALERTA RÁPIDO) */}
       <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 99999, display: 'flex', flexDirection: 'column', gap: '10px', width: '90%', maxWidth: '400px' }}>
         {notificacoes.map(notif => (
-          <div key={notif.id} style={{ background: notif.tipo === 'alerta' ? configDesign.cores.alerta : (notif.tipo === 'sucesso' ? configDesign.cores.sucesso : configDesign.cores.primaria), color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px' }}>
+          <div key={notif.id} onClick={() => lidarComCliqueNotificacao(notif.mensagem)} style={{ background: notif.tipo === 'alerta' ? configDesign.cores.alerta : (notif.tipo === 'sucesso' ? configDesign.cores.sucesso : configDesign.cores.primaria), color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
             <span>{notif.mensagem}</span>
           </div>
         ))}
       </div>
 
       {/* HEADER DE BOAS VINDAS */}
-      <div style={{ padding: '25px 20px 15px 20px', backgroundColor: '#fff', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '25px 20px 15px 20px', backgroundColor: configDesign.cores.fundoCards, borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '22px', color: configDesign.cores.textoForte, fontWeight: '900' }}>
             {saudacao}, {primeiroNome}!
@@ -443,24 +519,16 @@ export default function MenuCliente({ usuario }) {
         </div>
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          {/* BOTÃO DE INSTALAR (PWA) */}
-          {deferredPrompt && (
-            <button onClick={instalarApp} style={{ background: configDesign.cores.primaria, color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '10px', fontSize: '11px', fontWeight: '900', cursor: 'pointer' }}>
-              📲 INSTALAR
-            </button>
-          )}
+          {/* BOTÃO DE SENHA */}
+          <button onClick={() => setModalSenhaAberto(true)} style={{ background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', fontSize: '20px' }}>
+            ⚙️
+          </button>
 
           {/* BOTÃO DE NOTIFICAÇÕES (SINO) */}
           <button onClick={() => setModalNotificacoesAberto(true)} style={{ background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', position: 'relative' }}>
             <span style={{ fontSize: '20px' }}>🔔</span>
             {historicoNotificacoes.some(n => !n.lida) && <span style={{ position: 'absolute', top: '0', right: '0', width: '10px', height: '10px', background: configDesign.cores.alerta, borderRadius: '50%', border: '2px solid #fff' }}></span>}
           </button>
-
-          {modoVisualizacao && (
-            <button onClick={() => setModoVisualizacao(false)} style={{ background: '#f1f5f9', color: configDesign.cores.textoForte, border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-              ⬅️ VER PEDIDO
-            </button>
-          )}
         </div>
       </div>
 
@@ -476,7 +544,7 @@ export default function MenuCliente({ usuario }) {
         <div style={{ backgroundColor: configDesign.cores.fundoGeral }}>
           <div style={{ width: '100%', height: '180px', backgroundImage: `url(${banners.topo})`, backgroundSize: 'cover', backgroundPosition: 'center' }}></div>
           <div style={{ padding: '0 20px', display: 'flex', justifyContent: 'flex-start', marginTop: '-40px' }}>
-            <div style={{ width: '80px', height: '80px', borderRadius: '50%', border: '4px solid #f8fafc', backgroundImage: `url(${banners.logo})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', backgroundColor: '#fff', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}></div>
+            <div style={{ width: '80px', height: '80px', borderRadius: '50%', border: `4px solid ${configDesign.cores.fundoGeral}`, backgroundImage: `url(${banners.logo})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', backgroundColor: '#fff', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}></div>
           </div>
           <div style={{ width: '100%', height: '140px', marginTop: '20px', backgroundImage: `url(${banners.tematico})`, backgroundSize: 'cover', backgroundPosition: 'center', marginBottom: '0' }}></div>
         </div>
@@ -488,7 +556,7 @@ export default function MenuCliente({ usuario }) {
         top: categoriaAtiva === 'DESTAQUES' ? '0' : (navState.show ? '0' : '-100px'), 
         left: 0, right: 0, 
         zIndex: 100, 
-        backgroundColor: categoriaAtiva === 'DESTAQUES' ? configDesign.cores.fundoGeral : 'rgba(255, 255, 255, 0.95)', 
+        backgroundColor: categoriaAtiva === 'DESTAQUES' ? configDesign.cores.fundoGeral : configDesign.cores.fundoCards, 
         backdropFilter: categoriaAtiva === 'DESTAQUES' ? 'none' : 'blur(10px)', 
         borderBottom: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? '1px solid #e2e8f0' : 'none', 
         transition: configDesign.animacoes.transicaoSuave,
@@ -500,7 +568,7 @@ export default function MenuCliente({ usuario }) {
       }}>
         <div style={{ padding: '0 20px 10px 20px' }}>
           <div style={{ backgroundColor: '#f1f5f9', borderRadius: '12px', padding: (categoriaAtiva !== 'DESTAQUES' && navState.shrink) ? '8px 12px' : '12px', display: 'flex', gap: '10px', transition: configDesign.animacoes.transicaoSuave }}>
-            <span>🔍</span><input placeholder="Procurar produto..." value={buscaMenu} onChange={e => setBuscaMenu(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none' }} />
+            <span>🔍</span><input placeholder="Procurar produto..." value={buscaMenu} onChange={e => setBuscaMenu(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', color: '#111' }} />
           </div>
         </div>
         <div style={{ display: 'flex', overflowX: 'auto', gap: '20px', padding: '0 20px', scrollbarWidth: 'none' }}>
@@ -521,7 +589,7 @@ export default function MenuCliente({ usuario }) {
           return p.categoria === categoriaAtiva;
         }).map(p => {
           const itemNoCarrinho = carrinho.find(i => i.id === p.id);
-          let corBorda = configDesign.cards.fundo;
+          let corBorda = configDesign.cores.fundoCards;
           let selo = null;
           
           if (p.promocao) {
@@ -537,7 +605,7 @@ export default function MenuCliente({ usuario }) {
           const alturaImg = categoriaAtiva === 'DESTAQUES' ? configDesign.cards.alturaImgDestaque : configDesign.cards.alturaImgPequena;
 
           return (
-            <div key={p.id} onClick={() => abrirProduto(p)} style={{ border: `2px solid ${corBorda}`, borderRadius: configDesign.cards.raioBorda, overflow: 'visible', padding: '10px', cursor: 'pointer', position: 'relative', backgroundColor: '#fff', boxShadow: configDesign.cards.sombra, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: selo ? '10px' : '0' }}>
+            <div key={p.id} onClick={() => abrirProduto(p)} style={{ border: `2px solid ${corBorda}`, borderRadius: configDesign.cards.raioBorda, overflow: 'visible', padding: '10px', cursor: 'pointer', position: 'relative', backgroundColor: configDesign.cores.fundoCards, boxShadow: configDesign.cards.sombra, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: selo ? '10px' : '0' }}>
                {selo}
                {itemNoCarrinho && !selo && <div style={{position: 'absolute', top: '-8px', right: '-8px', background: configDesign.cores.primaria, color: '#fff', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: '900', fontSize: '11px', border: '2px solid #fff', zIndex: 2}}>{itemNoCarrinho.quantidade}</div>}
                
@@ -569,22 +637,22 @@ export default function MenuCliente({ usuario }) {
       {/* 🛎️ MODAL DE HISTÓRICO DE NOTIFICAÇÕES */}
       {modalNotificacoesAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 5000, display: 'flex', justifyContent: 'flex-end', backdropFilter: 'blur(4px)' }}>
-          <div style={{ width: '85%', maxWidth: '380px', height: '100%', background: '#fff', display: 'flex', flexDirection: 'column', animation: 'slideIn 0.3s ease-out' }}>
+          <div style={{ width: '85%', maxWidth: '380px', height: '100%', background: configDesign.cores.fundoCards, display: 'flex', flexDirection: 'column', animation: 'slideIn 0.3s ease-out' }}>
             <div style={{ padding: '25px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontWeight: '900' }}>Notificações</h3>
+              <h3 style={{ margin: 0, fontWeight: '900', color: configDesign.cores.textoForte }}>Notificações</h3>
               <div style={{ display: 'flex', gap: '15px' }}>
                 <button onClick={() => setModalConfigNotifAberto(true)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>⚙️</button>
-                <button onClick={() => { setModalNotificacoesAberto(false); setHistoricoNotificacoes(prev => prev.map(n => ({...n, lida: true}))); }} style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
+                <button onClick={() => { setModalNotificacoesAberto(false); setHistoricoNotificacoes(prev => prev.map(n => ({...n, lida: true}))); }} style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer', color: '#111' }}>✕</button>
               </div>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '15px' }}>
               {historicoNotificacoes.length === 0 ? (
-                <div style={{ textAlign: 'center', marginTop: '50px', color: '#999' }}>Nenhuma notificação por enquanto.</div>
+                <div style={{ textAlign: 'center', marginTop: '50px', color: configDesign.cores.textoSuave }}>Nenhuma notificação por enquanto.</div>
               ) : (
                 historicoNotificacoes.map(n => (
-                  <div key={n.id} style={{ padding: '15px', borderRadius: '15px', background: n.lida ? '#f8fafc' : '#fff7ed', marginBottom: '12px', border: n.lida ? '1px solid #eee' : `1px solid ${configDesign.cores.primaria}` }}>
-                    <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#111' }}>{n.mensagem}</div>
-                    <div style={{ fontSize: '10px', color: '#999', marginTop: '5px' }}>{n.data}</div>
+                  <div key={n.id} onClick={() => lidarComCliqueNotificacao(n.mensagem)} style={{ padding: '15px', borderRadius: '15px', background: n.lida ? configDesign.cores.fundoGeral : '#fff7ed', marginBottom: '12px', border: n.lida ? '1px solid #eee' : `1px solid ${configDesign.cores.primaria}`, cursor: 'pointer' }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '13px', color: configDesign.cores.textoForte }}>{n.mensagem}</div>
+                    <div style={{ fontSize: '10px', color: configDesign.cores.textoSuave, marginTop: '5px' }}>{n.data}</div>
                   </div>
                 ))
               )}
@@ -597,9 +665,9 @@ export default function MenuCliente({ usuario }) {
       {/* ⚙️ MODAL DE CONFIGURAÇÃO DE NOTIFICAÇÕES */}
       {modalConfigNotifAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 6000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '320px', borderRadius: '25px', padding: '25px' }}>
-            <h3 style={{ marginTop: 0, textAlign: 'center' }}>Configurações</h3>
-            <p style={{ fontSize: '12px', color: '#666', textAlign: 'center', marginBottom: '20px' }}>Escolha quais avisos deseja receber na barra de notificações.</p>
+          <div style={{ background: configDesign.cores.fundoCards, width: '100%', maxWidth: '320px', borderRadius: '25px', padding: '25px' }}>
+            <h3 style={{ marginTop: 0, textAlign: 'center', color: configDesign.cores.textoForte }}>Configurar Avisos</h3>
+            <p style={{ fontSize: '12px', color: configDesign.cores.textoSuave, textAlign: 'center', marginBottom: '20px' }}>Escolha quais alertas deseja receber no celular.</p>
             {[
               { id: 'precos', label: 'Liberação de Preços' },
               { id: 'edicao', label: 'Edição de Lista' },
@@ -607,24 +675,65 @@ export default function MenuCliente({ usuario }) {
               { id: 'novidades', label: 'Novos Produtos' }
             ].map(item => (
               <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px 0', borderBottom: '1px solid #eee' }}>
-                <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{item.label}</span>
+                <span style={{ fontWeight: 'bold', fontSize: '14px', color: configDesign.cores.textoForte }}>{item.label}</span>
                 <input type="checkbox" checked={configNotif[item.id]} onChange={() => setConfigNotif({...configNotif, [item.id]: !configNotif[item.id]})} style={{ width: '20px', height: '20px', accentColor: configDesign.cores.primaria }} />
               </div>
             ))}
-            <button onClick={() => setModalConfigNotifAberto(false)} style={{ width: '100%', marginTop: '25px', padding: '15px', background: configDesign.cores.textoForte, color: '#fff', borderRadius: '15px', fontWeight: 'bold', border: 'none' }}>Salvar Preferências</button>
+            {deferredPrompt && (
+              <button onClick={instalarApp} style={{ width: '100%', marginTop: '15px', padding: '15px', background: '#f1f5f9', color: '#111', borderRadius: '15px', fontWeight: 'bold', border: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px' }}>
+                 📲 Instalar Aplicativo
+              </button>
+            )}
+            <button onClick={() => setModalConfigNotifAberto(false)} style={{ width: '100%', marginTop: '15px', padding: '15px', background: configDesign.cores.textoForte, color: '#fff', borderRadius: '15px', fontWeight: 'bold', border: 'none' }}>Salvar Preferências</button>
           </div>
         </div>
       )}
 
-      {/* MODAL PRODUTO, CARRINHO E REVISÃO (MANTIDOS ORIGINAIS) */}
+      {/* 🔐 MODAL DE TROCA DE SENHA */}
+      {modalSenhaAberto && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 7000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
+          <div style={{ background: configDesign.cores.fundoCards, width: '100%', maxWidth: '350px', borderRadius: '25px', padding: '30px' }}>
+            <h3 style={{ marginTop: 0, textAlign: 'center', color: configDesign.cores.textoForte, marginBottom: '20px' }}>Alterar Senha</h3>
+            
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Senha Antiga</label>
+              <input type={mostrarSenha ? "text" : "password"} placeholder="Digite a senha atual" value={dadosSenha.antiga} onChange={e => setDadosSenha({...dadosSenha, antiga: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid #ddd', background: '#f8fafc', color: '#111', outline: 'none' }} />
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Nova Senha</label>
+              <input type={mostrarSenha ? "text" : "password"} placeholder="No mínimo 6 caracteres" value={dadosSenha.nova} onChange={e => setDadosSenha({...dadosSenha, nova: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid #ddd', background: '#f8fafc', color: '#111', outline: 'none' }} />
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Repetir Nova Senha</label>
+              <input type={mostrarSenha ? "text" : "password"} placeholder="Digite a nova senha novamente" value={dadosSenha.confirma} onChange={e => setDadosSenha({...dadosSenha, confirma: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid #ddd', background: '#f8fafc', color: '#111', outline: 'none' }} />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+              <input type="checkbox" id="showPass" checked={mostrarSenha} onChange={() => setMostrarSenha(!mostrarSenha)} style={{ width: '18px', height: '18px', accentColor: configDesign.cores.primaria }} />
+              <label htmlFor="showPass" style={{ fontSize: '13px', color: configDesign.cores.textoForte, cursor: 'pointer' }}>Mostrar senhas</label>
+            </div>
+
+            {erroSenha && <div style={{ color: configDesign.cores.alerta, fontSize: '12px', fontWeight: 'bold', textAlign: 'center', marginBottom: '15px', background: '#fef2f2', padding: '10px', borderRadius: '8px' }}>{erroSenha}</div>}
+
+            <button onClick={salvarNovaSenha} disabled={carregandoSenha} style={{ width: '100%', padding: '18px', background: configDesign.cores.primaria, color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '15px' }}>
+              {carregandoSenha ? 'SALVANDO...' : 'CONFIRMAR ALTERAÇÃO'}
+            </button>
+            <button onClick={() => { setModalSenhaAberto(false); setErroSenha(''); setDadosSenha({antiga:'', nova:'', confirma:''}); setMostrarSenha(false); }} style={{ width: '100%', marginTop: '10px', padding: '15px', background: 'transparent', color: configDesign.cores.textoSuave, border: 'none', fontWeight: 'bold', cursor: 'pointer' }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PRODUTO */}
       {produtoExpandido && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column', backdropFilter: 'blur(5px)' }}>
            <button onClick={() => setProdutoExpandido(null)} style={{ alignSelf: 'flex-end', margin: '20px', color: '#fff', fontSize: '28px', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
            <div style={{ flex: 1, backgroundImage: `url(${(produtoExpandido.foto_url || '').split(',')[0]})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', margin: '20px' }} />
-           <div style={{ backgroundColor: '#fff', padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', boxShadow: '0 -10px 30px rgba(0,0,0,0.1)' }}>
+           <div style={{ backgroundColor: configDesign.cores.fundoCards, padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', boxShadow: '0 -10px 30px rgba(0,0,0,0.1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <h2 style={{margin: 0, fontSize: '20px', color: configDesign.cores.textoForte, flex: 1}}>{produtoExpandido.nome}</h2>
-                <span style={{ fontSize: '12px', background: '#f1f5f9', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: configDesign.cores.textoSuave }}>Vendido por {produtoExpandido.unidade_medida || 'UN'}</span>
+                <span style={{ fontSize: '12px', background: '#f1f5f9', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: '#111' }}>Vendido por {produtoExpandido.unidade_medida || 'UN'}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: '1px dashed #e2e8f0' }}>
                 <div>
@@ -639,13 +748,13 @@ export default function MenuCliente({ usuario }) {
               {!isAppTravado ? (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', margin: '25px 0' }}>
-                     <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontWeight: 'bold', color: configDesign.cores.textoSuave }}>-</button>
+                     <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontWeight: 'bold', color: '#111' }}>-</button>
                      <div style={{ position: 'relative' }}>
-                       <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '80px', height: '55px', fontSize: '24px', fontWeight: '900', textAlign: 'center', borderRadius: '15px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte }} />
+                       <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '80px', height: '55px', fontSize: '24px', fontWeight: '900', textAlign: 'center', borderRadius: '15px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: '#111' }} />
                      </div>
-                     <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontWeight: 'bold', color: configDesign.cores.textoSuave }}>+</button>
+                     <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontWeight: 'bold', color: '#111' }}>+</button>
                   </div>
-                  <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>
+                  <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoCards, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>
                     {carrinho.find(i => i.id === produtoExpandido.id) ? 'ATUALIZAR QUANTIDADE' : 'ADICIONAR AO CARRINHO'}
                   </button>
                 </>
@@ -660,11 +769,12 @@ export default function MenuCliente({ usuario }) {
         </div>
       )}
 
+      {/* MODAL CARRINHO */}
       {modalCarrinhoAberto && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: '#fff', zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: configDesign.cores.fundoCards, zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 style={{ margin: 0, fontWeight: '900' }}>Meu Carrinho</h2>
-            <button onClick={() => { setModalCarrinhoAberto(false); setItemEditandoId(null); }} style={{ border: 'none', background: '#f1f5f9', borderRadius: '50%', width: '40px', height: '40px', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
+            <h2 style={{ margin: 0, fontWeight: '900', color: configDesign.cores.textoForte }}>Meu Carrinho</h2>
+            <button onClick={() => { setModalCarrinhoAberto(false); setItemEditandoId(null); }} style={{ border: 'none', background: '#f1f5f9', borderRadius: '50%', width: '40px', height: '40px', fontWeight: 'bold', cursor: 'pointer', color: '#111' }}>✕</button>
           </div>
           <div style={{ padding: '10px 20px' }}>
             <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>🗑️ ESVAZIAR CARRINHO</button>
@@ -674,16 +784,16 @@ export default function MenuCliente({ usuario }) {
               <div key={item.id} style={{ padding: '15px 0', borderBottom: '1px solid #f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 {itemEditandoId === item.id ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-                     <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: '#f1f5f9', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold'}}>-</button>
-                     <input type="number" value={item.quantidade} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: '1px solid #ccc' }} />
-                     <button onClick={() => alterarQtdCart(item.id, 1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: '#f1f5f9', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold'}}>+</button>
+                     <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: '#f1f5f9', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold', color: '#111'}}>-</button>
+                     <input type="number" value={item.quantidade} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: '1px solid #ccc', color: '#111' }} />
+                     <button onClick={() => alterarQtdCart(item.id, 1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: '#f1f5f9', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold', color: '#111'}}>+</button>
                      <button onClick={() => setItemEditandoId(null)} style={{marginLeft: 'auto', background: configDesign.cores.sucesso, color: 'white', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer'}}>OK</button>
                   </div>
                 ) : (
                   <div onClick={() => setItemEditandoId(item.id)} style={{ cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: '10px' }}>
                     <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: '13px' }}><b style={{color: configDesign.cores.primaria, fontSize: '15px'}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item.nome}</span>
-                      <div style={{ fontSize: '11px', color: '#999', marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'} • Toque para editar qtd</div>
+                      <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria, fontSize: '15px'}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item.nome}</span>
+                      <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'} • Toque para editar qtd</div>
                     </div>
                     <div style={{ fontWeight: '900', color: configDesign.cores.textoForte, fontSize: '14px', whiteSpace: 'nowrap' }}>{formatarMoeda(item.total)}</div>
                   </div>
@@ -692,31 +802,32 @@ export default function MenuCliente({ usuario }) {
               </div>
             ))}
           </div>
-          <div style={{ padding: '20px', borderTop: '1px solid #eee', background: '#f8fafc' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontWeight: '900', fontSize: '18px' }}><span>Total Estimado:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
-            <button onClick={() => setModalRevisaoAberto(true)} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: '#fff', borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>REVISAR E ENVIAR</button>
+          <div style={{ padding: '20px', borderTop: '1px solid #eee', background: configDesign.cores.fundoGeral }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontWeight: '900', fontSize: '18px', color: configDesign.cores.textoForte }}><span>Total Estimado:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
+            <button onClick={() => setModalRevisaoAberto(true)} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoCards, borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>REVISAR E ENVIAR</button>
           </div>
         </div>
       )}
 
+      {/* MODAL REVISÃO */}
       {modalRevisaoAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
-          <div style={{ backgroundColor: '#fff', width: '100%', maxWidth: '400px', borderRadius: '28px', padding: '30px', display: 'flex', flexDirection: 'column', maxHeight: '80vh' }}>
-            <h3 style={{marginTop: 0, textAlign: 'center', fontWeight: '900'}}>Confirmação do Pedido</h3>
+          <div style={{ backgroundColor: configDesign.cores.fundoCards, width: '100%', maxWidth: '400px', borderRadius: '28px', padding: '30px', display: 'flex', flexDirection: 'column', maxHeight: '80vh' }}>
+            <h3 style={{marginTop: 0, textAlign: 'center', fontWeight: '900', color: configDesign.cores.textoForte}}>Confirmação do Pedido</h3>
             <div style={{ flex: 1, overflowY: 'auto', marginBottom: '20px', borderTop: '1px solid #eee', borderBottom: '1px solid #eee', padding: '10px 0' }}>
                 {carrinho.map((item, i) => (
                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px dashed #f1f5f9' }}>
                         <div>
-                          <span style={{ fontSize: '13px' }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item.nome}</span>
-                          <div style={{ fontSize: '11px', color: '#999', marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'}</div>
+                          <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item.nome}</span>
+                          <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'}</div>
                         </div>
-                        <span style={{fontWeight: 'bold', color: '#666'}}>{formatarMoeda(item.total)}</span>
+                        <span style={{fontWeight: 'bold', color: configDesign.cores.textoSuave}}>{formatarMoeda(item.total)}</span>
                     </div>
                 ))}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '25px', fontWeight: '900', fontSize: '20px', color: '#111' }}><span>TOTAL FINAL:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '25px', fontWeight: '900', fontSize: '20px', color: configDesign.cores.textoForte }}><span>TOTAL FINAL:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
             <button onClick={confirmarEnvio} disabled={enviandoPedido} style={{ width: '100%', padding: '20px', background: configDesign.cores.sucesso, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '16px', cursor: 'pointer' }}>{enviandoPedido ? 'ENVIANDO...' : 'CONFIRMAR ENVIO'}</button>
-            <button onClick={() => setModalRevisaoAberto(false)} style={{ background: 'none', border: 'none', marginTop: '15px', color: '#999', fontWeight: 'bold', cursor: 'pointer' }}>Voltar e editar carrinho</button>
+            <button onClick={() => setModalRevisaoAberto(false)} style={{ background: 'none', border: 'none', marginTop: '15px', color: configDesign.cores.textoSuave, fontWeight: 'bold', cursor: 'pointer' }}>Voltar e editar carrinho</button>
           </div>
         </div>
       )}
