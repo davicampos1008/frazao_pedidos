@@ -42,7 +42,6 @@ function App() {
   const [eventoInstalacao, setEventoInstalacao] = useState(null);
   const [isStandalone, setIsStandalone] = useState(false);
 
-  // 💡 ESTADOS DO MENU DE CONFIGURAÇÕES NA HOME
   const [modalConfiguracoesAberto, setModalConfiguracoesAberto] = useState(false);
   const [modalSenhaAberto, setModalSenhaAberto] = useState(false);
   const [modalNotificacoesAberto, setModalNotificacoesAberto] = useState(false);
@@ -64,8 +63,10 @@ function App() {
       const telaInicial = ultimaTela || (dadosUsuario.perfil === 'admin' ? 'inicio' : 'cliente');
       setTelaAtiva(telaInicial);
       
-      // Inicializa o histórico para o botão voltar do celular funcionar
-      window.history.replaceState({ tela: telaInicial }, '', '');
+      // Inicializa o primeiro estado do histórico
+      if (!window.history.state || window.history.state.tela !== telaInicial) {
+         window.history.replaceState({ tela: telaInicial }, '', '');
+      }
     }
 
     setIsStandalone(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone);
@@ -77,14 +78,20 @@ function App() {
     };
     window.addEventListener('beforeinstallprompt', escutarInstalacao);
     
-    // 💡 INTERCEPTADOR DO BOTÃO VOLTAR DO CELULAR
+    // 💡 LÓGICA DE VOLTAR TELA REAL DO CELULAR
     const lidarComVoltar = (e) => {
+      // Se tivermos um estado salvo no histórico (ex: navegou de Início -> Clientes)
       if (e.state && e.state.tela) {
         setTelaAtiva(e.state.tela);
         sessionStorage.setItem('telaAtivaVIRTUS', e.state.tela);
       } else {
-        setTelaAtiva('inicio');
-        sessionStorage.setItem('telaAtivaVIRTUS', 'inicio');
+        // Se voltar demais e acabar os estados do App, deixa fechar nativamente
+        const telaBase = usuarioLogado?.perfil === 'admin' ? 'inicio' : 'cliente';
+        if (telaAtiva !== 'inicio' && telaAtiva !== 'cliente') {
+           setTelaAtiva(telaBase);
+           sessionStorage.setItem('telaAtivaVIRTUS', telaBase);
+           window.history.replaceState({ tela: telaBase }, '', '');
+        }
       }
     };
     window.addEventListener('popstate', lidarComVoltar);
@@ -93,7 +100,7 @@ function App() {
       window.removeEventListener('beforeinstallprompt', escutarInstalacao);
       window.removeEventListener('popstate', lidarComVoltar);
     };
-  }, []);
+  }, [telaAtiva, usuarioLogado]);
 
   const instalarApp = async () => {
     if (eventoInstalacao) {
@@ -141,14 +148,18 @@ function App() {
       const confirma = window.confirm(`⚠️ AVISO DE SEGURANÇA:\nVocê tem ${window.VIRTUS_PENDENCIAS} produtos pendentes na cotação.\n\nDeseja abandonar a cotação e trocar de tela mesmo assim?`);
       if (!confirma) return; 
     }
+    
+    // Adiciona a nova tela no histórico real do navegador/celular
+    if (telaAtiva !== telaDestino) {
+        window.history.pushState({ tela: telaDestino }, '', '');
+    }
+
     setTelaAtiva(telaDestino);
     sessionStorage.setItem('telaAtivaVIRTUS', telaDestino);
     setMenuAberto(false);
-    window.history.pushState({ tela: telaDestino }, '', '');
     window.scrollTo(0,0);
   };
 
-  // 💡 LÓGICA DE TROCA DE SENHA NA HOME
   const salvarNovaSenha = async () => {
     if(!dadosSenha.antiga || !dadosSenha.nova || !dadosSenha.confirma) return setErroSenha("Preencha todos os campos.");
     if(dadosSenha.nova !== dadosSenha.confirma) return setErroSenha("A nova senha não confere.");
@@ -184,6 +195,11 @@ function App() {
     if (hora < 12) return 'BOM DIA';
     if (hora < 18) return 'BOA TARDE';
     return 'BOA NOITE';
+  };
+
+  const renderBadgePerfil = (perfil) => {
+    if (perfil === 'admin') return <span style={{ backgroundColor: '#111', color: '#fff', padding: '5px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '900', letterSpacing: '1px' }}>🛡️ ADMINISTRADOR</span>;
+    return <span style={{ backgroundColor: isEscuro ? '#334155' : '#f1f5f9', color: isEscuro ? '#cbd5e1' : '#64748b', padding: '5px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '900', letterSpacing: '1px' }}>👤 OPERADOR</span>;
   };
 
   const s = {
@@ -222,7 +238,16 @@ function App() {
               </>
             )}
           </div>
+          
           <div style={{ paddingTop: '20px', borderTop: '1px solid #333', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            {/* 💡 BOTÃO TEMA NO MENU LATERAL */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: isEscuro ? '#1e1e1e' : '#333', padding: '10px 15px', borderRadius: '12px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>TEMA</span>
+              <button onClick={() => setTema(isEscuro ? 'claro' : 'escuro')} style={{ background: isEscuro ? '#333' : '#f8fafc', color: isEscuro ? '#fff' : '#111', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                {isEscuro ? '☀️ DIA' : '🌙 NOITE'}
+              </button>
+            </div>
+
             <button onClick={fazerLogout} style={{ width: '100%', backgroundColor: '#ef4444', color: 'white', padding: '15px', borderRadius: '12px', border: 'none', fontWeight: '900', cursor: 'pointer' }}>🚪 SAIR DO APP</button>
           </div>
         </div>
@@ -234,7 +259,6 @@ function App() {
         {telaAtiva === 'inicio' && (
           <div style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center', backgroundColor: config.identidade.corCard, padding: '40px 30px', borderRadius: '30px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', transition: 'all 0.3s' }}>
             
-            {/* 💡 BOTÕES SINO E ENGRENAGEM (IDÊNTICOS AO MENU CLIENTE) */}
             <div style={{ display: 'flex', gap: '10px', width: '100%', justifyContent: 'flex-end', marginBottom: '10px' }}>
               <button onClick={() => setModalConfiguracoesAberto(true)} style={{ background: isEscuro ? '#334155' : '#f1f5f9', border: 'none', width: '45px', height: '45px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', fontSize: '22px' }}>⚙️</button>
               <button onClick={() => setModalNotificacoesAberto(true)} style={{ background: isEscuro ? '#334155' : '#f1f5f9', border: 'none', width: '45px', height: '45px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', position: 'relative' }}>
@@ -245,9 +269,7 @@ function App() {
 
             <p style={{ color: config.identidade.corTextoSecundario, fontSize: '12px', fontWeight: 'bold', margin: 0 }}>{saudacaoPorHorario()}</p>
             <h1 style={{ fontWeight: '900', color: config.identidade.corTexto, margin: 0, fontSize: '30px' }}><span style={{ color: config.identidade.corDestaque }}>{usuarioLogado.nome.toUpperCase()}</span></h1>
-            <div style={{ marginTop: '5px' }}>
-               {usuarioLogado.perfil === 'admin' ? <span style={{ backgroundColor: '#111', color: '#fff', padding: '5px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '900' }}>🛡️ ADMIN</span> : <span style={{ backgroundColor: isEscuro ? '#334155' : '#f1f5f9', color: isEscuro ? '#cbd5e1' : '#64748b', padding: '5px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '900' }}>👤 OPERADOR</span>}
-            </div>
+            <div style={{ marginTop: '5px' }}>{renderBadgePerfil(usuarioLogado.perfil)}</div>
             <hr style={{ width: '50px', border: `2px solid ${config.identidade.corDestaque}`, borderRadius: '10px', margin: '15px 0' }} />
             <p style={{ color: config.identidade.corTextoSecundario, fontWeight: 'bold', margin: 0, marginBottom: '20px' }}>Frazão Frutas & CIA</p>
             
@@ -259,7 +281,6 @@ function App() {
           </div>
         )}
 
-        {/* COMPONENTES CARREGADOS COM TEMA ESCURO */}
         {telaAtiva === 'lojas' && <Lojas setTelaAtiva={setTelaAtiva} />}
         {telaAtiva === 'usuarios' && <Usuarios />}
         {telaAtiva === 'fornecedores' && <Fornecedores />}
@@ -272,7 +293,6 @@ function App() {
         {telaAtiva === 'fechamento' && <FechamentoLojas isEscuro={isEscuro} />}
       </div>
 
-      {/* ⚙️ MODAL CONFIGURAÇÕES (HOME) */}
       {modalConfiguracoesAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 6500, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
           <div style={{ background: config.identidade.corCard, width: '100%', maxWidth: '320px', borderRadius: '25px', padding: '25px' }}>
@@ -295,7 +315,6 @@ function App() {
         </div>
       )}
 
-      {/* 🔐 MODAL SENHA (HOME) */}
       {modalSenhaAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 7000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
           <div style={{ background: config.identidade.corCard, width: '100%', maxWidth: '350px', borderRadius: '25px', padding: '30px' }}>
@@ -323,7 +342,6 @@ function App() {
         </div>
       )}
 
-      {/* 🔔 MODAL NOTIFICAÇÕES (HOME) */}
       {modalNotificacoesAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 6000, display: 'flex', justifyContent: 'flex-end', backdropFilter: 'blur(4px)' }}>
           <div style={{ width: '85%', maxWidth: '380px', height: '100%', background: config.identidade.corCard, display: 'flex', flexDirection: 'column', animation: 'slideIn 0.3s ease-out' }}>
