@@ -8,7 +8,6 @@ export default function FechamentoLojas() {
   const [fornecedoresBd, setFornecedoresBd] = useState([]); 
   const [carregando, setCarregando] = useState(true);
 
-  // Controle de Cards Minimizados
   const [lojaExpandida, setLojaExpandida] = useState(null);
 
   const [lojaEmEdicao, setLojaEmEdicao] = useState(null);
@@ -380,7 +379,7 @@ export default function FechamentoLojas() {
     return txtVisivel;
   };
 
-  if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>Carregando dados...</div>;
+  if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Processando...</div>;
 
   const renderTabelaDupla = (itensLoja, isMotorista) => {
     const half = Math.ceil(itensLoja.length / 2);
