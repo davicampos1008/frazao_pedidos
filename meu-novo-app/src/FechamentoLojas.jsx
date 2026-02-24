@@ -21,6 +21,20 @@ export default function FechamentoLojas() {
   const hoje = new Date().toLocaleDateString('en-CA');
   const dataBr = new Date().toLocaleDateString('pt-BR');
 
+  const [lojaGeralSelecionada, setLojaGeralSelecionada] = useState({});
+  const [localCompra, setLocalCompra] = useState('ceasa'); 
+  const [copiadoGeral, setCopiadoGeral] = useState(null);
+  const [copiadoLoja, setCopiadoLoja] = useState(null);
+
+  useEffect(() => {
+    if (!window.html2pdf) {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      script.async = true;
+      document.head.appendChild(script);
+    }
+  }, []);
+
   const extrairNum = (valor) => {
     const num = String(valor || "").match(/\d+/);
     return num ? parseInt(num[0], 10) : null;
@@ -51,7 +65,7 @@ export default function FechamentoLojas() {
       (pedData || []).forEach(p => {
         if (p.status_compra === 'pendente') return;
 
-        // --- FORNECEDORES (AGRUPAMENTO TOTAL) ---
+        // --- FORNECEDORES ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
           const fNome = p.fornecedor_compra ? p.fornecedor_compra.toUpperCase() : 'SEM FORNECEDOR';
           const isBoleto = p.status_compra === 'boleto';
@@ -83,7 +97,7 @@ export default function FechamentoLojas() {
             };
           }
 
-          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => i.nomeItem === p.nome_produto && i.isBoleto === isBoleto && i.valUnit === baseVal);
+          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => i.nomeItem === p.nome_produto && i.valUnit === baseVal);
 
           if (itemExistenteIndex >= 0) {
               const itEx = mapaForn[fNome].itens[itemExistenteIndex];
@@ -146,8 +160,8 @@ export default function FechamentoLojas() {
           totalDisplay = 'FALTA';
         } else if (p.custo_unit === 'BONIFICAÇÃO') {
           isBonif = true;
-          unitDisplay = 'BONIFICAÇÃO';
-          totalDisplay = 'BONIFICAÇÃO';
+          unitDisplay = 'BONIFIC.';
+          totalDisplay = 'BONIFIC.';
           totalItem = 0;
           qtdDisplay = p.qtd_atendida;
         } else if (String(p.custo_unit).includes('BONIFICAÇÃO |')) {
@@ -163,13 +177,13 @@ export default function FechamentoLojas() {
           totalDisplay = formatarMoeda(totalItem);
 
           if (qtdBonificadaLoja >= qtdDisplay) {
-              unitDisplay = 'BONIFICAÇÃO';
-              totalDisplay = 'BONIFICAÇÃO';
+              unitDisplay = 'BONIFIC.';
+              totalDisplay = 'BONIFIC.';
           } else if (isBoleto) {
-              unitDisplay = `${qtdBonificadaLoja} BONIFIC.`;
+              unitDisplay = `${qtdBonificadaLoja} = BONIFIC.`;
               totalDisplay = 'BOLETO';
           } else {
-              unitDisplay = `${qtdBonificadaLoja} BONIFIC.`;
+              unitDisplay = `${qtdBonificadaLoja} = BONIFIC.`;
           }
 
         } else if (isBoleto) {
@@ -257,7 +271,7 @@ export default function FechamentoLojas() {
   };
 
   const handleBlurPreco = (idPedido, campo, valorAtual) => {
-    if (!valorAtual || valorAtual === 'FALTA' || valorAtual === 'BOLETO' || valorAtual.includes('BONIF')) return;
+    if (!valorAtual || valorAtual === 'FALTA' || valorAtual === 'BOLETO' || valorAtual.includes('BONIFIC')) return;
     let v = String(valorAtual).replace(/[^\d,.]/g, '');
     if (!v.includes(',') && !v.includes('.')) { v = v + ',00'; }
     if(v.includes('.') && !v.includes(',')) v = v.replace('.', ',');
@@ -309,7 +323,7 @@ export default function FechamentoLojas() {
   };
 
   const totalAoVivoEdicao = itensEditados.reduce((acc, item) => {
-     if(item.isFalta || item.isBoleto || (item.isBonif && item.unitDisplay.includes('BONIF'))) return acc;
+     if(item.isFalta || item.isBoleto || (item.isBonif && item.unitDisplay.includes('BONIFIC'))) return acc;
      const val = tratarPrecoNum(item.totalDisplay);
      return acc + (isNaN(val) ? 0 : val);
   }, 0);
@@ -328,16 +342,7 @@ export default function FechamentoLojas() {
     carregar();
   };
 
-  const alternarStatusPagamento = (nomeForn) => {
-    setFornecedores(prev => prev.map(f => {
-      if (f.nome === nomeForn) {
-        return { ...f, statusPagamento: f.statusPagamento === 'pago' ? 'pendente' : 'pago' };
-      }
-      return f;
-    }));
-  };
-
-  // 💡 LÓGICA DE PDF APRIMORADA (Share Web API + Preview Seguro)
+  // 💡 LÓGICA DE COMPARTILHAMENTO E PDF APRIMORADA
   const processarPDF = async (modo = 'baixar', lojaObj = null) => {
     const elemento = document.getElementById('area-impressao');
     if (!elemento) return;
@@ -352,19 +357,13 @@ export default function FechamentoLojas() {
       filename:     nomeArquivo,
       image:        { type: 'jpeg', quality: 0.98 },
       html2canvas:  { scale: 2, useCORS: true },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }, // 💡 OBRIGATÓRIO RETRATO
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }, // OBRIGATÓRIO RETRATO
       pagebreak:    { mode: 'css', after: '.print-break' }
     };
 
-    // Garante que a biblioteca está pronta
     if (!window.html2pdf) {
-      await new Promise((resolve, reject) => {
-         const script = document.createElement('script');
-         script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-         script.onload = resolve;
-         script.onerror = reject;
-         document.head.appendChild(script);
-      });
+      alert("Aguarde, carregando biblioteca PDF...");
+      return;
     }
 
     if (modo === 'whatsapp') {
@@ -393,19 +392,9 @@ export default function FechamentoLojas() {
     }
   };
 
-  const fornecedoresExibidos = fornecedores.filter(f => {
-    const isPago = f.statusPagamento === 'pago';
-    const isBoletoOnly = f.totalPix === 0 && f.totalBoleto > 0;
-    
-    if (abaForn === 'pendentes') return !isPago && !isBoletoOnly;
-    if (abaForn === 'finalizados') return isPago && !isBoletoOnly;
-    if (abaForn === 'boletos') return isBoletoOnly;
-    return true;
-  });
-
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Processando...</div>;
 
-  // 💡 DESIGN DA TABELA COM CORES RESTAURADAS
+  // 💡 MUDANÇA NO DESIGN DA TABELA (RETRATO / ESPAÇOS / NEGRITO / CORES)
   const renderTabelaDupla = (itensLoja, isMotorista) => {
     const half = Math.ceil(itensLoja.length / 2);
     const rows = [];
@@ -413,6 +402,7 @@ export default function FechamentoLojas() {
       rows.push({ left: itensLoja[i], right: itensLoja[i + half] });
     }
 
+    // Proporções: 6% + 22% + 12% + 9% = 49%. Espaçador central = 2%. Total = 100%
     const thStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#e5e7eb', color: 'black' };
     const tdStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontSize: '12px', fontWeight: '900', color: 'black' };
     const tdDesc = { ...tdStyle, textAlign: 'left', fontSize: '13px', fontWeight: '900', color: 'black', wordBreak: 'break-word' }; 
@@ -421,17 +411,17 @@ export default function FechamentoLojas() {
       <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
         <thead>
           <tr>
-            <th style={{...thStyle, width: '7%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '25%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '11%'}}>VAL. UNIT.</th>
-            <th style={{...thStyle, width: '11%'}}>VAL. TOTAL.</th>
+            <th style={{...thStyle, width: '6%'}}>QUANT.</th>
+            <th style={{...thStyle, width: '22%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '12%'}}>VAL. UNIT.</th>
+            <th style={{...thStyle, width: '9%'}}>VAL. TOTAL.</th>
             
             <th style={{ border: 'none', width: '2%', backgroundColor: 'transparent' }}></th>
 
-            <th style={{...thStyle, width: '7%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '25%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '11%'}}>VAL. UNIT.</th>
-            <th style={{...thStyle, width: '11%'}}>VAL. TOTAL.</th>
+            <th style={{...thStyle, width: '6%'}}>QUANT.</th>
+            <th style={{...thStyle, width: '22%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '12%'}}>VAL. UNIT.</th>
+            <th style={{...thStyle, width: '9%'}}>VAL. TOTAL.</th>
           </tr>
         </thead>
         <tbody>
@@ -439,19 +429,33 @@ export default function FechamentoLojas() {
              const renderCell = (item) => {
                if (!item) return <><td style={tdStyle}></td><td style={tdDesc}></td><td style={tdStyle}></td><td style={tdStyle}></td></>;
                
-               let corTexto = 'black';
+               let corUnit = 'black';
+               let corTotal = 'black';
                let uDisp = item.unitDisplay;
                let tDisp = item.totalDisplay;
 
-               // 💡 Lógica de Cores
+               // 💡 Lógica de Cores Rigorosa
                if (item.isFalta) {
-                  corTexto = '#ef4444'; // Vermelho
+                  corUnit = '#ef4444'; // Vermelho
+                  corTotal = '#ef4444';
                   uDisp = 'FALTA';
                   tDisp = 'FALTA';
-               } else if (item.isBonif) {
-                  corTexto = '#16a34a'; // Verde
-               } else if (item.isBoleto) {
-                  corTexto = '#d97706'; // Amarelo Dourado
+               } else {
+                  // Avalia coluna Unitário
+                  if (uDisp.includes('BONIFIC.')) {
+                      corUnit = '#16a34a'; // Verde
+                  } else if (uDisp === 'BOLETO') {
+                      corUnit = '#d97706'; // Dourado
+                  }
+                  
+                  // Avalia coluna Total
+                  if (tDisp === 'BONIFIC.') {
+                      corTotal = '#16a34a'; // Verde
+                  } else if (tDisp === 'BOLETO') {
+                      corTotal = '#d97706'; // Dourado
+                  } else {
+                      corTotal = 'black'; // Valor numerico
+                  }
                }
 
                if (isMotorista && !item.isFalta) {
@@ -463,8 +467,8 @@ export default function FechamentoLojas() {
                  <>
                    <td style={tdStyle}>{item.qtdEntregue}</td>
                    <td style={tdDesc}>{formatarNomeItem(item.nome)}</td>
-                   <td style={{...tdStyle, fontSize: '11px', color: corTexto}}>{uDisp}</td>
-                   <td style={{...tdStyle, fontSize: '11px', color: corTexto}}>{tDisp}</td>
+                   <td style={{...tdStyle, fontSize: '11px', color: corUnit, fontWeight: '900'}}>{uDisp}</td>
+                   <td style={{...tdStyle, fontSize: '11px', color: corTotal, fontWeight: '900'}}>{tDisp}</td>
                  </>
                );
              };
@@ -494,7 +498,6 @@ export default function FechamentoLojas() {
            
            <div style={{ display: 'flex', gap: '10px', flex: '1 1 auto', flexWrap: 'wrap' }}>
              
-             {/* 💡 NOVO: VISUALIZAR PDF NA TELA ANTES DE BAIXAR */}
              <button onClick={() => processarPDF('preview', isMotGlobal ? null : lojaParaImprimir)} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>👁️ VISUALIZAR PDF</button>
 
              {!isMotGlobal && (
@@ -513,21 +516,25 @@ export default function FechamentoLojas() {
                      
                      <div style={{ border: '2px solid black', boxSizing: 'border-box', padding: '10px', height: '100%' }}>
                          
-                         {/* 💡 HEADER LIMPO, CENTRALIZADO E COM LOGO VIA /PUBLIC */}
-                         <div style={{ display: 'flex', flexDirection: 'column', width: '100%', borderBottom: '2px solid black', paddingBottom: '15px' }}>
-                            <div style={{ textAlign: 'center', marginBottom: '15px' }}>
-                                {/* Certifique-se de salvar a logo como "logoPDF.png" na pasta public */}
-                                <img src="/logoPDF.png" alt="Frazão Frutas & Cia" style={{ maxHeight: '80px', objectFit: 'contain' }} />
-                            </div>
+                         {/* 💡 HEADER COMPACTO, 1 LINHA SÓ */}
+                         <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '2px solid black', paddingBottom: '10px', marginBottom: '10px' }}>
                             
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 10px' }}>
-                                <div style={{ fontWeight: '900', fontSize: '20px', color: 'black', textTransform: 'uppercase' }}>
-                                    LOJA: {loja.nome_fantasia}
-                                </div>
-                                <div style={{ display: 'flex', gap: '30px', fontWeight: '900', fontSize: '18px', color: 'black' }}>
-                                    <span>DATA: {dataBr}</span>
-                                    {!isMotGlobal && <span>TOTAL: {formatarMoeda(loja.totalFatura)}</span>}
-                                </div>
+                            {/* Esquerda: Nome da Loja */}
+                            <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+                                <span style={{ fontWeight: '900', fontSize: '13px', color: 'black', marginRight: '5px' }}>LOJA:</span>
+                                <span style={{ fontWeight: '900', fontSize: '15px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
+                            </div>
+
+                            {/* Centro: Logo */}
+                            <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {/* A imagem deve estar salva como logoPDF.png na pasta public */}
+                                <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '45px', objectFit: 'contain' }} />
+                            </div>
+
+                            {/* Direita: Data e Total na mesma linha */}
+                            <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', fontWeight: '900', fontSize: '13px', color: 'black', gap: '8px' }}>
+                                <span>DATA: {dataBr}</span>
+                                {!isMotGlobal && <span>| TOTAL: {formatarMoeda(loja.totalFatura)}</span>}
                             </div>
                          </div>
 
@@ -546,7 +553,6 @@ export default function FechamentoLojas() {
             html, body { height: auto !important; overflow: visible !important; background: white; margin: 0; padding: 0; }
             #root, div { overflow: visible !important; height: auto !important; }
             
-            /* 💡 MUDANÇA: IMPRESSÃO EM RETRATO (PORTRAIT) SEMPRE */
             .print-section { box-shadow: none !important; min-width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; }
             @page { margin: 10mm; size: portrait; } 
           }
@@ -622,7 +628,7 @@ export default function FechamentoLojas() {
                          const totF = item.totalDisplay;
                          const isRed = item.isFalta;
                          const isOrange = item.isBoleto;
-                         const isGreen = item.isBonif;
+                         const isGreen = item.isBonif || unitF.includes('BONIFIC');
 
                          return (
                             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', borderBottom: '1px dashed #e2e8f0', backgroundColor: '#f8fafc', borderRadius: '8px' }}>
@@ -633,7 +639,7 @@ export default function FechamentoLojas() {
                               </div>
                               <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                 <span style={{ color: isOrange ? '#d97706' : isRed ? '#ef4444' : isGreen ? '#16a34a' : '#94a3b8', marginRight: '5px', fontWeight: 'bold' }}>{unitF}</span>
-                                <strong style={{ fontWeight: '900', color: isOrange ? '#d97706' : isRed ? '#ef4444' : isGreen ? '#16a34a' : '#111' }}>{totF}</strong>
+                                <strong style={{ fontWeight: '900', color: isOrange ? '#d97706' : isRed ? '#ef4444' : (totF === 'BONIFIC.' ? '#16a34a' : '#111') }}>{totF}</strong>
                               </div>
                             </div>
                          )
@@ -706,8 +712,8 @@ export default function FechamentoLojas() {
                              const qtdCobrada = i.qtd - i.qtdBonificada;
                              if (qtdCobrada > 0) {
                                return (
-                                 <div key={`norm_${k}`} style={{ fontSize: '11px', color: '#333' }}>
-                                   {qtdCobrada} - {formatarNomeItem(i.nomeItem)} - {i.valUnit} = {formatarMoeda(i.totalCobrado)} <span style={{color: '#d97706', fontWeight: 'bold'}}>{i.isBoleto && '(BOLETO)'}</span>
+                                 <div key={`norm_${k}`} style={{ fontSize: '11px', color: '#333', fontWeight: 'bold' }}>
+                                   {qtdCobrada} - {formatarNomeItem(i.nomeItem)} - {i.valUnit} = {formatarMoeda(i.totalCobrado)} <span style={{color: '#d97706', fontWeight: '900'}}>{i.isBoleto && '(BOLETO)'}</span>
                                  </div>
                                );
                              }
@@ -717,19 +723,19 @@ export default function FechamentoLojas() {
 
                         {forn.totalDescontoBonif > 0 && (
                           <div style={{ borderTop: '1px dashed #e2e8f0', paddingTop: '10px', marginTop: '10px' }}>
-                            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#16a34a', marginBottom: '5px' }}>Bonificações:</div>
+                            <div style={{ fontSize: '12px', fontWeight: '900', color: '#16a34a', marginBottom: '5px' }}>Bonificações:</div>
                             <div style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                               {forn.itens.filter(i => i.qtdBonificada > 0).map((i, k) => {
                                  const basePriceNum = tratarPrecoNum(i.valUnit);
                                  const valBonif = basePriceNum * i.qtdBonificada;
                                  return (
-                                   <div key={`bonif_${k}`} style={{ fontSize: '11px', color: '#16a34a' }}>
+                                   <div key={`bonif_${k}`} style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold' }}>
                                      {i.qtdBonificada} - {formatarNomeItem(i.nomeItem)} - {formatarMoeda(valBonif)}
                                    </div>
                                  );
                               })}
                             </div>
-                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '10px' }}>
+                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '10px', fontWeight: 'bold' }}>
                                Valor bruto = {formatarMoeda(forn.totalBruto)}
                             </div>
                           </div>
