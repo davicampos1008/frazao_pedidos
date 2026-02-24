@@ -253,36 +253,47 @@ export default function MenuCliente({ usuario }) {
     }
   };
 
-  const confirmarEnvio = async () => {
+ const confirmarEnvio = async () => {
     const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
     if (!codLoja) return alert("🚨 ERRO: Seu usuário não tem uma Loja vinculada.");
 
     setEnviandoPedido(true);
     try {
-      const dataFixa = new Date().toISOString().split('T')[0];
+      // CORREÇÃO AQUI: Usando a variável 'hoje' que já tem a data local correta
+      const dataFixa = hoje; 
+      
       const dadosParaEnviar = carrinho.map(item => ({
-        loja_id: codLoja, nome_usuario: usuario?.nome || "Operador", nome_produto: item.nome, quantidade: item.quantidade,
-        unidade_medida: item.unidade_medida || 'UN', data_pedido: dataFixa, solicitou_refazer: false, liberado_edicao: false, status_compra: 'pendente' 
+        loja_id: codLoja, 
+        nome_usuario: usuario?.nome || "Operador", 
+        nome_produto: item.nome, 
+        quantidade: item.quantidade,
+        unidade_medida: item.unidade_medida || 'UN', 
+        data_pedido: dataFixa, // Agora salva com a data certa!
+        solicitou_refazer: false, 
+        liberado_edicao: false, 
+        status_compra: 'pendente' 
       }));
 
-      await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
+      await supabase.from('pedidos').delete().eq('data_pedido', dataFixa).eq('loja_id', codLoja);
       const { error } = await supabase.from('pedidos').insert(dadosParaEnviar);
       if (error) throw error;
 
       setCarrinho([]); 
       localStorage.removeItem('carrinho_virtus');
       
-      setModalRevisaoAberto(false); setModalCarrinhoAberto(false); setModoVisualizacao(false);
+      setModalRevisaoAberto(false); 
+      setModalCarrinhoAberto(false); 
+      setModoVisualizacao(false);
+      
       await carregarDados(false); 
       window.scrollTo(0,0);
       mostrarNotificacao("🚀 LISTA ENVIADA COM SUCESSO!", 'sucesso', 'Pedido Realizado');
     } catch (err) { 
-      // Isso vai forçar o erro aparecer na sua tela
-      alert("ERRO SUPABASE: " + JSON.stringify(err));
-      console.error("ERRO COMPLETO:", err);
+        alert("Erro ao gravar: " + err.message); 
     } finally { 
-      setEnviandoPedido(false); 
-    };
+        setEnviandoPedido(false); 
+    }
+  };
 
   const pedirParaEditar = async () => {
     if(!window.confirm("Pedir ao administrador para liberar a edição da lista?")) return;
@@ -626,5 +637,4 @@ export default function MenuCliente({ usuario }) {
       )}
     </div>
   );
-}
 }
