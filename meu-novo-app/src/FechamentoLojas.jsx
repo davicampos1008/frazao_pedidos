@@ -22,6 +22,11 @@ export default function FechamentoLojas() {
   const hoje = new Date().toLocaleDateString('en-CA');
   const dataBr = new Date().toLocaleDateString('pt-BR');
 
+  // Controle da Loja selecionada no Pedido Geral
+  const [lojaGeralSelecionada, setLojaGeralSelecionada] = useState({});
+  const [localCompra, setLocalCompra] = useState('ceasa'); 
+  const [copiadoGeral, setCopiadoGeral] = useState(null);
+
   const extrairNum = (valor) => {
     const num = String(valor || "").match(/\d+/);
     return num ? parseInt(num[0], 10) : null;
@@ -55,7 +60,7 @@ export default function FechamentoLojas() {
       (pedData || []).forEach(p => {
         if (p.status_compra === 'pendente') return;
 
-        // --- FORNECEDORES ---
+        // --- FORNECEDORES (AGRUPAMENTO TOTAL) ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
           const fNome = p.fornecedor_compra ? p.fornecedor_compra.toUpperCase() : 'SEM FORNECEDOR';
           const isBoleto = p.status_compra === 'boleto';
@@ -70,17 +75,33 @@ export default function FechamentoLojas() {
           }
 
           const valNum = tratarPrecoNum(baseVal);
-          
-          // Total cobrado pelo fornecedor (deduzindo bonificação)
           const qtdCobradaForn = Math.max(0, p.qtd_atendida - qtdBonifFornecedor);
           const totalItemFornCobrado = qtdCobradaForn * valNum;
+          const valorEconomizadoBonif = qtdBonifFornecedor * valNum;
 
           if (!mapaForn[fNome]) {
-            mapaForn[fNome] = { nome: fNome, totalPix: 0, totalBoleto: 0, itens: [], statusPagamento: 'pendente' };
+            mapaForn[fNome] = { 
+               nome: fNome, 
+               totalPix: 0, 
+               totalBoleto: 0, 
+               totalBruto: 0,
+               totalDescontoBonif: 0,
+               qtdBonificadaGeral: 0,
+               itens: [], 
+               lojasEnvolvidas: {},
+               statusPagamento: 'pendente' 
+            };
           }
 
-          // Busca item já existente para não duplicar linhas no fornecedor
-          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => i.nomeItem === p.nome_produto && i.isBoleto === isBoleto);
+          // Salva as lojas envolvidas para o Dropdown da placa
+          const idLojaForn = extrairNum(p.loja_id);
+          const lInfoForn = lojasData.find(l => extrairNum(l.codigo_loja) === idLojaForn);
+          if (lInfoForn) {
+             mapaForn[fNome].lojasEnvolvidas[lInfoForn.nome_fantasia] = lInfoForn;
+          }
+
+          // Agrupa o item se for o mesmo produto e mesmo status
+          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => i.nomeItem === p.nome_produto && i.isBoleto === isBoleto && i.valUnit === baseVal);
 
           if (itemExistenteIndex >= 0) {
               const itEx = mapaForn[fNome].itens[itemExistenteIndex];
@@ -90,6 +111,7 @@ export default function FechamentoLojas() {
           } else {
               mapaForn[fNome].itens.push({ 
                 nomeItem: p.nome_produto, 
+                unidade: p.unidade_medida || 'UN',
                 qtd: p.qtd_atendida,
                 qtdBonificada: qtdBonifFornecedor,
                 valUnit: baseVal, 
@@ -97,6 +119,10 @@ export default function FechamentoLojas() {
                 isBoleto 
               });
           }
+
+          mapaForn[fNome].totalBruto += (totalItemFornCobrado + valorEconomizadoBonif);
+          mapaForn[fNome].totalDescontoBonif += valorEconomizadoBonif;
+          mapaForn[fNome].qtdBonificadaGeral += qtdBonifFornecedor;
 
           if (isBoleto) {
             mapaForn[fNome].totalBoleto += totalItemFornCobrado;
@@ -129,9 +155,7 @@ export default function FechamentoLojas() {
         let totalDisplay = '';
         let precoOriginal = p.custo_unit || 'R$ 0,00';
         let isBonif = false;
-        let qtdBonificadaLoja = 0;
 
-        // 💡 LÓGICA DE BONIFICAÇÃO (APLICAÇÃO VISUAL DA PLANILHA)
         if (isFalta) {
           unitDisplay = 'FALTA';
           totalDisplay = 'FALTA';
@@ -141,31 +165,26 @@ export default function FechamentoLojas() {
           totalDisplay = 'BONIFICAÇÃO';
           totalItem = 0;
           qtdDisplay = p.qtd_atendida;
-          qtdBonificadaLoja = p.qtd_atendida;
         } else if (String(p.custo_unit).includes('BONIFICAÇÃO |')) {
           isBonif = true;
           const parts = p.custo_unit.split('|');
           precoOriginal = parts[1] ? parts[1].trim() : 'R$ 0,00';
           const pUnit = tratarPrecoNum(precoOriginal);
-          qtdBonificadaLoja = parseInt(parts[0]) || 0;
+          const qtdBonificadaLoja = parseInt(parts[0]) || 0;
           qtdDisplay = p.qtd_atendida;
           
           const restCobrado = qtdDisplay - qtdBonificadaLoja;
           totalItem = restCobrado > 0 ? restCobrado * pUnit : 0;
           totalDisplay = formatarMoeda(totalItem);
 
-          // 💡 REGRAS DE EXIBIÇÃO SOLICITADAS
           if (qtdBonificadaLoja >= qtdDisplay) {
-              // Total do item pedido = BONIFICAÇÃO NOS DOIS QUADRADOS
               unitDisplay = 'BONIFICAÇÃO';
               totalDisplay = 'BONIFICAÇÃO';
           } else if (isBoleto) {
-              // Boleto + Bonificação Parcial
-              unitDisplay = `${qtdBonificadaLoja} BONIF.`;
+              unitDisplay = `${qtdBonificadaLoja} BONIFIC.`;
               totalDisplay = 'BOLETO';
           } else {
-              // Bonificação Parcial Normal (Mostra Quantidade Bonificada no Unitário)
-              unitDisplay = `${qtdBonificadaLoja} BONIF. | ${precoOriginal}`;
+              unitDisplay = `${qtdBonificadaLoja} BONIFIC.`;
           }
 
         } else if (isBoleto) {
@@ -181,7 +200,6 @@ export default function FechamentoLojas() {
         const nomeUpper = p.nome_produto.toUpperCase();
         const idxExistente = mapaLojas[idLoja].itens.findIndex(i => i.nome === nomeUpper);
 
-        // Agrupamento Loja
         if (idxExistente >= 0) {
           const it = mapaLojas[idLoja].itens[idxExistente];
           if (!isFalta && !isBoleto && !it.isFalta && !it.isBoleto && !isBonif && !it.isBonif) {
@@ -199,7 +217,6 @@ export default function FechamentoLojas() {
             unidade: p.unidade_medida || 'UN',
             qtdOriginal: p.quantidade,
             qtdEntregue: qtdDisplay,
-            qtdBonificada: qtdBonificadaLoja,
             unitDisplay: unitDisplay,
             totalDisplay: totalDisplay,
             valorNumerico: totalItem,
@@ -223,7 +240,9 @@ export default function FechamentoLojas() {
       arrayLojas.forEach(loja => loja.itens.sort((a, b) => a.nome.localeCompare(b.nome)));
       setFechamentos(arrayLojas);
 
-      const arrayForn = Object.values(mapaForn).sort((a, b) => b.totalPix - a.totalPix);
+      // Organiza alfabeticamente os fornecedores e os itens dentro deles
+      const arrayForn = Object.values(mapaForn).sort((a, b) => a.nome.localeCompare(b.nome));
+      arrayForn.forEach(f => f.itens.sort((a, b) => a.nomeItem.localeCompare(b.nomeItem)));
       setFornecedores(arrayForn);
 
     } catch (err) { console.error(err); } finally { setCarregando(false); }
@@ -334,49 +353,95 @@ export default function FechamentoLojas() {
     }));
   };
 
-  // 💡 MUDANÇA: COMPARTILHAMENTO DIRETO WHATSAPP + NOME NO PDF
-  const processarPDF = (modo = 'baixar', lojaObj = null) => {
+  // 💡 NOVO: COMPARTILHAMENTO INTELIGENTE PDF (WEB SHARE API)
+  const processarPDF = async (modo = 'baixar', lojaObj = null) => {
     const elemento = document.getElementById('area-impressao');
     if (!elemento) return;
 
     let nomeArquivo = `Fechamentos_${dataBr.replace(/\//g, '-')}.pdf`;
-    
-    // Se for impressão de uma loja única
     if (lojaObj) {
        nomeArquivo = `${lojaObj.nome_fantasia} - ${dataBr.replace(/\//g, '-')}.pdf`;
     }
 
-    const gerar = () => {
-      const opt = {
-        margin:       [10, 5, 10, 5],
-        filename:     nomeArquivo,
-        image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true },
-        // 💡 MUDANÇA: PORTRAIT (RETRATO) PARA AS LOJAS
-        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }, 
-        pagebreak:    { mode: 'css', after: '.print-break' }
-      };
-
-      if (modo === 'whatsapp') {
-         // O html2pdf não tem uma função nativa de 'share file' direta e fácil via web
-         // O mais seguro é forçar o download com o nome correto e instruir o envio
-         window.html2pdf().set(opt).from(elemento).save().then(() => {
-            alert(`O arquivo "${nomeArquivo}" foi baixado. Agora é só enviar no WhatsApp da loja!`);
-            window.open('https://web.whatsapp.com', '_blank');
-         });
-      } else {
-         window.html2pdf().set(opt).from(elemento).save();
-      }
+    const opt = {
+      margin:       [10, 5, 10, 5],
+      filename:     nomeArquivo,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }, // 💡 Orientação Retrato
+      pagebreak:    { mode: 'css', after: '.print-break' }
     };
 
     if (!window.html2pdf) {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-      script.onload = gerar;
-      document.body.appendChild(script);
-    } else {
-      gerar();
+       alert("Aguarde, carregando biblioteca PDF...");
+       return;
     }
+
+    if (modo === 'whatsapp') {
+       try {
+         const pdfBlob = await window.html2pdf().set(opt).from(elemento).output('blob');
+         const file = new File([pdfBlob], nomeArquivo, { type: 'application/pdf' });
+         
+         if (navigator.canShare && navigator.canShare({ files: [file] })) {
+           await navigator.share({
+             files: [file],
+             title: nomeArquivo,
+             text: 'Fechamento de Caixa'
+           });
+         } else {
+           alert("Seu dispositivo não suporta compartilhamento direto. O arquivo será baixado para você enviar manualmente.");
+           window.html2pdf().set(opt).from(elemento).save();
+         }
+       } catch (e) {
+         console.error("Erro no Share API", e);
+       }
+    } else {
+       window.html2pdf().set(opt).from(elemento).save();
+    }
+  };
+
+  // 💡 MENSAGEM WHATSAPP FORNECEDOR (TOTALMENTE REESTRUTURADA)
+  const gerarPedidoGeral = (f, btnId) => {
+    const nomeLoja = lojaGeralSelecionada[f.nome];
+    if (!nomeLoja) return alert("⚠️ Selecione a loja titular da banca para o cabeçalho.");
+
+    const lojaTitular = f.lojasEnvolvidas[nomeLoja];
+    const nomeFormatado = nomeLoja.replace(/^\d+\s*-\s*/, '').trim().toUpperCase();
+
+    const placaBase = lojaTitular && lojaTitular.placa_caminhao ? lojaTitular.placa_caminhao.toUpperCase().trim() : 'SEM PLACA';
+    const complemento = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
+    
+    let msg = `*${nomeFormatado}*\n\n`;
+    let strNormais = '';
+    let strBonif = '';
+    
+    f.itens.forEach(i => {
+       const qtdCobrada = i.qtd - i.qtdBonificada;
+       if (qtdCobrada > 0) {
+          strNormais += `${qtdCobrada} ${formatarNomeItem(i.nomeItem)} - ${i.valUnit} = ${formatarMoeda(i.totalItem)}${i.isBoleto ? ' (B)' : ''}\n`;
+       }
+       if (i.qtdBonificada > 0) {
+          const basePriceNum = tratarPrecoNum(i.valUnit);
+          const valBonif = basePriceNum * i.qtdBonificada;
+          strBonif += `${i.qtdBonificada} ${formatarNomeItem(i.nomeItem)} - ${formatarMoeda(valBonif)}\n`;
+       }
+    });
+
+    msg += strNormais;
+
+    if (f.totalDescontoBonif > 0) {
+       msg += `\n*Bonificações:*\n${strBonif}`;
+       msg += `\nValor bruto = ${formatarMoeda(f.totalBruto)}\n`;
+    } else {
+       msg += `\n`;
+    }
+
+    msg += `Total a pagar = ${formatarMoeda(f.totalPix + f.totalBoleto)}`;
+    msg += `\n\n${placaBase} - ${complemento}`;
+
+    navigator.clipboard.writeText(msg);
+    setCopiadoGeral(btnId);
+    setTimeout(() => setCopiadoGeral(null), 2000);
   };
 
   const fornecedoresExibidos = fornecedores.filter(f => {
@@ -389,17 +454,9 @@ export default function FechamentoLojas() {
     return true;
   });
 
-  const formatarTextoTabela = (texto) => {
-    if (typeof texto !== 'string') return texto;
-    if (texto.includes('BONIF')) {
-        return <span style={{ color: '#16a34a', fontWeight: '900' }}>{texto}</span>;
-    }
-    return texto;
-  };
-
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Processando...</div>;
 
-  // 💡 MUDANÇA DESIGN DA TABELA E FONTE 
+  // 💡 MUDANÇA NO DESIGN DA TABELA (RETRATO / ESPAÇOS / NEGRITO)
   const renderTabelaDupla = (itensLoja, isMotorista) => {
     const half = Math.ceil(itensLoja.length / 2);
     const rows = [];
@@ -407,27 +464,25 @@ export default function FechamentoLojas() {
       rows.push({ left: itensLoja[i], right: itensLoja[i + half] });
     }
 
-    const thStyle = { border: '1px solid black', padding: '4px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#e5e7eb', color: 'black' };
-    const tdStyle = { border: '1px solid black', padding: '4px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold' };
-    
-    // Diminui o quadrado dos nomes (width menor) e aumenta a fonte + negrito
-    const tdDesc = { ...tdStyle, textAlign: 'left', fontWeight: '900', fontSize: '12px' }; 
+    const thStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#e5e7eb', color: 'black' };
+    const tdStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontSize: '12px', fontWeight: '900', color: 'black' };
+    const tdDesc = { ...tdStyle, textAlign: 'left', fontSize: '13px', fontWeight: '900', color: 'black', wordBreak: 'break-word' }; 
 
     return (
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
         <thead>
           <tr>
-            <th style={{...thStyle, width: '6%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '25%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '13%'}}>VAL. UNIT.</th>
-            <th style={{...thStyle, width: '13%'}}>VAL. TOTAL.</th>
+            <th style={{...thStyle, width: '7%'}}>QUANT.</th>
+            <th style={{...thStyle, width: '24%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '9%'}}>VAL. UNIT.</th>
+            <th style={{...thStyle, width: '9%'}}>VAL. TOTAL.</th>
             
-            <th style={{ border: 'none', width: '10px', backgroundColor: 'transparent' }}></th>
+            <th style={{ border: 'none', width: '2%', backgroundColor: 'transparent' }}></th>
 
-            <th style={{...thStyle, width: '6%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '25%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '13%'}}>VAL. UNIT.</th>
-            <th style={{...thStyle, width: '13%'}}>VAL. TOTAL.</th>
+            <th style={{...thStyle, width: '7%'}}>QUANT.</th>
+            <th style={{...thStyle, width: '24%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '9%'}}>VAL. UNIT.</th>
+            <th style={{...thStyle, width: '9%'}}>VAL. TOTAL.</th>
           </tr>
         </thead>
         <tbody>
@@ -435,29 +490,20 @@ export default function FechamentoLojas() {
              const renderCell = (item) => {
                if (!item) return <><td style={tdStyle}></td><td style={tdDesc}></td><td style={tdStyle}></td><td style={tdStyle}></td></>;
                
-               const isFa = item.isFalta;
-               const isBo = item.isBoleto;
-
-               const corValores = isFa ? 'red' : isBo ? '#d97706' : 'black';
-
                let uDisp = item.unitDisplay;
                let tDisp = item.totalDisplay;
 
                if (isMotorista) {
-                  uDisp = isFa ? 'FALTA' : '';
-                  tDisp = isFa ? 'FALTA' : '';
-               } else {
-                  uDisp = formatarTextoTabela(uDisp);
-                  tDisp = formatarTextoTabela(tDisp);
-               }
+                  uDisp = item.isFalta ? 'FALTA' : '';
+                  tDisp = item.isFalta ? 'FALTA' : '';
+               } 
 
                return (
                  <>
-                   <td style={{...tdStyle, color: 'black'}}>{item.qtdEntregue}</td>
-                   {/* Nome com fonte maior, sem cor vermelha e em negrito */}
-                   <td style={{...tdDesc, color: 'black'}}>{formatarNomeItem(item.nome)}</td>
-                   <td style={{...tdStyle, color: corValores}}>{uDisp}</td>
-                   <td style={{...tdStyle, color: corValores}}>{tDisp}</td>
+                   <td style={tdStyle}>{item.qtdEntregue}</td>
+                   <td style={tdDesc}>{formatarNomeItem(item.nome)}</td>
+                   <td style={{...tdStyle, fontSize: '11px'}}>{uDisp}</td>
+                   <td style={{...tdStyle, fontSize: '11px'}}>{tDisp}</td>
                  </>
                );
              };
@@ -465,7 +511,7 @@ export default function FechamentoLojas() {
              return (
                <tr key={idx}>
                  {renderCell(row.left)}
-                 <td style={{ border: 'none', width: '10px' }}></td>
+                 <td style={{ border: 'none', width: '2%' }}></td>
                  {renderCell(row.right)}
                </tr>
              )
@@ -491,7 +537,6 @@ export default function FechamentoLojas() {
              )}
              
              <button onClick={() => processarPDF('baixar', isMotGlobal ? null : lojaParaImprimir)} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
-             <button onClick={() => window.print()} style={{ background: '#22c55e', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🖨️ IMPRIMIR</button>
            </div>
         </div>
 
@@ -501,36 +546,36 @@ export default function FechamentoLojas() {
                {lojasParaRenderizar.map((loja, idx) => (
                   <div key={loja.loja_id} className="print-break" style={{ padding: '15px', position: 'relative', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
                      
-                     <div style={{ border: '2px solid black', boxSizing: 'border-box', height: '100%' }}>
+                     <div style={{ border: '2px solid black', boxSizing: 'border-box', padding: '10px', height: '100%' }}>
                          
-                         <div style={{ display: 'flex', flexDirection: 'row', width: '100%', borderBottom: '2px solid black', minHeight: '80px' }}>
+                         {/* 💡 HEADER LIMPO, PRETO, LOGO VIA /PUBLIC */}
+                         <div style={{ display: 'flex', flexDirection: 'row', width: '100%', borderBottom: '2px solid black', paddingBottom: '10px' }}>
                             
                             <div style={{ flex: '1.5', borderRight: '2px solid black', padding: '10px', display: 'flex', alignItems: 'center' }}>
                                 <span style={{ fontWeight: '900', fontSize: '18px', color: 'black', marginRight: '5px' }}>LOJA:</span>
-                                <span style={{ fontWeight: '900', fontSize: '20px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia} [cite: 2]</span>
+                                <span style={{ fontWeight: '900', fontSize: '20px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
                             </div>
 
-                            <div style={{ flex: '1.2', borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', overflow: 'hidden' }}>
-                                {/* 💡 INSIRA O LINK DA SUA IMAGEM HOSPEDADA ABAIXO */}
-                                <img src="https://i.postimg.cc/zX8QYXbG/frazao-logo-black.png" alt="Frazão Frutas & Cia [cite: 3]" style={{ maxHeight: '70px', maxWidth: '100%', objectFit: 'contain' }} />
-                                {/* Caso a imagem acima falhe, coloque a sua aqui trocando o src */}
+                            <div style={{ flex: '1.2', borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px' }}>
+                                {/* 💡 LOGO DO SISTEMA: Coloque a sua imagem com o nome 'logo.png' na pasta public */}
+                                <img src="/logoPDF.png" alt="Frazão Frutas & Cia" style={{ maxHeight: '60px', maxWidth: '100%', objectFit: 'contain' }} />
                             </div>
 
                             <div style={{ flex: '0.8', display: 'flex', flexDirection: 'column' }}>
                                 <div style={{ display: 'flex', flex: 1, borderBottom: '2px solid black' }}>
                                     <div style={{ flex: 1, borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '14px', color: 'black', padding: '5px', textAlign: 'center' }}>
-                                        VALOR TOTAL: [cite: 4]
+                                        VALOR TOTAL:
                                     </div>
                                     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '16px', color: 'black', padding: '5px' }}>
-                                        {!isMotGlobal ? formatarMoeda(loja.totalFatura) : ''} [cite: 5]
+                                        {!isMotGlobal ? formatarMoeda(loja.totalFatura) : ''}
                                     </div>
                                 </div>
                                 <div style={{ display: 'flex', flex: 1 }}>
                                     <div style={{ flex: 1, borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '16px', color: 'black', padding: '5px' }}>
-                                        DATA: 
+                                        DATA:
                                     </div>
                                     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '16px', color: 'black', padding: '5px' }}>
-                                        {dataBr} 
+                                        {dataBr}
                                     </div>
                                 </div>
                             </div>
@@ -571,7 +616,7 @@ export default function FechamentoLojas() {
         
         {abaAtiva === 'lojas' && (
           <button onClick={() => abrirPreviewImpressao('motorista_todos')} style={{ backgroundColor: '#fff', color: '#111', border: 'none', padding: '12px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', display: 'flex', gap: '10px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.1)', flex: '1 1 auto', justifyContent: 'center' }}>
-            <span>🚚</span> VISUALIZAR TODAS VIAS (MOTORISTAS)
+            <span>🚚</span> VIAS MOTORISTAS PDF
           </button>
         )}
       </div>
@@ -615,8 +660,7 @@ export default function FechamentoLojas() {
                     
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '25px', justifyContent: 'flex-end' }}>
                       <button onClick={() => abrirEdicao(loja)} style={{ background: '#111', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>✏️ EDITAR</button>
-                      <button onClick={() => abrirPreviewImpressao('motorista_unico', loja)} style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>🚚 MOTORISTA</button>
-                      <button onClick={() => abrirPreviewImpressao('loja_unica', loja)} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>📄 VIA LOJA</button>
+                      <button onClick={() => abrirPreviewImpressao('loja_unica', loja)} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>📄 VISUALIZAR VIA</button>
                       {!loja.liberadoCliente && (
                         <button onClick={() => liberarParaOCliente(loja.loja_id)} style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>📤 LIBERAR CLIENTE</button>
                       )}
@@ -624,8 +668,8 @@ export default function FechamentoLojas() {
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px', fontSize: '12px' }}>
                       {loja.itens.map((item, i) => {
-                         const unitF = formatarTextoTabela(item.isBoleto ? 'BOLETO' : item.isFalta ? 'FALTA' : item.unitDisplay);
-                         const totF = formatarTextoTabela(item.isBoleto ? 'BOLETO' : item.isFalta ? 'FALTA' : item.totalDisplay);
+                         const unitF = item.unitDisplay;
+                         const totF = item.totalDisplay;
                          const isRed = item.isFalta;
                          const isOrange = item.isBoleto;
 
@@ -706,6 +750,25 @@ export default function FechamentoLojas() {
                     {expandido && (
                       <div style={{ padding: '15px' }}>
                         
+                        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                          <select 
+                              value={lojaGeralSelecionada[forn.nome] || ''}
+                              onChange={e => setLojaGeralSelecionada({...lojaGeralSelecionada, [forn.nome]: e.target.value})}
+                              style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold', fontSize: '11px' }}
+                          >
+                              <option value="">Selecione a banca base...</option>
+                              {Object.keys(forn.lojasEnvolvidas).map((nomeLoja, i) => (
+                                  <option key={i} value={nomeLoja}>{nomeLoja.replace(/^\d+\s*-\s*/, '').trim().toUpperCase()}</option>
+                              ))}
+                          </select>
+                          <button 
+                              onClick={() => gerarPedidoGeral(forn, `geral_${forn.nome}`)} 
+                              style={{ background: copiadoGeral === `geral_${forn.nome}` ? '#22c55e' : '#25d366', color: '#fff', border: 'none', padding: '0 15px', borderRadius: '8px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', transition: '0.2s' }}
+                          >
+                              {copiadoGeral === `geral_${forn.nome}` ? 'COPIADO!' : 'COPIAR WHATSAPP'}
+                          </button>
+                        </div>
+
                         {!isBoletoOnly && (
                           <div style={{ backgroundColor: '#f8fafc', border: '1px dashed #cbd5e1', padding: '12px', borderRadius: '8px', marginBottom: '15px', fontSize: '11px', color: '#334155' }}>
                             <strong style={{ display: 'block', color: '#0f172a', marginBottom: '5px' }}>📄 DADOS PARA PAGAMENTO</strong>
