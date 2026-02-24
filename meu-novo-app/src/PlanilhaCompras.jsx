@@ -24,7 +24,7 @@ export default function PlanilhaCompras() {
     qtd_pedir: '', 
     isFaltaGeral: false,
     qtdFornecedor: '',
-    temBonificacao: false // 💡 Controle de Bonificação
+    temBonificacao: false 
   });
   const [lojasEnvolvidas, setLojasEnvolvidas] = useState([]);
 
@@ -199,7 +199,7 @@ export default function PlanilhaCompras() {
 
     const isAlgumBoleto = lojasEnvolvidas.some(l => l.isBoleto);
 
-    // 💡 TRAVA: Se não for boleto, o preço é obrigatório
+    // 💡 TRAVA MODIFICADA: Se for boleto, NÃO exige preço unitário. Ele fica "R$ 0,00" por padrão.
     if (!isAlgumBoleto && (!dadosCompra.fornecedor || !dadosCompra.valor_unit)) {
       return alert("⚠️ Preencha o fornecedor e o valor unitário.");
     }
@@ -265,9 +265,9 @@ export default function PlanilhaCompras() {
 
   const finalizarPedidoFracionado = async () => {
     const temCompra = lojasEnvolvidas.some(l => (Number(l.qtd_receber) > 0));
-    
     const tudoBoleto = lojasEnvolvidas.every(l => Number(l.qtd_receber) === 0 || l.isBoleto);
     
+    // 💡 TRAVA MODIFICADA: Permite salvar sem preço se todos os itens selecionados forem boletos.
     if (temCompra && !tudoBoleto && (!dadosCompra.fornecedor || !dadosCompra.valor_unit)) {
       return alert("⚠️ Preencha fornecedor e valor unitário para os itens comprados fora de boleto.");
     }
@@ -329,7 +329,6 @@ export default function PlanilhaCompras() {
     carregarDados();
   };
 
-  // 💡 LÓGICA REINSERIDA: Obter Fechamento por Fornecedor
   const obterFechamentoPorFornecedor = () => {
     const mapaForn = {};
     pedidosRaw.forEach(p => {
@@ -361,8 +360,10 @@ export default function PlanilhaCompras() {
         const placaFinal = `${placaBase} | ${complemento}`;
 
         if (!mapaForn[fNome]) {
+           const fInfo = (fornecedoresBd || []).find(f => f.nome_fantasia.toUpperCase() === fNome);
            mapaForn[fNome] = { 
              nome: fNome, 
+             chavePix: fInfo ? fInfo.chave_pix : '',
              totalBruto: 0,         
              totalDescontoBonif: 0, 
              qtdBonificadaGeral: 0, 
@@ -398,73 +399,10 @@ export default function PlanilhaCompras() {
 
   const fechamento = obterFechamentoPorFornecedor();
 
-  const copiarMensagemWhatsapp = (lojaNome, lojaData, btnId) => {
-    const nomeFormatado = lojaNome.replace(/^\d+\s*-\s*/, '').trim().toUpperCase();
-    const partesPlaca = lojaData.placa.split(' | ');
-    const placaBase = partesPlaca[0];
-    const complemento = partesPlaca[1];
-
-    let msg = `*${nomeFormatado}*\n\n`;
-    
-    lojaData.itens.forEach(i => {
-      msg += `${i.qtd} ${i.unidade} : ${formatarNomeItem(i.nome)}\n`;
-    });
-    
-    msg += `\n${placaBase} - ${complemento}`;
-    
-    navigator.clipboard.writeText(msg);
-    setCopiadoLoja(btnId);
-    setTimeout(() => setCopiadoLoja(null), 2000);
-  };
-
-  const gerarPedidoGeral = (f, btnId) => {
-    const nomeLoja = lojaGeralSelecionada[f.nome];
-    if (!nomeLoja) return alert("⚠️ Selecione a loja titular da banca para o cabeçalho.");
-
-    const lojaData = f.lojas[nomeLoja];
-    const nomeFormatado = lojaData.nome.replace(/^\d+\s*-\s*/, '').trim().toUpperCase();
-    const partesPlaca = lojaData.placa.split(' | ');
-    const placaBase = partesPlaca[0];
-    const complemento = partesPlaca[1];
-    
-    const mapaItensGerais = {};
-    Object.values(f.lojas).forEach(loja => {
-      loja.itens.forEach(item => {
-        if (!mapaItensGerais[item.nome]) {
-          mapaItensGerais[item.nome] = { ...item, qtd: 0, totalNum: 0, qtd_bonificada: 0 };
-        }
-        mapaItensGerais[item.nome].qtd += item.qtd;
-        mapaItensGerais[item.nome].qtd_bonificada += item.qtd_bonificada;
-        mapaItensGerais[item.nome].totalNum += item.totalNum;
-      });
-    });
-
-    let msg = `*${nomeFormatado}*\n\n`;
-    
-    Object.values(mapaItensGerais).forEach(i => {
-      let linhaValor = `${i.valor_unit} = ${formatarMoeda(i.totalNum)}`;
-      if (i.qtd_bonificada > 0) {
-         linhaValor = `R$ Base ${i.valor_unit.split('|')[1].trim()} = ${formatarMoeda(i.totalNum)}`;
-      }
-
-      if (i.isBoleto) {
-        msg += `${i.qtd} ${i.unidade} - ${formatarNomeItem(i.nome)} ${linhaValor} (B)\n`;
-      } else {
-        msg += `${i.qtd} ${i.unidade} - ${formatarNomeItem(i.nome)} ${linhaValor}\n`;
-      }
-    });
-    
-    msg += `\n----------------------`;
-    if (f.totalDescontoBonif > 0) {
-      msg += `\nVALOR BRUTO: ${formatarMoeda(f.totalBruto)}`;
-      msg += `\n🎁 DESCONTOS BONIFICAÇÃO (${f.qtdBonificadaGeral} Itens): - ${formatarMoeda(f.totalDescontoBonif)}`;
-    }
-    
-    msg += `\n\n${placaBase} - ${complemento} - TOTAL A PAGAR: ${formatarMoeda(f.totalGeral)}`;
-
-    navigator.clipboard.writeText(msg);
-    setCopiadoGeral(btnId);
-    setTimeout(() => setCopiadoGeral(null), 2000);
+  // 💡 MENSAGEM WHATSAPP FORNECEDOR (SEM BOTÃO DE COPIAR PEDIDO) - Apenas copio o PIX agora!
+  const copiarPixFornecedor = (chave, fNome) => {
+    navigator.clipboard.writeText(chave);
+    alert(`PIX Copiado: ${chave}\nFornecedor: ${fNome}`);
   };
 
   const desfazerCompra = async (idPedido) => {
@@ -607,7 +545,7 @@ export default function PlanilhaCompras() {
         </>
       )}
 
-      {/* ABA 3: FORNECEDORES */}
+      {/* ABA 3: FORNECEDORES E RESUMOS */}
       {abaAtiva === 'fornecedores' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
           <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '10px 15px', display: 'flex', gap: '10px', border: '1px solid #e2e8f0' }}>
@@ -620,6 +558,7 @@ export default function PlanilhaCompras() {
             fechamento.filter(f => f.nome.toLowerCase().includes(buscaFornecedores.toLowerCase())).map((f, idx) => {
               const expandido = fornExpandido === f.nome;
               
+              // Simplificado a exibição da tela do Fornecedor. Apenas visualização e cópia do Pix.
               return (
                 <div key={idx} style={{ backgroundColor: '#fff', borderRadius: '20px', padding: '20px', boxShadow: '0 5px 15px rgba(0,0,0,0.05)', borderTop: '6px solid #111' }}>
                   
@@ -633,68 +572,38 @@ export default function PlanilhaCompras() {
 
                   {expandido && (
                     <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9' }}>
-                      <div style={{ backgroundColor: '#f1f5f9', padding: '15px', borderRadius: '12px', marginBottom: '20px' }}>
-                        <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#111' }}>🛍️ PEDIDO GERAL DA BANCA</h4>
+                      
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', border: '1px dashed #e2e8f0', padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
+                        <div>
+                           <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>Chave PIX:</span>
+                           <strong style={{ fontSize: '12px', color: '#111' }}>{f.chavePix || 'Não cadastrada'}</strong>
+                        </div>
+                        <button onClick={() => copiarPixFornecedor(f.chavePix, f.nome)} style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>COPIAR PIX</button>
+                      </div>
+
+                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '15px', fontSize: '12px', color: '#333', lineHeight: '1.6' }}>
+                        {f.itens.map((i, k) => {
+                           let linhaFormatada = `${i.qtd} ${i.unidade} - ${formatarNomeItem(i.nomeItem)} ${i.valUnit} = ${formatarMoeda(i.totalNum)}`;
+                           if (i.qtd_bonificada > 0) {
+                              const precoVisivel = i.valUnit.includes('|') ? i.valUnit.split('|')[1].trim() : i.valUnit;
+                              linhaFormatada = `${i.qtd} ${i.unidade} - ${formatarNomeItem(i.nomeItem)} R$ Base ${precoVisivel} = ${formatarMoeda(i.totalNum)}`;
+                           }
+                           if (i.isBoleto) linhaFormatada += ' (BOLETO)';
+                           return <div key={k}>{linhaFormatada}</div>;
+                        })}
                         
-                        <div style={{ display: 'flex', gap: '10px' }}>
-                          <select 
-                              value={lojaGeralSelecionada[f.nome] || ''}
-                              onChange={e => setLojaGeralSelecionada({...lojaGeralSelecionada, [f.nome]: e.target.value})}
-                              style={{ flex: 1, padding: '12px', borderRadius: '10px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold' }}
-                          >
-                              <option value="">Escolha a loja do cabeçalho...</option>
-                              {Object.values(f.lojas).map((loja, i) => (
-                                  <option key={i} value={loja.nome}>{loja.nome.replace(/^\d+\s*-\s*/, '').trim().toUpperCase()}</option>
-                              ))}
-                          </select>
-                          <button 
-                              onClick={() => gerarPedidoGeral(f, `geral_${f.nome}`)} 
-                              style={{ background: copiadoGeral === `geral_${f.nome}` ? '#22c55e' : '#111', color: '#fff', border: 'none', padding: '0 20px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', transition: '0.2s' }}
-                          >
-                              {copiadoGeral === `geral_${f.nome}` ? '✅ COPIADO!' : '📋 COPIAR GERAL'}
-                          </button>
+                        <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #ccc' }}>
+                          {f.totalDescontoBonif > 0 && (
+                             <div style={{ color: '#16a34a', fontWeight: 'bold', fontSize: '11px', marginBottom: '5px' }}>
+                               🎁 Desconto Bonificação ({f.qtdBonificadaGeral} Itens): - {formatarMoeda(f.totalDescontoBonif)}
+                             </div>
+                          )}
+                          <div style={{ fontWeight: '900', color: '#111', fontSize: '14px' }}>
+                            TOTAL A PAGAR: {formatarMoeda(f.totalGeral)}
+                          </div>
                         </div>
                       </div>
-                      
-                      <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#111', paddingLeft: '5px' }}>📦 PEDIDOS SEPARADOS POR LOJA</h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {Object.values(f.lojas).map((loja, lIdx) => {
-                           const nomeFormatado = loja.nome.replace(/^\d+\s*-\s*/, '').trim().toUpperCase();
-                           const btnId = `loja_${f.nome}_${loja.nome}`;
-                           
-                           return (
-                            <div key={lIdx} style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px dashed #e2e8f0' }}>
-                              <strong style={{ fontSize: '14px', color: '#111', display: 'block', marginBottom: '10px' }}>{nomeFormatado}</strong>
-                              
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '10px' }}>
-                                {loja.itens.map(item => (
-                                  <div key={item.id_pedido} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div style={{ flex: 1 }}>
-                                      <span>{item.qtd} {item.unidade} : <b>{formatarNomeItem(item.nome)}</b></span>
-                                    </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                      {item.qtd_bonificada > 0 && (
-                                        <span style={{ fontSize: '9px', background: '#dcfce7', color: '#166534', padding: '2px 5px', borderRadius: '4px', fontWeight: 'bold' }}>🎁 {item.qtd_bonificada} Bonif.</span>
-                                      )}
-                                      <span style={{ fontWeight: 'bold', color: item.isBoleto ? '#d97706' : '#333' }}>
-                                        {formatarMoeda(item.totalNum)} {item.isBoleto && '(B)'}
-                                      </span>
-                                      <button onClick={() => desfazerCompra(item.id_pedido)} title="Desfazer" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', padding: '0' }}>🗑️</button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
 
-                              <button 
-                                onClick={() => copiarMensagemWhatsapp(loja.nome, loja, btnId)} 
-                                style={{ width: '100%', background: copiadoLoja === btnId ? '#dcfce7' : '#25d366', color: copiadoLoja === btnId ? '#166534' : '#fff', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', transition: '0.2s' }}
-                              >
-                                {copiadoLoja === btnId ? '✅ COPIADO PARA O WHATSAPP' : '🟢 COPIAR LISTA DA LOJA'}
-                              </button>
-                            </div>
-                           );
-                        })}
-                      </div>
                     </div>
                   )}
                 </div>
