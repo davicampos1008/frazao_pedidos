@@ -7,11 +7,15 @@ export default function PlanilhaCompras() {
   
   const [buscaPendentes, setBuscaPendentes] = useState('');
   const [buscaFeitos, setBuscaFeitos] = useState('');
-  const [buscaFornecedores, setBuscaFornecedores] = useState('');
+  const [buscaFornList, setBuscaFornList] = useState(''); 
 
   const [demandas, setDemandas] = useState([]); 
   const [pedidosFeitos, setPedidosFeitos] = useState([]); 
   const [pedidosRaw, setPedidosRaw] = useState([]); 
+  
+  // 💡 NOVO ESTADO: Lista Consolidada de Produtos x Fornecedores
+  const [listaGeralItens, setListaGeralItens] = useState([]);
+
   const [fornecedoresBd, setFornecedoresBd] = useState([]);
   const [lojasBd, setLojasBd] = useState([]);
 
@@ -27,14 +31,6 @@ export default function PlanilhaCompras() {
     temBonificacao: false 
   });
   const [lojasEnvolvidas, setLojasEnvolvidas] = useState([]);
-
-  const [fornExpandido, setFornExpandido] = useState(null);
-  
-  const [lojaGeralSelecionada, setLojaGeralSelecionada] = useState({});
-  const [localCompra, setLocalCompra] = useState('ceasa'); 
-
-  const [copiadoGeral, setCopiadoGeral] = useState(null);
-  const [copiadoLoja, setCopiadoLoja] = useState(null);
 
   const hoje = new Date().toLocaleDateString('en-CA');
   const dataBr = new Date().toLocaleDateString('pt-BR');
@@ -68,6 +64,9 @@ export default function PlanilhaCompras() {
       
       const mapaPendentes = {};
       const mapaFeitos = {};
+      
+      // 💡 MAPA DA NOVA TELA "LISTA DE FORNECEDORES"
+      const mapaGeralItens = {}; 
 
       (pedData || []).forEach(p => {
         const idLoja = extrairNum(p.loja_id);
@@ -76,6 +75,7 @@ export default function PlanilhaCompras() {
           const lojaInfo = (lojasData || []).find(l => extrairNum(l.codigo_loja) === idLoja);
           const nomeLoja = lojaInfo ? lojaInfo.nome_fantasia : `Loja ${idLoja}`;
 
+          // --- MONTANDO A TELA DE PENDENTES E FEITOS ---
           if (p.status_compra === 'pendente') {
             if (!mapaPendentes[nome]) mapaPendentes[nome] = { nome, demanda: 0, unidade: p.unidade_medida || "UN", lojas: [] };
             mapaPendentes[nome].demanda += Number(p.quantidade || 0);
@@ -85,8 +85,47 @@ export default function PlanilhaCompras() {
             mapaFeitos[nome].total_resolvido += Number(p.quantidade || 0);
             mapaFeitos[nome].itens.push(p);
           }
+
+          // --- MONTANDO A NOVA TELA (LISTA FORNECEDORES) ---
+          if (!mapaGeralItens[nome]) {
+             mapaGeralItens[nome] = {
+                nome: nome,
+                unidade: p.unidade_medida || "UN",
+                total_solicitado: 0,
+                total_comprado: 0,
+                isFaltaTotal: false, // Se tudo for falta
+                fornecedores_comprados: {} // Onde o item foi comprado
+             };
+          }
+
+          mapaGeralItens[nome].total_solicitado += Number(p.quantidade || 0);
+
+          if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
+             mapaGeralItens[nome].total_comprado += Number(p.qtd_atendida || 0);
+             const fName = p.fornecedor_compra ? p.fornecedor_compra.toUpperCase() : 'DESCONHECIDO';
+             
+             if (!mapaGeralItens[nome].fornecedores_comprados[fName]) {
+                 mapaGeralItens[nome].fornecedores_comprados[fName] = 0;
+             }
+             mapaGeralItens[nome].fornecedores_comprados[fName] += Number(p.qtd_atendida || 0);
+          }
+
+          if (p.status_compra === 'falta') {
+             // Se marcou falta, não conta como pendente mais. Então abatemos o solicitado para a barra de progresso não quebrar.
+             mapaGeralItens[nome].total_solicitado -= Number(p.quantidade || 0); 
+          }
         }
       });
+
+      // Se após abater a falta o total solicitado ficar 0 (ou seja, ngm pediu mais nada, tudo foi falta), marca como falta total.
+      Object.values(mapaGeralItens).forEach(item => {
+         if (item.total_solicitado <= 0 && item.total_comprado <= 0) {
+             item.isFaltaTotal = true;
+         }
+      });
+
+      const arrayGeralItens = Object.values(mapaGeralItens).sort((a, b) => a.nome.localeCompare(b.nome));
+      setListaGeralItens(arrayGeralItens);
 
       const arrayPendentes = Object.values(mapaPendentes).map(item => {
         const prodRef = (prodData || []).find(p => p.nome.toUpperCase() === item.nome);
@@ -199,7 +238,6 @@ export default function PlanilhaCompras() {
 
     const isAlgumBoleto = lojasEnvolvidas.some(l => l.isBoleto);
 
-    // 💡 TRAVA MODIFICADA: Se for boleto, NÃO exige preço unitário. Ele fica "R$ 0,00" por padrão.
     if (!isAlgumBoleto && (!dadosCompra.fornecedor || !dadosCompra.valor_unit)) {
       return alert("⚠️ Preencha o fornecedor e o valor unitário.");
     }
@@ -267,7 +305,6 @@ export default function PlanilhaCompras() {
     const temCompra = lojasEnvolvidas.some(l => (Number(l.qtd_receber) > 0));
     const tudoBoleto = lojasEnvolvidas.every(l => Number(l.qtd_receber) === 0 || l.isBoleto);
     
-    // 💡 TRAVA MODIFICADA: Permite salvar sem preço se todos os itens selecionados forem boletos.
     if (temCompra && !tudoBoleto && (!dadosCompra.fornecedor || !dadosCompra.valor_unit)) {
       return alert("⚠️ Preencha fornecedor e valor unitário para os itens comprados fora de boleto.");
     }
@@ -329,88 +366,6 @@ export default function PlanilhaCompras() {
     carregarDados();
   };
 
-  const obterFechamentoPorFornecedor = () => {
-    const mapaForn = {};
-    pedidosRaw.forEach(p => {
-      if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
-        const fNome = p.fornecedor_compra.toUpperCase();
-        
-        let vUnit = tratarPrecoNum(p.custo_unit);
-        let qtdBonif = 0;
-        let descBonifValor = 0;
-        let totalItemCobrado = 0;
-        
-        if (String(p.custo_unit).includes('|')) {
-           const parts = p.custo_unit.split('|');
-           vUnit = tratarPrecoNum(parts[1].trim());
-           qtdBonif = parseInt(parts[0]) || 0;
-           const qtdCobrada = Math.max(0, p.qtd_atendida - qtdBonif);
-           totalItemCobrado = qtdCobrada * vUnit;
-           descBonifValor = qtdBonif * vUnit;
-        } else {
-           totalItemCobrado = p.qtd_atendida * vUnit;
-        }
-
-        const idLoja = extrairNum(p.loja_id);
-        const lojaInfo = lojasBd.find(l => extrairNum(l.codigo_loja) === idLoja);
-        const nomeLoja = lojaInfo ? lojaInfo.nome_fantasia : `Loja ${idLoja}`;
-        
-        const placaBase = lojaInfo && lojaInfo.placa_caminhao ? lojaInfo.placa_caminhao.toUpperCase().trim() : 'SEM PLACA';
-        const complemento = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
-        const placaFinal = `${placaBase} | ${complemento}`;
-
-        if (!mapaForn[fNome]) {
-           const fInfo = (fornecedoresBd || []).find(f => f.nome_fantasia.toUpperCase() === fNome);
-           mapaForn[fNome] = { 
-             nome: fNome, 
-             chavePix: fInfo ? fInfo.chave_pix : '',
-             totalBruto: 0,         
-             totalDescontoBonif: 0, 
-             qtdBonificadaGeral: 0, 
-             totalGeral: 0,         
-             lojas: {} 
-           };
-        }
-        
-        if (!mapaForn[fNome].lojas[nomeLoja]) {
-           mapaForn[fNome].lojas[nomeLoja] = { nome: nomeLoja, placa: placaFinal, totalLoja: 0, itens: [] };
-        }
-        
-        mapaForn[fNome].lojas[nomeLoja].itens.push({
-          id_pedido: p.id,
-          nome: p.nome_produto,
-          qtd: p.qtd_atendida,
-          qtd_bonificada: qtdBonif,
-          unidade: p.unidade_medida || 'UN',
-          valor_unit: p.custo_unit, 
-          totalNum: totalItemCobrado,
-          isBoleto: p.status_compra === 'boleto'
-        });
-        
-        mapaForn[fNome].lojas[nomeLoja].totalLoja += totalItemCobrado;
-        mapaForn[fNome].totalBruto += (totalItemCobrado + descBonifValor);
-        mapaForn[fNome].totalDescontoBonif += descBonifValor;
-        mapaForn[fNome].qtdBonificadaGeral += qtdBonif;
-        mapaForn[fNome].totalGeral += totalItemCobrado;
-      }
-    });
-    return Object.values(mapaForn).sort((a, b) => a.nome.localeCompare(b.nome));
-  };
-
-  const fechamento = obterFechamentoPorFornecedor();
-
-  // 💡 MENSAGEM WHATSAPP FORNECEDOR (SEM BOTÃO DE COPIAR PEDIDO) - Apenas copio o PIX agora!
-  const copiarPixFornecedor = (chave, fNome) => {
-    navigator.clipboard.writeText(chave);
-    alert(`PIX Copiado: ${chave}\nFornecedor: ${fNome}`);
-  };
-
-  const desfazerCompra = async (idPedido) => {
-    setCarregando(true);
-    await supabase.from('pedidos').update({ fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, status_compra: 'pendente' }).eq('id', idPedido);
-    carregarDados();
-  };
-
   const renderListaLojasModal = () => (
     <div style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0', marginTop: '10px' }}>
       <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#111', display: 'block', marginBottom: '15px', textTransform: 'uppercase' }}>
@@ -465,14 +420,11 @@ export default function PlanilhaCompras() {
             <button onClick={resetarPedidosDoDia} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '11px', boxShadow: '0 4px 15px rgba(239,68,68,0.4)' }}>
               🚨 ZERAR TUDO E RECOMEÇAR
             </button>
-            <div style={{ display: 'flex', backgroundColor: '#333', borderRadius: '10px', padding: '4px' }}>
-              <button onClick={() => setLocalCompra('ceasa')} style={{ border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: localCompra === 'ceasa' ? '#f97316' : 'transparent', color: localCompra === 'ceasa' ? '#fff' : '#999' }}>CEASA</button>
-              <button onClick={() => setLocalCompra('ceilandia')} style={{ border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: localCompra === 'ceilandia' ? '#f97316' : 'transparent', color: localCompra === 'ceilandia' ? '#fff' : '#999' }}>CEILÂNDIA</button>
-            </div>
           </div>
         </div>
       </div>
 
+      {/* 💡 ABA DE NAVEGAÇÃO */}
       <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', overflowX: 'auto', paddingBottom: '5px' }}>
         <button onClick={() => setAbaAtiva('pendentes')} style={{ flexShrink: 0, padding: '15px 20px', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '12px', cursor: 'pointer', backgroundColor: abaAtiva === 'pendentes' ? '#f97316' : '#fff', color: abaAtiva === 'pendentes' ? '#fff' : '#64748b' }}>
           📋 PENDENTES ({demandas.length})
@@ -480,8 +432,9 @@ export default function PlanilhaCompras() {
         <button onClick={() => setAbaAtiva('feitos')} style={{ flexShrink: 0, padding: '15px 20px', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '12px', cursor: 'pointer', backgroundColor: abaAtiva === 'feitos' ? '#3b82f6' : '#fff', color: abaAtiva === 'feitos' ? '#fff' : '#64748b' }}>
           ✅ FEITOS ({pedidosFeitos.length})
         </button>
-        <button onClick={() => setAbaAtiva('fornecedores')} style={{ flexShrink: 0, padding: '15px 20px', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '12px', cursor: 'pointer', backgroundColor: abaAtiva === 'fornecedores' ? '#111' : '#fff', color: abaAtiva === 'fornecedores' ? '#fff' : '#64748b' }}>
-          🏢 FORNECEDORES ({fechamento.length})
+        {/* 💡 ABA DA NOVA LISTA DE FORNECEDORES */}
+        <button onClick={() => setAbaAtiva('lista_fornecedores')} style={{ flexShrink: 0, padding: '15px 20px', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '12px', cursor: 'pointer', backgroundColor: abaAtiva === 'lista_fornecedores' ? '#111' : '#fff', color: abaAtiva === 'lista_fornecedores' ? '#fff' : '#64748b' }}>
+          🏢 FORNECEDORES ({listaGeralItens.length})
         </button>
       </div>
 
@@ -545,71 +498,81 @@ export default function PlanilhaCompras() {
         </>
       )}
 
-      {/* ABA 3: FORNECEDORES E RESUMOS */}
-      {abaAtiva === 'fornecedores' && (
+      {/* 💡 NOVA ABA: LISTA FORNECEDORES (TUDO CONSOLIDADO E COLORIDO) */}
+      {abaAtiva === 'lista_fornecedores' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          
           <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '10px 15px', display: 'flex', gap: '10px', border: '1px solid #e2e8f0' }}>
-            <span>🔍</span><input placeholder="Buscar fornecedor..." value={buscaFornecedores} onChange={e => setBuscaFornecedores(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
+            <span>🔍</span><input placeholder="Buscar produto..." value={buscaFornList} onChange={e => setBuscaFornList(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
           </div>
 
-          {fechamento.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '20px' }}>Nenhum fornecedor acionado.</div>
-          ) : (
-            fechamento.filter(f => f.nome.toLowerCase().includes(buscaFornecedores.toLowerCase())).map((f, idx) => {
-              const expandido = fornExpandido === f.nome;
-              
-              // Simplificado a exibição da tela do Fornecedor. Apenas visualização e cópia do Pix.
-              return (
-                <div key={idx} style={{ backgroundColor: '#fff', borderRadius: '20px', padding: '20px', boxShadow: '0 5px 15px rgba(0,0,0,0.05)', borderTop: '6px solid #111' }}>
-                  
-                  <div onClick={() => setFornExpandido(expandido ? null : f.nome)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-                    <h3 style={{ margin: 0, fontSize: '16px', color: '#111', textTransform: 'uppercase' }}>🏢 {f.nome}</h3>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                      <strong style={{ color: '#22c55e', fontSize: '18px' }}>{formatarMoeda(f.totalGeral)}</strong>
-                      <span style={{ color: '#ccc', transform: expandido ? 'rotate(90deg)' : 'none', transition: '0.2s' }}>❯</span>
+          <div style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', fontSize: '11px', fontWeight: 'bold' }}>
+             <span style={{ color: '#ef4444' }}>🔴 Falta 100% (Pendente)</span>
+             <span style={{ color: '#16a34a' }}>🟢 Comprado 100%</span>
+             <span style={{ color: '#d97706' }}>🟡 Comprado Incompleto</span>
+             <span style={{ color: '#111', textDecoration: 'line-through' }}>⚫ Falta (Sem Fornecedor)</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {listaGeralItens.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '20px' }}>Nenhum pedido hoje.</div>
+            ) : (
+              listaGeralItens.filter(f => f.nome.toLowerCase().includes(buscaFornList.toLowerCase())).map((item, idx) => {
+                
+                // 💡 Lógica de Cores da Linha
+                let corFundo = '#fff';
+                let corBorda = '#e2e8f0';
+                let corTexto = '#111';
+                let statusMsg = '';
+                let textoRiscado = 'none';
+
+                if (item.isFaltaTotal) {
+                   corFundo = '#f1f5f9';
+                   corBorda = '#ccc';
+                   corTexto = '#94a3b8';
+                   textoRiscado = 'line-through';
+                   statusMsg = 'FALTA TOTAL';
+                } else if (item.total_comprado === 0) {
+                   corFundo = '#fef2f2';
+                   corBorda = '#fecaca';
+                   corTexto = '#ef4444';
+                   statusMsg = 'PENDENTE';
+                } else if (item.total_comprado < item.total_solicitado) {
+                   corFundo = '#fffbeb';
+                   corBorda = '#fde68a';
+                   corTexto = '#d97706';
+                   statusMsg = `FALTA COMPRAR: ${item.total_solicitado - item.total_comprado}`;
+                } else if (item.total_comprado >= item.total_solicitado) {
+                   corFundo = '#dcfce7';
+                   corBorda = '#bbf7d0';
+                   corTexto = '#166534';
+                   statusMsg = 'COMPLETO';
+                }
+
+                return (
+                  <div key={idx} style={{ backgroundColor: corFundo, borderRadius: '12px', padding: '15px', border: `1px solid ${corBorda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    
+                    <div>
+                      <strong style={{ fontSize: '14px', color: corTexto, textDecoration: textoRiscado, display: 'block' }}>{formatarNomeItem(item.nome)}</strong>
+                      <span style={{ fontSize: '10px', color: corTexto, fontWeight: 'bold', display: 'block', marginTop: '2px' }}>Total Pedido Lojas: {item.total_solicitado} {item.unidade}</span>
                     </div>
+
+                    <div style={{ textAlign: 'right' }}>
+                       {Object.entries(item.fornecedores_comprados).map(([fornNome, qtd]) => (
+                           <div key={fornNome} style={{ fontSize: '11px', color: '#333', fontWeight: 'bold', marginBottom: '2px' }}>
+                               {qtd}x - {fornNome}
+                           </div>
+                       ))}
+                       <div style={{ fontSize: '10px', fontWeight: '900', color: corTexto, marginTop: '5px', padding: '3px 6px', background: 'rgba(255,255,255,0.5)', borderRadius: '4px', display: 'inline-block' }}>
+                           {statusMsg}
+                       </div>
+                    </div>
+
                   </div>
-
-                  {expandido && (
-                    <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9' }}>
-                      
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', border: '1px dashed #e2e8f0', padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
-                        <div>
-                           <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>Chave PIX:</span>
-                           <strong style={{ fontSize: '12px', color: '#111' }}>{f.chavePix || 'Não cadastrada'}</strong>
-                        </div>
-                        <button onClick={() => copiarPixFornecedor(f.chavePix, f.nome)} style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>COPIAR PIX</button>
-                      </div>
-
-                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '15px', fontSize: '12px', color: '#333', lineHeight: '1.6' }}>
-                        {f.itens.map((i, k) => {
-                           let linhaFormatada = `${i.qtd} ${i.unidade} - ${formatarNomeItem(i.nomeItem)} ${i.valUnit} = ${formatarMoeda(i.totalNum)}`;
-                           if (i.qtd_bonificada > 0) {
-                              const precoVisivel = i.valUnit.includes('|') ? i.valUnit.split('|')[1].trim() : i.valUnit;
-                              linhaFormatada = `${i.qtd} ${i.unidade} - ${formatarNomeItem(i.nomeItem)} R$ Base ${precoVisivel} = ${formatarMoeda(i.totalNum)}`;
-                           }
-                           if (i.isBoleto) linhaFormatada += ' (BOLETO)';
-                           return <div key={k}>{linhaFormatada}</div>;
-                        })}
-                        
-                        <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #ccc' }}>
-                          {f.totalDescontoBonif > 0 && (
-                             <div style={{ color: '#16a34a', fontWeight: 'bold', fontSize: '11px', marginBottom: '5px' }}>
-                               🎁 Desconto Bonificação ({f.qtdBonificadaGeral} Itens): - {formatarMoeda(f.totalDescontoBonif)}
-                             </div>
-                          )}
-                          <div style={{ fontWeight: '900', color: '#111', fontSize: '14px' }}>
-                            TOTAL A PAGAR: {formatarMoeda(f.totalGeral)}
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
+                );
+              })
+            )}
+          </div>
         </div>
       )}
 

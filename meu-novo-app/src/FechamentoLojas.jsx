@@ -5,12 +5,13 @@ export default function FechamentoLojas({ isEscuro }) {
   const [abaAtiva, setAbaAtiva] = useState('lojas'); 
   const [fechamentos, setFechamentos] = useState([]);
   const [fornecedores, setFornecedores] = useState([]);
+  const [fornecedoresBd, setFornecedoresBd] = useState([]); 
   const [carregando, setCarregando] = useState(true);
 
   const [lojaExpandida, setLojaExpandida] = useState(null);
   const [lojaEmEdicao, setLojaEmEdicao] = useState(null);
   const [itensEditados, setItensEditados] = useState([]);
-  const [buscaEdicao, setBuscaEdicao] = useState(''); // 💡 Busca Inteligente na Edição
+  const [buscaEdicao, setBuscaEdicao] = useState(''); 
 
   const [modoVisualizacaoImp, setModoVisualizacaoImp] = useState(false);
   const [tipoImpressao, setTipoImpressao] = useState(null); 
@@ -22,9 +23,12 @@ export default function FechamentoLojas({ isEscuro }) {
   const hoje = new Date().toLocaleDateString('en-CA');
   const dataBr = new Date().toLocaleDateString('pt-BR');
 
-  // Cores dinâmicas para o Tema
+  const [lojaGeralSelecionada, setLojaGeralSelecionada] = useState({});
+  const [localCompra, setLocalCompra] = useState('ceasa'); 
+  const [copiadoGeral, setCopiadoGeral] = useState(null);
+
+  const themeBg = isEscuro ? '#0f172a' : '#f5f5f4';
   const themeCard = isEscuro ? '#1e293b' : '#ffffff';
-  const themeBg = isEscuro ? '#0f172a' : '#f8fafc';
   const themeText = isEscuro ? '#f8fafc' : '#111111';
   const themeBorder = isEscuro ? '#334155' : '#e2e8f0';
 
@@ -62,12 +66,15 @@ export default function FechamentoLojas({ isEscuro }) {
       const { data: pedData } = await supabase.from('pedidos').select('*').eq('data_pedido', hoje);
       const { data: fornData } = await supabase.from('fornecedores').select('*'); 
       
+      if (fornData) setFornecedoresBd(fornData);
+
       const mapaLojas = {};
       const mapaForn = {};
 
       (pedData || []).forEach(p => {
         if (p.status_compra === 'pendente') return;
 
+        // --- FORNECEDORES ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
           const fNome = p.fornecedor_compra ? p.fornecedor_compra.toUpperCase() : 'SEM FORNECEDOR';
           const isBoleto = p.status_compra === 'boleto';
@@ -90,18 +97,26 @@ export default function FechamentoLojas({ isEscuro }) {
             const fInfo = (fornData || []).find(f => f.nome_fantasia.toUpperCase() === fNome);
             mapaForn[fNome] = { 
                nome: fNome, 
-               chavePix: fInfo ? fInfo.chave_pix : 'Não cadastrada', // 💡 Resgata a Chave PIX
+               chavePix: fInfo ? fInfo.chave_pix : 'Não cadastrada', 
                totalPix: 0, 
                totalBoleto: 0, 
                totalBruto: 0,
                totalDescontoBonif: 0,
                qtdBonificadaGeral: 0,
                itens: [], 
-               statusPagamento: 'pendente' 
+               lojasEnvolvidas: {},
+               statusPagamento: 'pendente',
+               precisaRefazer: false
             };
           }
 
-          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => i.nomeItem === p.nome_produto && i.isBoleto === isBoleto && i.valUnit === baseVal);
+          const idLojaForn = extrairNum(p.loja_id);
+          const lInfoForn = (lojasData || []).find(l => extrairNum(l.codigo_loja) === idLojaForn);
+          const nomeLojaForn = lInfoForn ? lInfoForn.nome_fantasia : `Loja ${idLojaForn}`;
+          
+          mapaForn[fNome].lojasEnvolvidas[nomeLojaForn] = lInfoForn || { nome_fantasia: nomeLojaForn, placa_caminhao: 'SEM PLACA' };
+
+          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => i.nomeItem === p.nome_produto && i.valUnit === baseVal);
 
           if (itemExistenteIndex >= 0) {
               const itEx = mapaForn[fNome].itens[itemExistenteIndex];
@@ -131,8 +146,13 @@ export default function FechamentoLojas({ isEscuro }) {
           } else {
             mapaForn[fNome].totalPix += totalItemFornCobrado;
           }
+
+          if (p.status_compra === 'falta' || p.qtd_atendida === 0 || p.fornecedor_compra === 'REFAZER') {
+             mapaForn[fNome].precisaRefazer = true;
+          }
         }
 
+        // --- LOJAS ---
         const idLoja = extrairNum(p.loja_id);
         if (!idLoja || idLoja <= 1) return;
 
@@ -160,7 +180,13 @@ export default function FechamentoLojas({ isEscuro }) {
         if (isFalta) {
           unitDisplay = 'FALTA';
           totalDisplay = 'FALTA';
-        } else if (String(p.custo_unit).includes('|')) {
+        } else if (p.custo_unit === 'BONIFICAÇÃO') {
+          isBonif = true;
+          unitDisplay = 'BONIFIC.';
+          totalDisplay = 'BONIFIC.';
+          totalItem = 0;
+          qtdDisplay = p.qtd_atendida;
+        } else if (String(p.custo_unit).includes('BONIFICAÇÃO |')) {
           isBonif = true;
           const parts = p.custo_unit.split('|');
           precoOriginal = parts[1] ? parts[1].trim() : 'R$ 0,00';
@@ -247,14 +273,14 @@ export default function FechamentoLojas({ isEscuro }) {
   const abrirEdicao = (loja) => {
     setLojaEmEdicao(loja);
     setItensEditados(JSON.parse(JSON.stringify(loja.itens)));
-    setBuscaEdicao(''); // Reseta a busca ao abrir
+    setBuscaEdicao(''); 
   };
 
   const handleChangeEdicao = (idPedido, campo, valor) => {
     setItensEditados(prev => prev.map(item => {
       if (item.id_pedido === idPedido) {
         const novoItem = { ...item, [campo]: valor };
-        if (!novoItem.isFalta && !novoItem.isBoleto && !novoItem.isBonif) {
+        if (!novoItem.isFalta && !novoItem.isBoleto && !novoItem.isBonif && !novoItem.desfazerVoltar) {
            const q = parseFloat(novoItem.qtdEntregue) || 0;
            const v = tratarPrecoNum(novoItem.unitDisplay);
            const totalCalc = q * v;
@@ -282,20 +308,50 @@ export default function FechamentoLojas({ isEscuro }) {
   const setStatusRapido = (idPedido, tipo) => {
     setItensEditados(prev => prev.map(item => {
       if (item.id_pedido === idPedido) {
-        if (tipo === 'boleto') return { ...item, isBoleto: true, isFalta: false, isBonif: false, unitDisplay: 'BOLETO', totalDisplay: 'BOLETO', valorNumerico: 0 };
-        if (tipo === 'falta') return { ...item, isFalta: true, isBoleto: false, isBonif: false, unitDisplay: 'FALTA', totalDisplay: 'FALTA', valorNumerico: 0 };
+        if (tipo === 'boleto') return { ...item, isBoleto: true, isFalta: false, isBonif: false, desfazerVoltar: false, unitDisplay: 'BOLETO', totalDisplay: 'BOLETO', valorNumerico: 0 };
+        
+        if (tipo === 'falta') return { ...item, isFalta: true, isBoleto: false, isBonif: false, desfazerVoltar: true, unitDisplay: 'FALTA', totalDisplay: 'FALTA', valorNumerico: 0 };
+        
         if (tipo === 'normal') {
-           return { ...item, isFalta: false, isBoleto: false, isBonif: false, unitDisplay: '0,00', totalDisplay: 'R$ 0,00', valorNumerico: 0 };
+           const pb = item.precoOriginal && !item.precoOriginal.includes('BONIF') ? item.precoOriginal : '0,00';
+           if (pb === '0,00') {
+               return { ...item, isFalta: false, isBoleto: false, isBonif: false, desfazerVoltar: true, unitDisplay: '0,00', totalDisplay: 'R$ 0,00', valorNumerico: 0 };
+           }
+           const t = parseInt(item.qtdEntregue) * tratarPrecoNum(pb);
+           return { ...item, isFalta: false, isBoleto: false, isBonif: false, desfazerVoltar: false, unitDisplay: pb, totalDisplay: formatarMoeda(t), valorNumerico: t };
         }
       }
       return item;
     }));
   };
 
+  // 💡 MUDANÇA: BOTÃO DE REFAZER DIRETO NA LINHA! (Joga pra aba de Pendentes automaticamente)
+  const devolverParaPendenteDireto = async (idPedido) => {
+     if (!window.confirm("Isso apagará o preço e devolverá esse item para a aba de PENDENTES. Deseja continuar?")) return;
+     setCarregando(true);
+     await supabase.from('pedidos').update({
+        status_compra: 'pendente',
+        fornecedor_compra: 'REFAZER',
+        custo_unit: '',
+        qtd_atendida: 0
+     }).eq('id', idPedido);
+     carregar();
+  };
+
   const salvarEdicaoLoja = async () => {
     setCarregando(true);
     try {
       for (const item of itensEditados) {
+        if (item.desfazerVoltar) {
+            await supabase.from('pedidos').update({
+              qtd_atendida: 0,
+              custo_unit: '',
+              fornecedor_compra: 'REFAZER',
+              status_compra: 'pendente'
+            }).eq('id', item.id_pedido);
+            continue;
+        }
+
         const statusFinal = item.isFalta ? 'falta' : item.isBoleto ? 'boleto' : 'atendido';
         const updatePayload = {
           qtd_atendida: Number(item.qtdEntregue) || 0,
@@ -312,8 +368,20 @@ export default function FechamentoLojas({ isEscuro }) {
     }
   };
 
+  const refazerPedidoFornecedor = async (nomeForn) => {
+     if (!window.confirm(`Isso vai APAGAR as notas de ${nomeForn} e devolver tudo para a aba PENDENTES. Deseja continuar?`)) return;
+     setCarregando(true);
+     await supabase.from('pedidos').update({
+        status_compra: 'pendente',
+        fornecedor_compra: '',
+        custo_unit: '',
+        qtd_atendida: 0
+     }).eq('data_pedido', hoje).eq('fornecedor_compra', nomeForn).in('status_compra', ['atendido', 'boleto', 'pendente']); 
+     carregar();
+  };
+
   const totalAoVivoEdicao = itensEditados.reduce((acc, item) => {
-     if(item.isFalta || item.isBoleto || (item.isBonif && item.unitDisplay.includes('BONIFIC'))) return acc;
+     if(item.isFalta || item.isBoleto || (item.isBonif && item.unitDisplay.includes('BONIFIC')) || item.desfazerVoltar) return acc;
      const val = tratarPrecoNum(item.totalDisplay);
      return acc + (isNaN(val) ? 0 : val);
   }, 0);
@@ -355,13 +423,12 @@ export default function FechamentoLojas({ isEscuro }) {
        nomeArquivo = `${lojaObj.nome_fantasia} - ${dataBr.replace(/\//g, '-')}.pdf`;
     }
 
-    // 💡 MARGENS DE SEGURANÇA E ESCALA GARANTIDA
     const opt = {
       margin:       [10, 10, 15, 10], 
       filename:     nomeArquivo,
       image:        { type: 'jpeg', quality: 0.98 },
       html2canvas:  { scale: 2, useCORS: true, logging: false },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }, // 💡 SEMPRE RETRATO
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }, 
       pagebreak:    { mode: 'css', after: '.print-break' }
     };
 
@@ -407,7 +474,6 @@ export default function FechamentoLojas({ isEscuro }) {
 
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif', color: themeText }}>🔄 Processando...</div>;
 
-  // 💡 DESIGN DA TABELA IMPRESSA
   const renderTabelaDupla = (itensLoja, isMotorista) => {
     const half = Math.ceil(itensLoja.length / 2);
     const rows = [];
@@ -516,7 +582,6 @@ export default function FechamentoLojas({ isEscuro }) {
                      
                      <div style={{ border: '2px solid black', boxSizing: 'border-box', padding: '10px', height: '100%' }}>
                          
-                         {/* 💡 CABEÇALHO COMPACTO EM UMA LINHA COM LOGO CENTRAL */}
                          <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '2px solid black', paddingBottom: '10px', marginBottom: '10px' }}>
                             
                             {isMotGlobal ? (
@@ -643,9 +708,14 @@ export default function FechamentoLojas({ isEscuro }) {
                                   {item.qtdEntregue}x {formatarNomeItem(item.nome)}
                                 </span>
                               </div>
-                              <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                                <span style={{ color: isOrange ? '#d97706' : isRed ? '#ef4444' : isGreen ? '#16a34a' : '#94a3b8', marginRight: '5px', fontWeight: 'bold' }}>{unitF}</span>
-                                <strong style={{ fontWeight: '900', color: isOrange ? '#d97706' : isRed ? '#ef4444' : (totF === 'BONIFIC.' ? '#16a34a' : themeText) }}>{totF}</strong>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '15px', whiteSpace: 'nowrap' }}>
+                                {/* 💡 NOVO BOTÃO DE REFAZER DIRETO NA LINHA! JOGA O ITEM INTEIRO PRO PENDENTE */}
+                                <button onClick={() => devolverParaPendenteDireto(item.id_pedido)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer' }} title="Desfazer e jogar para pendentes">🔙</button>
+                                
+                                <div style={{ textAlign: 'right' }}>
+                                  <span style={{ color: isOrange ? '#d97706' : isRed ? '#ef4444' : isGreen ? '#16a34a' : '#94a3b8', marginRight: '5px', fontWeight: 'bold' }}>{unitF}</span>
+                                  <strong style={{ fontWeight: '900', color: isOrange ? '#d97706' : isRed ? '#ef4444' : (totF === 'BONIFIC.' ? '#16a34a' : themeText) }}>{totF}</strong>
+                                </div>
                               </div>
                             </div>
                          )
@@ -681,7 +751,13 @@ export default function FechamentoLojas({ isEscuro }) {
                 let corTexto = isEscuro ? '#fcd34d' : '#b45309';
                 let tagStatus = 'PENDENTE';
 
-                if (isPago) {
+                // 💡 SE PRECISAR REFAZER (Um item dessa lista virou falta ou mudou no fechamento)
+                if (forn.precisaRefazer) {
+                    corBorda = '#ef4444';
+                    corFundo = isEscuro ? '#450a0a' : '#fef2f2';
+                    corTexto = '#ef4444';
+                    tagStatus = '⚠️ REFAZER PEDIDO';
+                } else if (isPago) {
                   corBorda = '#22c55e'; 
                   corFundo = isEscuro ? '#14532d' : '#dcfce7';
                   corTexto = isEscuro ? '#86efac' : '#166534';
@@ -705,14 +781,22 @@ export default function FechamentoLojas({ isEscuro }) {
                       </div>
                       
                       <div style={{ fontSize: '20px', fontWeight: '900', color: corTexto }}>
-                         {isBoletoOnly && !expandido ? 'BOLETO' : formatarMoeda(forn.totalPix + forn.totalBoleto)}
+                         {forn.precisaRefazer ? 'ALERTA!' : (isBoletoOnly && !expandido ? 'BOLETO' : formatarMoeda(forn.totalPix + forn.totalBoleto))}
                       </div>
                     </div>
 
                     {expandido && (
                       <div style={{ padding: '15px' }}>
                         
-                        {!isBoletoOnly && (
+                        {/* 💡 BOTÃO PARA REFAZER A COMPRA DO FORNECEDOR (DEVOLVE PRO PENDENTE) */}
+                        {forn.precisaRefazer && (
+                           <div style={{ backgroundColor: '#fef2f2', border: '1px dashed #ef4444', padding: '12px', borderRadius: '8px', marginBottom: '15px', textAlign: 'center' }}>
+                              <strong style={{ color: '#ef4444', fontSize: '11px', display: 'block', marginBottom: '5px' }}>🚨 ITENS FORAM CANCELADOS NAS LOJAS</strong>
+                              <button onClick={() => refazerPedidoFornecedor(forn.nome)} style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>🔄 DEVOLVER PARA PENDENTES</button>
+                           </div>
+                        )}
+
+                        {!isBoletoOnly && !forn.precisaRefazer && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', border: `1px dashed ${themeBorder}`, padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
                             <div>
                                <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>Chave PIX:</span>
@@ -760,7 +844,7 @@ export default function FechamentoLojas({ isEscuro }) {
                            Total a pagar = {formatarMoeda(forn.totalPix + forn.totalBoleto)}
                         </div>
 
-                        {!isBoletoOnly && (
+                        {!isBoletoOnly && !forn.precisaRefazer && (
                           <button onClick={() => alternarStatusPagamento(forn.nome)} style={{ width: '100%', marginTop: '15px', padding: '12px', backgroundColor: isPago ? (isEscuro ? '#1e293b' : '#f1f5f9') : '#22c55e', color: isPago ? '#64748b' : '#fff', border: 'none', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
                             {isPago ? 'DESFAZER PAGAMENTO' : 'PIX FEITO / CONCLUIR'}
                           </button>
@@ -789,7 +873,6 @@ export default function FechamentoLojas({ isEscuro }) {
               <button onClick={() => setLojaEmEdicao(null)} style={{ background: isEscuro ? '#334155' : '#f1f5f9', color: themeText, border: 'none', width: '35px', height: '35px', borderRadius: '50%', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
             </div>
 
-            {/* 💡 BARRA DE PESQUISA NA EDIÇÃO */}
             <div style={{ marginBottom: '15px' }}>
               <input 
                  type="text" 
