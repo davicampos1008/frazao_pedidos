@@ -40,7 +40,8 @@ export default function Usuarios() {
   const [lojaDigitada, setLojaDigitada] = useState('');
   
   const [mostrarSugestoesLoja, setMostrarSugestoesLoja] = useState(false);
-  const [mostrarSugestoesNome, setMostrarSugestoesNome] = useState(false); // 💡 Controle de Nomes
+  // 💡 Controle de Nomes Parecidos (Evitar Duplicidade)
+  const [mostrarSugestoesNome, setMostrarSugestoesNome] = useState(false); 
   
   const [usuarioAberto, setUsuarioAberto] = useState(null);
   const [editando, setEditando] = useState(false);
@@ -94,10 +95,10 @@ export default function Usuarios() {
     if (!dados.loja.trim() || !dados.codigo) return alert("⚠️ V.I.R.T.U.S INFORMA: Você precisa buscar e selecionar uma LOJA para gerar o código de acesso!");
     if (!dados.senha.trim()) return alert("⚠️ V.I.R.T.U.S INFORMA: A SENHA é obrigatória!");
 
-    // 💡 TRAVA: Impede criar usuários com o mesmo nome exato na mesma loja.
-    const duplicado = usuarios.find(u => u.nome === dados.nome && u.loja === dados.loja && u.codigo !== dados.codigo);
+    // 💡 TRAVA: Impede criar usuários com o mesmo nome exato na mesma loja, se for um novo código (Cadastro Duplicado).
+    const duplicado = usuarios.find(u => u.nome.trim().toUpperCase() === dados.nome.trim().toUpperCase() && u.loja === dados.loja && u.codigo !== dados.codigo);
     if (duplicado) {
-       return alert(`⚠️ V.I.R.T.U.S INFORMA: Já existe um usuário com o nome "${dados.nome}" cadastrado nesta loja! Selecione na lista de sugestões caso queira apenas atualizar.`);
+       return alert(`⚠️ Ação Bloqueada! Já existe um funcionário com o nome "${dados.nome}" cadastrado na loja "${dados.loja}".\n\nPor favor, utilize a lista de sugestões ao digitar o nome para editar o cadastro existente em vez de criar um novo.`);
     }
 
     const { error } = await supabase.from('usuarios').upsert([dados]);
@@ -124,7 +125,10 @@ export default function Usuarios() {
     return nome.toUpperCase().includes(lojaDigitada.toUpperCase());
   });
 
-  const usuariosFiltradosNome = dados.nome ? usuarios.filter(u => u.nome?.toLowerCase().includes(dados.nome.toLowerCase()) && u.codigo !== dados.codigo) : [];
+  // 💡 Auto-completar inteligente para nomes parecidos (ajuda a achar usuários antigos antes de criar novos)
+  const usuariosFiltradosNome = dados.nome && dados.nome.length > 2 
+    ? usuarios.filter(u => u.nome?.toLowerCase().includes(dados.nome.toLowerCase()) && u.codigo !== dados.codigo) 
+    : [];
 
   const cssLabel = { fontSize: design.inputs.labelTamanho, fontWeight: '900', color: design.inputs.labelCor, display: 'block', marginBottom: '6px' };
   const cssInput = (bloqueado) => ({ width: '100%', padding: design.inputs.padding, borderRadius: design.inputs.raio, border: design.inputs.borda, backgroundColor: bloqueado ? design.inputs.fundoBloqueado : design.inputs.fundo, outline: 'none', boxSizing: 'border-box' });
@@ -181,7 +185,8 @@ export default function Usuarios() {
                     style={cssInput(!editando)} 
                     placeholder="EX: JOÃO DA SILVA" 
                   />
-                  {/* 💡 CAIXA DE SUGESTÃO NOME USUÁRIO */}
+                  
+                  {/* 💡 CAIXA DE SUGESTÃO NOME USUÁRIO (Evita Duplicidade) */}
                   {mostrarSugestoesNome && editando && usuariosFiltradosNome.length > 0 && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', marginTop: '5px' }}>
                       <div style={{ padding: '10px', fontSize: '11px', color: '#f97316', fontWeight: 'bold', backgroundColor: '#fff7ed' }}>⚠️ Nomes parecidos já cadastrados:</div>
