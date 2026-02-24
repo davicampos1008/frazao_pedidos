@@ -30,11 +30,9 @@ export default function PlanilhaCompras() {
 
   const [fornExpandido, setFornExpandido] = useState(null);
   
-  // Controle da Loja selecionada no Pedido Geral
   const [lojaGeralSelecionada, setLojaGeralSelecionada] = useState({});
   const [localCompra, setLocalCompra] = useState('ceasa'); 
 
-  // Feedback Visual dos Botões de Cópia
   const [copiadoGeral, setCopiadoGeral] = useState(null);
   const [copiadoLoja, setCopiadoLoja] = useState(null);
 
@@ -49,7 +47,6 @@ export default function PlanilhaCompras() {
   const tratarPrecoNum = (p) => parseFloat(String(p || '0').replace('R$ ', '').replaceAll('.', '').replace(',', '.')) || 0;
   const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // 💡 FORMATADOR PARA PRIMEIRAS LETRAS MAIÚSCULAS
   const formatarNomeItem = (str) => {
     if (!str) return '';
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
@@ -157,7 +154,7 @@ export default function PlanilhaCompras() {
     setLojasEnvolvidas(item.lojas.map(l => ({
       ...l,
       qtd_receber: l.qtd_pedida, 
-      qtd_bonificada: 0, // 💡 Novo campo individual
+      qtd_bonificada: 0, 
       isFalta: false,
       isBoleto: false
     })));
@@ -169,7 +166,6 @@ export default function PlanilhaCompras() {
         const novaLoja = { ...l, [campo]: valor };
         if (campo === 'isFalta' && valor === true) novaLoja.qtd_receber = 0;
         
-        // 💡 Trava: A bonificação não pode ser maior que o recebimento
         if (campo === 'qtd_bonificada') {
            const maximo = Number(novaLoja.qtd_receber) || Number(novaLoja.qtd_pedida);
            if (Number(valor) > maximo) {
@@ -183,15 +179,9 @@ export default function PlanilhaCompras() {
     }));
   };
 
-  // 💡 CENTRALIZADA LÓGICA DE FORMATAÇÃO DO PREÇO COM BONIFICAÇÃO
   const gerarCustoUnitarioFinal = (precoBaseFinal, qtdBonificada, qtdReceber) => {
      if (qtdBonificada > 0) {
-         if (qtdBonificada >= qtdReceber && qtdReceber > 0) {
-             // 100% bonificado - mantemos a base oculta para o resumo financeiro!
-             return `${qtdBonificada} = BONIFICAÇÃO | ${precoBaseFinal}`;
-         } else {
-             return `${qtdBonificada} = BONIFICAÇÃO | ${precoBaseFinal}`;
-         }
+         return `${qtdBonificada} | ${precoBaseFinal}`;
      }
      return precoBaseFinal;
   };
@@ -207,8 +197,17 @@ export default function PlanilhaCompras() {
       return carregarDados();
     }
 
-    if (!dadosCompra.fornecedor || !dadosCompra.valor_unit) return alert("⚠️ Preencha fornecedor e valor unitário.");
+    const isAlgumBoleto = lojasEnvolvidas.some(l => l.isBoleto);
+
+    // 💡 TRAVA: Se não for boleto, o preço é obrigatório
+    if (!isAlgumBoleto && (!dadosCompra.fornecedor || !dadosCompra.valor_unit)) {
+      return alert("⚠️ Preencha o fornecedor e o valor unitário.");
+    }
     
+    if (!dadosCompra.fornecedor) {
+      return alert("⚠️ Preencha o fornecedor.");
+    }
+
     const qtdDesejada = Number(dadosCompra.qtd_pedir) || 0;
     if (qtdDesejada <= 0) return alert("Quantidade inválida.");
 
@@ -216,7 +215,6 @@ export default function PlanilhaCompras() {
     if (!precoLimpo.includes(',') && precoLimpo) precoLimpo += ',00';
     const precoFinal = precoLimpo ? `R$ ${precoLimpo}` : 'R$ 0,00';
 
-    const isAlgumBoleto = lojasEnvolvidas.some(l => l.isBoleto);
     const statusGeral = isAlgumBoleto ? 'boleto' : 'atendido';
 
     setCarregando(true);
@@ -228,7 +226,6 @@ export default function PlanilhaCompras() {
       const bonificada = Number(loja.qtd_bonificada) || 0;
 
       if (qtdRestanteParaDistribuir >= loja.qtd_pedida) {
-        
         const custoFormatado = gerarCustoUnitarioFinal(precoFinal, bonificada, loja.qtd_pedida);
 
         promessas.push(supabase.from('pedidos').update({
@@ -240,7 +237,6 @@ export default function PlanilhaCompras() {
         qtdRestanteParaDistribuir -= loja.qtd_pedida;
 
       } else if (qtdRestanteParaDistribuir > 0) {
-        
         const custoFormatado = gerarCustoUnitarioFinal(precoFinal, bonificada, qtdRestanteParaDistribuir);
 
         promessas.push(supabase.from('pedidos').update({
@@ -269,8 +265,14 @@ export default function PlanilhaCompras() {
 
   const finalizarPedidoFracionado = async () => {
     const temCompra = lojasEnvolvidas.some(l => (Number(l.qtd_receber) > 0));
-    if (temCompra && (!dadosCompra.fornecedor || !dadosCompra.valor_unit)) {
-      return alert("⚠️ Preencha fornecedor e valor unitário para os itens que irá comprar.");
+    
+    const tudoBoleto = lojasEnvolvidas.every(l => Number(l.qtd_receber) === 0 || l.isBoleto);
+    
+    if (temCompra && !tudoBoleto && (!dadosCompra.fornecedor || !dadosCompra.valor_unit)) {
+      return alert("⚠️ Preencha fornecedor e valor unitário para os itens comprados fora de boleto.");
+    }
+    if (temCompra && !dadosCompra.fornecedor) {
+      return alert("⚠️ O fornecedor é obrigatório.");
     }
 
     let precoLimpo = dadosCompra.valor_unit.replace(/[^\d,.-]/g, '').trim();
@@ -327,25 +329,19 @@ export default function PlanilhaCompras() {
     carregarDados();
   };
 
-  const desfazerCompra = async (idPedido) => {
-    setCarregando(true);
-    await supabase.from('pedidos').update({ fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, status_compra: 'pendente' }).eq('id', idPedido);
-    carregarDados();
-  };
-
+  // 💡 LÓGICA REINSERIDA: Obter Fechamento por Fornecedor
   const obterFechamentoPorFornecedor = () => {
     const mapaForn = {};
     pedidosRaw.forEach(p => {
       if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
         const fNome = p.fornecedor_compra.toUpperCase();
         
-        // 💡 DESCONSTRUÇÃO DA BONIFICAÇÃO PARA O RESUMO
         let vUnit = tratarPrecoNum(p.custo_unit);
         let qtdBonif = 0;
         let descBonifValor = 0;
         let totalItemCobrado = 0;
         
-        if (String(p.custo_unit).includes('BONIFICAÇÃO |')) {
+        if (String(p.custo_unit).includes('|')) {
            const parts = p.custo_unit.split('|');
            vUnit = tratarPrecoNum(parts[1].trim());
            qtdBonif = parseInt(parts[0]) || 0;
@@ -367,10 +363,10 @@ export default function PlanilhaCompras() {
         if (!mapaForn[fNome]) {
            mapaForn[fNome] = { 
              nome: fNome, 
-             totalBruto: 0,         // Soma total se não houvesse bônus
-             totalDescontoBonif: 0, // Soma total de economia
+             totalBruto: 0,         
+             totalDescontoBonif: 0, 
              qtdBonificadaGeral: 0, 
-             totalGeral: 0,         // Final a pagar
+             totalGeral: 0,         
              lojas: {} 
            };
         }
@@ -391,7 +387,6 @@ export default function PlanilhaCompras() {
         });
         
         mapaForn[fNome].lojas[nomeLoja].totalLoja += totalItemCobrado;
-        
         mapaForn[fNome].totalBruto += (totalItemCobrado + descBonifValor);
         mapaForn[fNome].totalDescontoBonif += descBonifValor;
         mapaForn[fNome].qtdBonificadaGeral += qtdBonif;
@@ -422,7 +417,6 @@ export default function PlanilhaCompras() {
     setTimeout(() => setCopiadoLoja(null), 2000);
   };
 
-  // 💡 MENSAGEM WHATSAPP FORNECEDOR (COM RESUMO DE BONIFICAÇÃO)
   const gerarPedidoGeral = (f, btnId) => {
     const nomeLoja = lojaGeralSelecionada[f.nome];
     if (!nomeLoja) return alert("⚠️ Selecione a loja titular da banca para o cabeçalho.");
@@ -473,9 +467,12 @@ export default function PlanilhaCompras() {
     setTimeout(() => setCopiadoGeral(null), 2000);
   };
 
-  if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Processando...</div>;
+  const desfazerCompra = async (idPedido) => {
+    setCarregando(true);
+    await supabase.from('pedidos').update({ fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, status_compra: 'pendente' }).eq('id', idPedido);
+    carregarDados();
+  };
 
-  // 💡 MÓDULO VISUAL: LISTA DE LOJAS PARA BONIFICAÇÃO
   const renderListaLojasModal = () => (
     <div style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0', marginTop: '10px' }}>
       <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#111', display: 'block', marginBottom: '15px', textTransform: 'uppercase' }}>
@@ -484,12 +481,10 @@ export default function PlanilhaCompras() {
       
       {lojasEnvolvidas.map(loja => (
         <div key={loja.id_pedido} style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', paddingBottom: '10px', borderBottom: '1px solid #e2e8f0' }}>
-          
           <div style={{ flex: '1 1 auto', minWidth: '100px' }}>
             <span style={{ fontSize: '13px', fontWeight: 'bold', display: 'block' }}>{loja.nome_fantasia}</span>
             <span style={{ fontSize: '10px', color: '#f97316', fontWeight: 'bold' }}>Pediu: {loja.qtd_pedida}</span>
           </div>
-          
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
             {abaModal === 'fracionado' && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -497,14 +492,12 @@ export default function PlanilhaCompras() {
                 <input type="number" value={loja.qtd_receber} onChange={(e) => atualizarLoja(loja.id_pedido, 'qtd_receber', e.target.value)} style={{ width: '50px', padding: '8px', borderRadius: '8px', border: '2px solid #ccc', textAlign: 'center', fontWeight: 'bold' }} />
               </div>
             )}
-
             {dadosCompra.temBonificacao && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', backgroundColor: '#dcfce7', padding: '5px', borderRadius: '8px', border: '1px solid #86efac' }}>
                 <label style={{ fontSize: '9px', color: '#166534', fontWeight: 'bold' }}>🎁 Bonif.</label>
                 <input type="number" value={loja.qtd_bonificada} onChange={(e) => atualizarLoja(loja.id_pedido, 'qtd_bonificada', e.target.value)} placeholder="0" style={{ width: '50px', padding: '6px', borderRadius: '6px', border: '1px solid #16a34a', textAlign: 'center', fontWeight: 'bold', color: '#16a34a' }} />
               </div>
             )}
-
             <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
               <label style={{ fontSize: '10px', fontWeight: '900', color: '#d97706', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
                 <input type="checkbox" checked={loja.isBoleto} onChange={(e) => atualizarLoja(loja.id_pedido, 'isBoleto', e.target.checked)} /> BOLETO
@@ -519,22 +512,21 @@ export default function PlanilhaCompras() {
     </div>
   );
 
+  if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Processando...</div>;
+
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px', padding: '10px' }}>
       
-      {/* HEADER */}
       <div style={{ backgroundColor: '#111', padding: '25px', borderRadius: '24px', color: 'white', marginBottom: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '22px', fontWeight: '900' }}>🛒 MESA DE COMPRAS</h2>
             <p style={{ margin: '5px 0 0 0', color: '#94a3b8', fontSize: '13px' }}>Planejamento: {dataBr}</p>
           </div>
-          
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-end' }}>
             <button onClick={resetarPedidosDoDia} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '11px', boxShadow: '0 4px 15px rgba(239,68,68,0.4)' }}>
               🚨 ZERAR TUDO E RECOMEÇAR
             </button>
-            
             <div style={{ display: 'flex', backgroundColor: '#333', borderRadius: '10px', padding: '4px' }}>
               <button onClick={() => setLocalCompra('ceasa')} style={{ border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: localCompra === 'ceasa' ? '#f97316' : 'transparent', color: localCompra === 'ceasa' ? '#fff' : '#999' }}>CEASA</button>
               <button onClick={() => setLocalCompra('ceilandia')} style={{ border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: localCompra === 'ceilandia' ? '#f97316' : 'transparent', color: localCompra === 'ceilandia' ? '#fff' : '#999' }}>CEILÂNDIA</button>
@@ -572,11 +564,9 @@ export default function PlanilhaCompras() {
             ) : (
               demandas.filter(d => d.nome.toLowerCase().includes(buscaPendentes.toLowerCase())).map(item => (
                 <div key={item.nome} onClick={() => abrirModalCompra(item)} style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '15px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', cursor: 'pointer', borderTop: item.isResto ? '4px solid #ef4444' : '4px solid #f97316', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', position: 'relative' }}>
-                  
                   <div style={{ position: 'absolute', top: '5px', right: '5px' }}>
                     <button onClick={(e) => marcarFaltaDireto(item, e)} style={{ background: '#fef2f2', color: '#ef4444', border: 'none', padding: '4px', borderRadius: '6px', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer' }}>🚫</button>
                   </div>
-
                   <div style={{ backgroundColor: item.isResto ? '#fef2f2' : '#fef3c7', color: item.isResto ? '#ef4444' : '#b45309', padding: '10px', borderRadius: '50%', fontWeight: '900', fontSize: '20px', width: '50px', height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '10px' }}>
                     {item.demanda}
                   </div>
@@ -617,10 +607,9 @@ export default function PlanilhaCompras() {
         </>
       )}
 
-      {/* ABA 3: FORNECEDORES E RESUMOS (V.I.R.T.U.S) */}
+      {/* ABA 3: FORNECEDORES */}
       {abaAtiva === 'fornecedores' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-          
           <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '10px 15px', display: 'flex', gap: '10px', border: '1px solid #e2e8f0' }}>
             <span>🔍</span><input placeholder="Buscar fornecedor..." value={buscaFornecedores} onChange={e => setBuscaFornecedores(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
           </div>
@@ -631,18 +620,6 @@ export default function PlanilhaCompras() {
             fechamento.filter(f => f.nome.toLowerCase().includes(buscaFornecedores.toLowerCase())).map((f, idx) => {
               const expandido = fornExpandido === f.nome;
               
-              const mapaItensGeraisUI = {};
-              Object.values(f.lojas).forEach(loja => {
-                loja.itens.forEach(item => {
-                  if (!mapaItensGeraisUI[item.nome]) {
-                    mapaItensGeraisUI[item.nome] = { ...item, qtd: 0, totalNum: 0, qtd_bonificada: 0 };
-                  }
-                  mapaItensGeraisUI[item.nome].qtd += item.qtd;
-                  mapaItensGeraisUI[item.nome].qtd_bonificada += item.qtd_bonificada;
-                  mapaItensGeraisUI[item.nome].totalNum += item.totalNum;
-                });
-              });
-
               return (
                 <div key={idx} style={{ backgroundColor: '#fff', borderRadius: '20px', padding: '20px', boxShadow: '0 5px 15px rgba(0,0,0,0.05)', borderTop: '6px solid #111' }}>
                   
@@ -656,35 +633,9 @@ export default function PlanilhaCompras() {
 
                   {expandido && (
                     <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9' }}>
-                      
-                      {/* SESSÃO DO PEDIDO GERAL */}
                       <div style={{ backgroundColor: '#f1f5f9', padding: '15px', borderRadius: '12px', marginBottom: '20px' }}>
                         <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#111' }}>🛍️ PEDIDO GERAL DA BANCA</h4>
                         
-                        <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '15px', fontSize: '12px', color: '#333', lineHeight: '1.6' }}>
-                          {Object.values(mapaItensGeraisUI).map((i, idxItem) => {
-                             let linhaFormatada = `${i.qtd} ${i.unidade} - ${formatarNomeItem(i.nome)} ${i.valor_unit} = ${formatarMoeda(i.totalNum)}`;
-                             if (i.qtd_bonificada > 0) {
-                                // Limpa a linha para a visualização, mostrando a base
-                                const precoVisivel = i.valor_unit.includes('|') ? i.valor_unit.split('|')[1].trim() : i.valor_unit;
-                                linhaFormatada = `${i.qtd} ${i.unidade} - ${formatarNomeItem(i.nome)} R$ Base ${precoVisivel} = ${formatarMoeda(i.totalNum)}`;
-                             }
-                             if (i.isBoleto) linhaFormatada += ' (B)';
-                             return <div key={idxItem}>{linhaFormatada}</div>;
-                          })}
-                          
-                          <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #ccc' }}>
-                            {f.totalDescontoBonif > 0 && (
-                               <div style={{ color: '#16a34a', fontWeight: 'bold', fontSize: '11px', marginBottom: '5px' }}>
-                                 🎁 Desconto Bonificação ({f.qtdBonificadaGeral} Itens): - {formatarMoeda(f.totalDescontoBonif)}
-                               </div>
-                            )}
-                            <div style={{ fontWeight: '900', color: '#111', fontSize: '14px' }}>
-                              TOTAL A PAGAR: {formatarMoeda(f.totalGeral)}
-                            </div>
-                          </div>
-                        </div>
-
                         <div style={{ display: 'flex', gap: '10px' }}>
                           <select 
                               value={lojaGeralSelecionada[f.nome] || ''}
@@ -705,7 +656,6 @@ export default function PlanilhaCompras() {
                         </div>
                       </div>
                       
-                      {/* SESSÃO DOS PEDIDOS SEPARADOS DAS LOJAS */}
                       <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#111', paddingLeft: '5px' }}>📦 PEDIDOS SEPARADOS POR LOJA</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {Object.values(f.lojas).map((loja, lIdx) => {
@@ -745,7 +695,6 @@ export default function PlanilhaCompras() {
                            );
                         })}
                       </div>
-
                     </div>
                   )}
                 </div>
@@ -779,7 +728,6 @@ export default function PlanilhaCompras() {
               </button>
             </div>
 
-            {/* HEADER COMUM DE COMPRA */}
             <div style={{ display: 'grid', gridTemplateColumns: abaModal === 'fracionado' ? '2fr 1fr' : '1fr', gap: '15px', marginBottom: '15px' }}>
               <div>
                 <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>FORNECEDOR</label>
@@ -814,16 +762,13 @@ export default function PlanilhaCompras() {
               </div>
             )}
 
-            {/* 💡 CHAVE GLOBAL PARA ABRIR A DISTRIBUIÇÃO DA BONIFICAÇÃO (EM AMBAS AS ABAS) */}
             <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-              
               <div style={{ flex: 1, backgroundColor: dadosCompra.temBonificacao ? '#dcfce7' : '#f8fafc', padding: '15px', borderRadius: '12px', border: dadosCompra.temBonificacao ? '1px solid #86efac' : '1px solid #e2e8f0', transition: '0.2s' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: dadosCompra.temBonificacao ? '#166534' : '#64748b', fontWeight: '900', fontSize: '12px', cursor: 'pointer' }}>
                   <input type="checkbox" checked={dadosCompra.temBonificacao} disabled={dadosCompra.isFaltaGeral} onChange={(e) => setDadosCompra({...dadosCompra, temBonificacao: e.target.checked})} style={{ width: '20px', height: '20px' }} />
                   🎁 INCLUIR BONIFICAÇÃO
                 </label>
               </div>
-
               {abaModal === 'completo' && (
                 <>
                   <div style={{ flex: 1, backgroundColor: '#fffbeb', padding: '15px', borderRadius: '12px', border: '1px solid #fde68a' }}>
@@ -838,9 +783,7 @@ export default function PlanilhaCompras() {
                     <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#ef4444', fontWeight: '900', fontSize: '12px', cursor: 'pointer' }}>
                       <input type="checkbox" checked={dadosCompra.isFaltaGeral} onChange={(e) => {
                         setDadosCompra({...dadosCompra, isFaltaGeral: e.target.checked, temBonificacao: false});
-                        if (e.target.checked) {
-                          setLojasEnvolvidas(lojasEnvolvidas.map(l => ({...l, qtd_bonificada: 0})));
-                        }
+                        if (e.target.checked) setLojasEnvolvidas(lojasEnvolvidas.map(l => ({...l, qtd_bonificada: 0})));
                       }} style={{ width: '20px', height: '20px' }} />
                       🚫 FALTA
                     </label>
@@ -849,7 +792,6 @@ export default function PlanilhaCompras() {
               )}
             </div>
 
-            {/* 💡 RENDERIZA A LISTA DE LOJAS SE FOR FRACIONADO OU SE TIVER BONIFICAÇÃO NO COMPLETO */}
             {(abaModal === 'fracionado' || (abaModal === 'completo' && dadosCompra.temBonificacao)) && !dadosCompra.isFaltaGeral && (
                 renderListaLojasModal()
             )}
@@ -857,7 +799,6 @@ export default function PlanilhaCompras() {
             <button onClick={abaModal === 'completo' ? finalizarPedidoCompleto : finalizarPedidoFracionado} style={{ width: '100%', padding: '20px', backgroundColor: dadosCompra.isFaltaGeral ? '#ef4444' : '#111', color: '#fff', border: 'none', borderRadius: '16px', fontWeight: '900', fontSize: '16px', cursor: 'pointer', marginTop: '10px' }}>
               FINALIZAR PEDIDO {abaModal === 'fracionado' ? 'FRACIONADO' : ''}
             </button>
-            
           </div>
         </div>
       )}

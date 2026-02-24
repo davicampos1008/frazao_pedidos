@@ -1,27 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 
-export default function MenuCliente({ usuario }) {
+export default function MenuCliente({ usuario, tema }) {
 
-  // 🎛️ PAINEL DE CONTROLE V.I.R.T.U.S - DESIGN E CORES DO MENU
+  // 💡 Lógica de cor injetada baseada na varável `tema` passada pelo App.js
+  const isEscuro = tema === 'escuro';
+
   const configDesign = {
     geral: {
       fontePadrao: "'Inter', sans-serif"
     },
     cores: {
-      fundoGeral: '#f8fafc',
-      fundoCards: '#ffffff',
-      primaria: '#f97316',      // Laranja Frazão
-      textoForte: '#111111',
-      textoSuave: '#64748b',
-      promocao: '#eab308',      // Amarelo
-      novidade: '#a855f7',      // Roxo
-      sucesso: '#22c55e',       // Verde
-      alerta: '#ef4444'         // Vermelho
+      // 💡 FUNDOS ESCUROS PROFUNDOS SE O TEMA FOR 'escuro'
+      fundoGeral: isEscuro ? '#0f172a' : '#f8fafc',
+      fundoCards: isEscuro ? '#1e293b' : '#ffffff',  
+      primaria: '#f97316',      
+      textoForte: isEscuro ? '#f8fafc' : '#111111',
+      textoSuave: isEscuro ? '#94a3b8' : '#64748b',
+      borda: isEscuro ? '#334155' : '#e2e8f0',
+      inputFundo: isEscuro ? '#0f172a' : '#f1f5f9',
+      promocao: '#eab308',      
+      novidade: '#a855f7',      
+      sucesso: '#22c55e',       
+      alerta: '#ef4444'         
     },
     cards: {
       raioBorda: '16px',
-      sombra: '0 4px 12px rgba(0,0,0,0.03)',
+      sombra: isEscuro ? '0 4px 12px rgba(0,0,0,0.5)' : '0 4px 12px rgba(0,0,0,0.03)',
       alturaImgDestaque: '220px', 
       alturaImgPequena: '85px'    
     },
@@ -70,7 +75,6 @@ export default function MenuCliente({ usuario }) {
     precos: true, edicao: true, promocoes: true, novidades: true
   });
   
-  // --- NOVOS ESTADOS MENU DE CONFIG E SENHA ---
   const [modalConfiguracoesAberto, setModalConfiguracoesAberto] = useState(false);
   const [modalSenhaAberto, setModalSenhaAberto] = useState(false);
   const [dadosSenha, setDadosSenha] = useState({ antiga: '', nova: '', confirma: '' });
@@ -91,7 +95,7 @@ export default function MenuCliente({ usuario }) {
   const primeiroNome = (usuario?.nome || 'Cliente').split(' ')[0];
   const nomeLojaLimpo = (usuario?.loja || 'Matriz').replace(/^\d+\s*-\s*/, '').trim();
 
-  // 💡 CONFIGURAÇÃO DE TEMA E PWA
+  // Força atualização da cor de fundo se o tema mudar
   useEffect(() => {
     document.body.style.backgroundColor = configDesign.cores.fundoGeral;
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -100,7 +104,6 @@ export default function MenuCliente({ usuario }) {
     });
   }, [configDesign.cores.fundoGeral]);
 
-  // 💡 AVISO PARA TROCAR SENHA
   useEffect(() => {
     if (usuario?.senha === '123456' || usuario?.senha === usuario?.codigo_loja?.toString()) {
       alert("⚠️ Aviso de Segurança: Detectamos que você está usando uma senha padrão. Por favor, clique na engrenagem no topo da tela e altere sua senha para proteger sua conta.");
@@ -412,7 +415,6 @@ export default function MenuCliente({ usuario }) {
     } catch (err) { alert("Erro ao importar: " + err.message); }
   };
 
-  // 💡 NOVA MUDANÇA DE SENHA CORRIGIDA
   const salvarNovaSenha = async () => {
     if(!dadosSenha.antiga || !dadosSenha.nova || !dadosSenha.confirma) return setErroSenha("Preencha todos os campos.");
     if(dadosSenha.nova !== dadosSenha.confirma) return setErroSenha("A nova senha não confere com a repetição.");
@@ -421,19 +423,16 @@ export default function MenuCliente({ usuario }) {
     setCarregandoSenha(true);
     setErroSenha('');
     try {
-      // Usa o código do usuário para buscar com segurança, caso 'id' não exista
       const identificador = usuario?.codigo || usuario?.id;
       const campoBusca = usuario?.codigo ? 'codigo' : 'id';
 
       if (!identificador) throw new Error("Erro de sessão: Faça login novamente.");
 
-      // Verifica senha antiga
       const { data: userAtual, error: errUser } = await supabase.from('usuarios').select('senha').eq(campoBusca, identificador).single();
       
       if (errUser || !userAtual) throw new Error("Usuário não encontrado no banco de dados.");
       if (userAtual.senha !== dadosSenha.antiga) throw new Error("A senha antiga está incorreta.");
       
-      // Atualiza senha
       const { error } = await supabase.from('usuarios').update({ senha: dadosSenha.nova }).eq(campoBusca, identificador);
       if(error) throw error;
       
@@ -447,7 +446,6 @@ export default function MenuCliente({ usuario }) {
     }
   };
 
-  // --- TELA DE SUCESSO PÓS-ENVIO ---
   if (listaEnviadaHoje && !modoVisualizacao) {
     const aguardandoLiberacao = listaEnviadaHoje.some(item => item.solicitou_refazer === true);
     const edicaoLiberada = listaEnviadaHoje.some(item => item.liberado_edicao === true);
@@ -464,30 +462,30 @@ export default function MenuCliente({ usuario }) {
         </div>
         <style>{`@keyframes fadeInDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }`}</style>
 
-        <div style={{ background: edicaoLiberada ? configDesign.cores.sucesso : (aguardandoLiberacao ? configDesign.cores.promocao : configDesign.cores.textoForte), color: '#fff', padding: '40px 30px', borderRadius: '30px', boxShadow: configDesign.cards.sombra, marginTop: '20px' }}>
+        <div style={{ background: edicaoLiberada ? configDesign.cores.sucesso : (aguardandoLiberacao ? configDesign.cores.promocao : configDesign.cores.textoForte), color: isEscuro && !edicaoLiberada && !aguardandoLiberacao ? '#000' : '#fff', padding: '40px 30px', borderRadius: '30px', boxShadow: configDesign.cards.sombra, marginTop: '20px' }}>
           <div style={{fontSize: '50px', marginBottom: '10px'}}>{edicaoLiberada ? '🔓' : (aguardandoLiberacao ? '⏳' : '✅')}</div>
           <h2 style={{ margin: 0 }}>{edicaoLiberada ? 'EDIÇÃO LIBERADA' : (aguardandoLiberacao ? 'AGUARDANDO ADMIN' : 'PEDIDO ENVIADO!')}</h2>
           <p style={{ margin: 0, opacity: 0.9, marginTop: '10px' }}>{edicaoLiberada ? 'Sua lista foi devolvida para o carrinho.' : (aguardandoLiberacao ? 'Aguarde a central liberar a edição da sua lista.' : 'Sua loja já enviou a lista de hoje com sucesso.')}</p>
         </div>
 
-        <div style={{ textAlign: 'left', marginTop: '25px', background: configDesign.cores.fundoCards, padding: '20px', borderRadius: '20px', border: '1px solid #eee', maxHeight: '40vh', overflowY: 'auto' }}>
+        <div style={{ textAlign: 'left', marginTop: '25px', background: configDesign.cores.fundoCards, padding: '20px', borderRadius: '20px', border: `1px solid ${configDesign.cores.borda}`, maxHeight: '40vh', overflowY: 'auto' }}>
           <h3 style={{ fontSize: '14px', color: configDesign.cores.textoSuave, marginBottom: '15px', marginTop: 0 }}>RESUMO DO PEDIDO:</h3>
           {listaEnviadaHoje.map((item, i) => (
-            <div key={i} style={{ padding: '12px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between' }}>
+            <div key={i} style={{ padding: '12px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between' }}>
               <span style={{color: configDesign.cores.textoForte}}><b>{item.quantidade}x</b> {item.nome_produto}</span><small style={{ color: configDesign.cores.textoSuave }}>{item.unidade_medida}</small>
             </div>
           ))}
         </div>
 
         <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-          <button onClick={() => carregarDados(false)} style={{ background: '#f1f5f9', border: 'none', padding: '18px', borderRadius: '15px', color: '#111', fontWeight: 'bold', cursor: 'pointer' }}>🔄 ATUALIZAR STATUS AGORA</button>
+          <button onClick={() => carregarDados(false)} style={{ background: configDesign.cores.inputFundo, border: `1px solid ${configDesign.cores.borda}`, padding: '18px', borderRadius: '15px', color: configDesign.cores.textoForte, fontWeight: 'bold', cursor: 'pointer' }}>🔄 ATUALIZAR STATUS AGORA</button>
           
           {edicaoLiberada ? (
             <button onClick={importarParaCarrinho} style={{ background: configDesign.cores.sucesso, border: 'none', padding: '18px', borderRadius: '15px', color: '#fff', fontWeight: '900', cursor: 'pointer', boxShadow: '0 5px 15px rgba(34,197,94,0.3)' }}>
               📥 PUXAR PARA O CARRINHO E EDITAR
             </button>
           ) : (
-            <button onClick={aguardandoLiberacao ? null : pedirParaEditar} style={{ background: configDesign.cores.fundoCards, border: `2px solid ${aguardandoLiberacao ? '#ccc' : configDesign.cores.textoForte}`, padding: '18px', borderRadius: '15px', color: aguardandoLiberacao ? '#ccc' : configDesign.cores.textoForte, fontWeight: 'bold', cursor: aguardandoLiberacao ? 'not-allowed' : 'pointer' }}>
+            <button onClick={aguardandoLiberacao ? null : pedirParaEditar} style={{ background: configDesign.cores.fundoCards, border: `2px solid ${aguardandoLiberacao ? configDesign.cores.borda : configDesign.cores.textoForte}`, padding: '18px', borderRadius: '15px', color: aguardandoLiberacao ? configDesign.cores.textoSuave : configDesign.cores.textoForte, fontWeight: 'bold', cursor: aguardandoLiberacao ? 'not-allowed' : 'pointer' }}>
               {aguardandoLiberacao ? '⏳ SOLICITAÇÃO PENDENTE...' : '✏️ SOLICITAR EDIÇÃO DE LISTA'}
             </button>
           )}
@@ -513,7 +511,7 @@ export default function MenuCliente({ usuario }) {
       </div>
 
       {/* HEADER DE BOAS VINDAS */}
-      <div style={{ padding: '25px 20px 15px 20px', backgroundColor: configDesign.cores.fundoCards, borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '25px 20px 15px 20px', backgroundColor: configDesign.cores.fundoCards, borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '22px', color: configDesign.cores.textoForte, fontWeight: '900' }}>
             {saudacao}, {primeiroNome}!
@@ -524,28 +522,22 @@ export default function MenuCliente({ usuario }) {
         </div>
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          
-          {/* 💡 NOVO BOTÃO DE CONFIGURAÇÕES (ANTIGA ENGRENAGEM) */}
-          <button onClick={() => setModalConfiguracoesAberto(true)} style={{ background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', fontSize: '20px' }}>
+          <button onClick={() => setModalConfiguracoesAberto(true)} style={{ background: configDesign.cores.inputFundo, border: 'none', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', fontSize: '20px' }}>
             ⚙️
           </button>
-
-          {/* BOTÃO DE NOTIFICAÇÕES (SINO) */}
-          <button onClick={() => setModalNotificacoesAberto(true)} style={{ background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', position: 'relative' }}>
+          <button onClick={() => setModalNotificacoesAberto(true)} style={{ background: configDesign.cores.inputFundo, border: 'none', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', position: 'relative' }}>
             <span style={{ fontSize: '20px' }}>🔔</span>
             {historicoNotificacoes.some(n => !n.lida) && <span style={{ position: 'absolute', top: '0', right: '0', width: '10px', height: '10px', background: configDesign.cores.alerta, borderRadius: '50%', border: '2px solid #fff' }}></span>}
           </button>
         </div>
       </div>
 
-      {/* AVISO DE VISUALIZAÇÃO/BLOQUEIO */}
       {isAppTravado && (
         <div style={{ backgroundColor: '#fefce8', color: '#a16207', padding: '12px 20px', fontSize: '12px', fontWeight: 'bold', textAlign: 'center' }}>
           ⚠️ {modoVisualizacao ? 'Modo de visualização. Seu pedido já foi enviado hoje.' : 'Os preços de hoje ainda estão sendo atualizados pela central.'}
         </div>
       )}
 
-      {/* BANNERS GIGANTES */}
       {categoriaAtiva === 'DESTAQUES' && (
         <div style={{ backgroundColor: configDesign.cores.fundoGeral }}>
           <div style={{ width: '100%', height: '180px', backgroundImage: `url(${banners.topo})`, backgroundSize: 'cover', backgroundPosition: 'center' }}></div>
@@ -556,7 +548,6 @@ export default function MenuCliente({ usuario }) {
         </div>
       )}
 
-      {/* CABEÇALHO DE BUSCA */}
       <div style={{ 
         position: categoriaAtiva === 'DESTAQUES' ? 'relative' : 'fixed', 
         top: categoriaAtiva === 'DESTAQUES' ? '0' : (navState.show ? '0' : '-100px'), 
@@ -564,7 +555,7 @@ export default function MenuCliente({ usuario }) {
         zIndex: 100, 
         backgroundColor: categoriaAtiva === 'DESTAQUES' ? configDesign.cores.fundoGeral : configDesign.cores.fundoCards, 
         backdropFilter: categoriaAtiva === 'DESTAQUES' ? 'none' : 'blur(10px)', 
-        borderBottom: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? '1px solid #e2e8f0' : 'none', 
+        borderBottom: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? `1px solid ${configDesign.cores.borda}` : 'none', 
         transition: configDesign.animacoes.transicaoSuave,
         opacity: categoriaAtiva === 'DESTAQUES' || navState.show ? 1 : 0,
         boxShadow: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? configDesign.cards.sombra : 'none',
@@ -573,8 +564,8 @@ export default function MenuCliente({ usuario }) {
         marginTop: categoriaAtiva === 'DESTAQUES' ? '15px' : '0'
       }}>
         <div style={{ padding: '0 20px 10px 20px' }}>
-          <div style={{ backgroundColor: '#f1f5f9', borderRadius: '12px', padding: (categoriaAtiva !== 'DESTAQUES' && navState.shrink) ? '8px 12px' : '12px', display: 'flex', gap: '10px', transition: configDesign.animacoes.transicaoSuave }}>
-            <span>🔍</span><input placeholder="Procurar produto..." value={buscaMenu} onChange={e => setBuscaMenu(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', color: '#111' }} />
+          <div style={{ backgroundColor: configDesign.cores.inputFundo, borderRadius: '12px', padding: (categoriaAtiva !== 'DESTAQUES' && navState.shrink) ? '8px 12px' : '12px', display: 'flex', gap: '10px', transition: configDesign.animacoes.transicaoSuave }}>
+            <span>🔍</span><input placeholder="Procurar produto..." value={buscaMenu} onChange={e => setBuscaMenu(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', color: configDesign.cores.textoForte }} />
           </div>
         </div>
         <div style={{ display: 'flex', overflowX: 'auto', gap: '20px', padding: '0 20px', scrollbarWidth: 'none' }}>
@@ -586,7 +577,6 @@ export default function MenuCliente({ usuario }) {
 
       <div style={{ height: categoriaAtiva === 'DESTAQUES' ? '10px' : '110px' }}></div>
 
-      {/* LISTA DE PRODUTOS */}
       <div style={{ padding: '0 20px 20px 20px', display: 'grid', gridTemplateColumns: categoriaAtiva === 'DESTAQUES' ? '1fr' : 'repeat(auto-fill, minmax(140px, 1fr))', gap: '15px' }}>
         {produtos.filter(p => {
           if (!(p.nome || '').toLowerCase().includes(buscaMenu.toLowerCase())) return false;
@@ -613,9 +603,9 @@ export default function MenuCliente({ usuario }) {
           return (
             <div key={p.id} onClick={() => abrirProduto(p)} style={{ border: `2px solid ${corBorda}`, borderRadius: configDesign.cards.raioBorda, overflow: 'visible', padding: '10px', cursor: 'pointer', position: 'relative', backgroundColor: configDesign.cores.fundoCards, boxShadow: configDesign.cards.sombra, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: selo ? '10px' : '0' }}>
                {selo}
-               {itemNoCarrinho && !selo && <div style={{position: 'absolute', top: '-8px', right: '-8px', background: configDesign.cores.primaria, color: '#fff', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: '900', fontSize: '11px', border: '2px solid #fff', zIndex: 2}}>{itemNoCarrinho.quantidade}</div>}
+               {itemNoCarrinho && !selo && <div style={{position: 'absolute', top: '-8px', right: '-8px', background: configDesign.cores.primaria, color: '#fff', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: '900', fontSize: '11px', border: `2px solid ${configDesign.cores.fundoCards}`, zIndex: 2}}>{itemNoCarrinho.quantidade}</div>}
                
-               <div style={{ height: alturaImg, borderRadius: '8px', backgroundImage: `url(${(p.foto_url || '').split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#f1f5f9' }} />
+               <div style={{ height: alturaImg, borderRadius: '8px', backgroundImage: `url(${(p.foto_url || '').split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: configDesign.cores.inputFundo }} />
                
                <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
                  <strong style={{ fontSize: categoriaAtiva === 'DESTAQUES' ? '14px' : '11px', color: configDesign.cores.textoForte, lineHeight: '1.2', height: categoriaAtiva === 'DESTAQUES' ? 'auto' : '26px', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
@@ -623,7 +613,7 @@ export default function MenuCliente({ usuario }) {
                  </strong>
                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto', paddingTop: '5px' }}>
                    <span style={{ color: configDesign.cores.primaria, fontWeight: '900', fontSize: categoriaAtiva === 'DESTAQUES' ? '18px' : '13px' }}>{p.preco || 'R$ 0,00'}</span>
-                   <span style={{ fontSize: '10px', color: configDesign.cores.textoSuave, fontWeight: 'bold', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
+                   <span style={{ fontSize: '10px', color: configDesign.cores.textoSuave, fontWeight: 'bold', background: configDesign.cores.inputFundo, padding: '2px 6px', borderRadius: '4px' }}>
                      {itemNoCarrinho ? formatarQtdUnidade(itemNoCarrinho.quantidade, p.unidade_medida) : (p.unidade_medida || 'UN')}
                    </span>
                  </div>
@@ -633,9 +623,8 @@ export default function MenuCliente({ usuario }) {
         })}
       </div>
 
-      {/* BOTÃO CARRINHO FLUTUANTE */}
       {carrinho.length > 0 && !isAppTravado && (
-        <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.textoForte, color: '#fff', border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer', transition: configDesign.animacoes.transicaoSuave, transform: navState.show ? 'translateY(0)' : 'translateY(20px)' }}>
+        <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer', transition: configDesign.animacoes.transicaoSuave, transform: navState.show ? 'translateY(0)' : 'translateY(20px)' }}>
           🛒 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.primaria, color: '#fff', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: `2px solid ${configDesign.cores.textoForte}`, fontWeight: 'bold' }}>{carrinho.reduce((a,c)=>a+c.quantidade,0)}</span>
         </button>
       )}
@@ -644,11 +633,11 @@ export default function MenuCliente({ usuario }) {
       {modalNotificacoesAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 5000, display: 'flex', justifyContent: 'flex-end', backdropFilter: 'blur(4px)' }}>
           <div style={{ width: '85%', maxWidth: '380px', height: '100%', background: configDesign.cores.fundoCards, display: 'flex', flexDirection: 'column', animation: 'slideIn 0.3s ease-out' }}>
-            <div style={{ padding: '25px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ padding: '25px 20px', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontWeight: '900', color: configDesign.cores.textoForte }}>Notificações</h3>
               <div style={{ display: 'flex', gap: '15px' }}>
                 <button onClick={() => setModalConfigNotifAberto(true)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>⚙️</button>
-                <button onClick={() => { setModalNotificacoesAberto(false); setHistoricoNotificacoes(prev => prev.map(n => ({...n, lida: true}))); }} style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer', color: '#111' }}>✕</button>
+                <button onClick={() => { setModalNotificacoesAberto(false); setHistoricoNotificacoes(prev => prev.map(n => ({...n, lida: true}))); }} style={{ background: configDesign.cores.inputFundo, border: 'none', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer', color: configDesign.cores.textoForte }}>✕</button>
               </div>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '15px' }}>
@@ -656,14 +645,14 @@ export default function MenuCliente({ usuario }) {
                 <div style={{ textAlign: 'center', marginTop: '50px', color: configDesign.cores.textoSuave }}>Nenhuma notificação por enquanto.</div>
               ) : (
                 historicoNotificacoes.map(n => (
-                  <div key={n.id} onClick={() => lidarComCliqueNotificacao(n.mensagem)} style={{ padding: '15px', borderRadius: '15px', background: n.lida ? configDesign.cores.fundoGeral : '#fff7ed', marginBottom: '12px', border: n.lida ? '1px solid #eee' : `1px solid ${configDesign.cores.primaria}`, cursor: 'pointer' }}>
+                  <div key={n.id} onClick={() => lidarComCliqueNotificacao(n.mensagem)} style={{ padding: '15px', borderRadius: '15px', background: n.lida ? configDesign.cores.fundoGeral : (isEscuro ? '#451a03' : '#fff7ed'), marginBottom: '12px', border: n.lida ? `1px solid ${configDesign.cores.borda}` : `1px solid ${configDesign.cores.primaria}`, cursor: 'pointer' }}>
                     <div style={{ fontWeight: 'bold', fontSize: '13px', color: configDesign.cores.textoForte }}>{n.mensagem}</div>
                     <div style={{ fontSize: '10px', color: configDesign.cores.textoSuave, marginTop: '5px' }}>{n.data}</div>
                   </div>
                 ))
               )}
             </div>
-            <button onClick={() => setHistoricoNotificacoes([])} style={{ margin: '20px', padding: '15px', border: 'none', background: '#fef2f2', color: configDesign.cores.alerta, borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>Limpar Histórico</button>
+            <button onClick={() => setHistoricoNotificacoes([])} style={{ margin: '20px', padding: '15px', border: 'none', background: isEscuro ? '#450a0a' : '#fef2f2', color: configDesign.cores.alerta, borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>Limpar Histórico</button>
           </div>
         </div>
       )}
@@ -680,17 +669,17 @@ export default function MenuCliente({ usuario }) {
               { id: 'promocoes', label: 'Novas Promoções' },
               { id: 'novidades', label: 'Novos Produtos' }
             ].map(item => (
-              <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px 0', borderBottom: '1px solid #eee' }}>
+              <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}` }}>
                 <span style={{ fontWeight: 'bold', fontSize: '14px', color: configDesign.cores.textoForte }}>{item.label}</span>
                 <input type="checkbox" checked={configNotif[item.id]} onChange={() => setConfigNotif({...configNotif, [item.id]: !configNotif[item.id]})} style={{ width: '20px', height: '20px', accentColor: configDesign.cores.primaria }} />
               </div>
             ))}
             {deferredPrompt && (
-              <button onClick={instalarApp} style={{ width: '100%', marginTop: '15px', padding: '15px', background: '#f1f5f9', color: '#111', borderRadius: '15px', fontWeight: 'bold', border: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px' }}>
+              <button onClick={instalarApp} style={{ width: '100%', marginTop: '15px', padding: '15px', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte, borderRadius: '15px', fontWeight: 'bold', border: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px' }}>
                  📲 Instalar Aplicativo
               </button>
             )}
-            <button onClick={() => setModalConfigNotifAberto(false)} style={{ width: '100%', marginTop: '15px', padding: '15px', background: configDesign.cores.textoForte, color: '#fff', borderRadius: '15px', fontWeight: 'bold', border: 'none' }}>Salvar Preferências</button>
+            <button onClick={() => setModalConfigNotifAberto(false)} style={{ width: '100%', marginTop: '15px', padding: '15px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoCards, borderRadius: '15px', fontWeight: 'bold', border: 'none' }}>Salvar Preferências</button>
           </div>
         </div>
       )}
@@ -702,16 +691,15 @@ export default function MenuCliente({ usuario }) {
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ margin: 0, color: configDesign.cores.textoForte }}>Configurações</h3>
-              <button onClick={() => setModalConfiguracoesAberto(false)} style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer', color: '#111', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>✕</button>
+              <button onClick={() => setModalConfiguracoesAberto(false)} style={{ background: configDesign.cores.inputFundo, border: 'none', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer', color: configDesign.cores.textoForte, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>✕</button>
             </div>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <button onClick={() => { setModalConfiguracoesAberto(false); setModalSenhaAberto(true); }} style={{ width: '100%', padding: '18px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '15px', fontWeight: 'bold', color: configDesign.cores.textoForte, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px' }}>
+              <button onClick={() => { setModalConfiguracoesAberto(false); setModalSenhaAberto(true); }} style={{ width: '100%', padding: '18px', background: configDesign.cores.fundoGeral, border: `1px solid ${configDesign.cores.borda}`, borderRadius: '15px', fontWeight: 'bold', color: configDesign.cores.textoForte, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px' }}>
                 🔒 Alterar Minha Senha
               </button>
               
-              {/* Espaço reservado para futuras funções */}
-              <div style={{ padding: '20px', marginTop: '10px', background: '#f1f5f9', borderRadius: '15px', border: '1px dashed #cbd5e1', color: configDesign.cores.textoSuave, fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}>
+              <div style={{ padding: '20px', marginTop: '10px', background: configDesign.cores.inputFundo, borderRadius: '15px', border: `1px dashed ${configDesign.cores.borda}`, color: configDesign.cores.textoSuave, fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}>
                  Mais opções em breve...
               </div>
             </div>
@@ -728,17 +716,17 @@ export default function MenuCliente({ usuario }) {
             
             <div style={{ marginBottom: '15px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Senha Antiga</label>
-              <input type={mostrarSenha ? "text" : "password"} placeholder="Digite a senha atual" value={dadosSenha.antiga} onChange={e => setDadosSenha({...dadosSenha, antiga: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid #ddd', background: '#f8fafc', color: '#111', outline: 'none' }} />
+              <input type={mostrarSenha ? "text" : "password"} placeholder="Digite a senha atual" value={dadosSenha.antiga} onChange={e => setDadosSenha({...dadosSenha, antiga: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
             </div>
 
             <div style={{ marginBottom: '15px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Nova Senha</label>
-              <input type={mostrarSenha ? "text" : "password"} placeholder="No mínimo 6 caracteres" value={dadosSenha.nova} onChange={e => setDadosSenha({...dadosSenha, nova: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid #ddd', background: '#f8fafc', color: '#111', outline: 'none' }} />
+              <input type={mostrarSenha ? "text" : "password"} placeholder="No mínimo 6 caracteres" value={dadosSenha.nova} onChange={e => setDadosSenha({...dadosSenha, nova: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
             </div>
 
             <div style={{ marginBottom: '15px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Repetir Nova Senha</label>
-              <input type={mostrarSenha ? "text" : "password"} placeholder="Digite a nova senha novamente" value={dadosSenha.confirma} onChange={e => setDadosSenha({...dadosSenha, confirma: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid #ddd', background: '#f8fafc', color: '#111', outline: 'none' }} />
+              <input type={mostrarSenha ? "text" : "password"} placeholder="Digite a nova senha novamente" value={dadosSenha.confirma} onChange={e => setDadosSenha({...dadosSenha, confirma: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
@@ -746,7 +734,7 @@ export default function MenuCliente({ usuario }) {
               <label htmlFor="showPass" style={{ fontSize: '13px', color: configDesign.cores.textoForte, cursor: 'pointer' }}>Mostrar senhas</label>
             </div>
 
-            {erroSenha && <div style={{ color: configDesign.cores.alerta, fontSize: '12px', fontWeight: 'bold', textAlign: 'center', marginBottom: '15px', background: '#fef2f2', padding: '10px', borderRadius: '8px' }}>{erroSenha}</div>}
+            {erroSenha && <div style={{ color: configDesign.cores.alerta, fontSize: '12px', fontWeight: 'bold', textAlign: 'center', marginBottom: '15px', background: isEscuro ? '#450a0a' : '#fef2f2', padding: '10px', borderRadius: '8px' }}>{erroSenha}</div>}
 
             <button onClick={salvarNovaSenha} disabled={carregandoSenha} style={{ width: '100%', padding: '18px', background: configDesign.cores.primaria, color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '15px' }}>
               {carregandoSenha ? 'SALVANDO...' : 'CONFIRMAR ALTERAÇÃO'}
@@ -764,9 +752,9 @@ export default function MenuCliente({ usuario }) {
            <div style={{ backgroundColor: configDesign.cores.fundoCards, padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', boxShadow: '0 -10px 30px rgba(0,0,0,0.1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <h2 style={{margin: 0, fontSize: '20px', color: configDesign.cores.textoForte, flex: 1}}>{produtoExpandido.nome}</h2>
-                <span style={{ fontSize: '12px', background: '#f1f5f9', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: '#111' }}>Vendido por {produtoExpandido.unidade_medida || 'UN'}</span>
+                <span style={{ fontSize: '12px', background: configDesign.cores.inputFundo, padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>Vendido por {produtoExpandido.unidade_medida || 'UN'}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: '1px dashed #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
                 <div>
                   <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário</span>
                   <span style={{color: configDesign.cores.primaria, fontSize: '20px', fontWeight: '900'}}>{produtoExpandido.preco}</span>
@@ -779,19 +767,19 @@ export default function MenuCliente({ usuario }) {
               {!isAppTravado ? (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', margin: '25px 0' }}>
-                     <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontWeight: 'bold', color: '#111' }}>-</button>
+                     <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: configDesign.cores.inputFundo, cursor: 'pointer', fontWeight: 'bold', color: configDesign.cores.textoForte }}>-</button>
                      <div style={{ position: 'relative' }}>
-                       <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '80px', height: '55px', fontSize: '24px', fontWeight: '900', textAlign: 'center', borderRadius: '15px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: '#111' }} />
+                       <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '80px', height: '55px', fontSize: '24px', fontWeight: '900', textAlign: 'center', borderRadius: '15px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
                      </div>
-                     <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontWeight: 'bold', color: '#111' }}>+</button>
+                     <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: configDesign.cores.inputFundo, cursor: 'pointer', fontWeight: 'bold', color: configDesign.cores.textoForte }}>+</button>
                   </div>
-                  <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoCards, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>
+                  <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>
                     {carrinho.find(i => i.id === produtoExpandido.id) ? 'ATUALIZAR QUANTIDADE' : 'ADICIONAR AO CARRINHO'}
                   </button>
                 </>
               ) : (
                 <div style={{ marginTop: '25px' }}>
-                  <button disabled style={{ width: '100%', padding: '22px', background: '#e2e8f0', color: '#94a3b8', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '13px' }}>
+                  <button disabled style={{ width: '100%', padding: '22px', background: isEscuro ? '#334155' : '#e2e8f0', color: isEscuro ? '#94a3b8' : '#94a3b8', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '13px' }}>
                     🔒 {modoVisualizacao ? 'PEDIDO JÁ ENVIADO' : 'AGUARDANDO LIBERAÇÃO DE PREÇOS'}
                   </button>
                 </div>
@@ -803,21 +791,21 @@ export default function MenuCliente({ usuario }) {
       {/* MODAL CARRINHO */}
       {modalCarrinhoAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: configDesign.cores.fundoCards, zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ margin: 0, fontWeight: '900', color: configDesign.cores.textoForte }}>Meu Carrinho</h2>
-            <button onClick={() => { setModalCarrinhoAberto(false); setItemEditandoId(null); }} style={{ border: 'none', background: '#f1f5f9', borderRadius: '50%', width: '40px', height: '40px', fontWeight: 'bold', cursor: 'pointer', color: '#111' }}>✕</button>
+            <button onClick={() => { setModalCarrinhoAberto(false); setItemEditandoId(null); }} style={{ border: 'none', background: configDesign.cores.inputFundo, borderRadius: '50%', width: '40px', height: '40px', fontWeight: 'bold', cursor: 'pointer', color: configDesign.cores.textoForte }}>✕</button>
           </div>
           <div style={{ padding: '10px 20px' }}>
-            <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>🗑️ ESVAZIAR CARRINHO</button>
+            <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: isEscuro ? '#450a0a' : '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>🗑️ ESVAZIAR CARRINHO</button>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px' }}>
             {carrinho.map(item => (
-              <div key={item.id} style={{ padding: '15px 0', borderBottom: '1px solid #f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div key={item.id} style={{ padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 {itemEditandoId === item.id ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-                     <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: '#f1f5f9', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold', color: '#111'}}>-</button>
-                     <input type="number" value={item.quantidade} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: '1px solid #ccc', color: '#111' }} />
-                     <button onClick={() => alterarQtdCart(item.id, 1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: '#f1f5f9', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold', color: '#111'}}>+</button>
+                     <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', cursor: 'pointer', fontWeight: 'bold', color: configDesign.cores.textoForte}}>-</button>
+                     <input type="number" value={item.quantidade} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
+                     <button onClick={() => alterarQtdCart(item.id, 1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', cursor: 'pointer', fontWeight: 'bold', color: configDesign.cores.textoForte}}>+</button>
                      <button onClick={() => setItemEditandoId(null)} style={{marginLeft: 'auto', background: configDesign.cores.sucesso, color: 'white', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer'}}>OK</button>
                   </div>
                 ) : (
@@ -833,9 +821,9 @@ export default function MenuCliente({ usuario }) {
               </div>
             ))}
           </div>
-          <div style={{ padding: '20px', borderTop: '1px solid #eee', background: configDesign.cores.fundoGeral }}>
+          <div style={{ padding: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontWeight: '900', fontSize: '18px', color: configDesign.cores.textoForte }}><span>Total Estimado:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
-            <button onClick={() => setModalRevisaoAberto(true)} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoCards, borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>REVISAR E ENVIAR</button>
+            <button onClick={() => setModalRevisaoAberto(true)} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>REVISAR E ENVIAR</button>
           </div>
         </div>
       )}
@@ -845,9 +833,9 @@ export default function MenuCliente({ usuario }) {
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
           <div style={{ backgroundColor: configDesign.cores.fundoCards, width: '100%', maxWidth: '400px', borderRadius: '28px', padding: '30px', display: 'flex', flexDirection: 'column', maxHeight: '80vh' }}>
             <h3 style={{marginTop: 0, textAlign: 'center', fontWeight: '900', color: configDesign.cores.textoForte}}>Confirmação do Pedido</h3>
-            <div style={{ flex: 1, overflowY: 'auto', marginBottom: '20px', borderTop: '1px solid #eee', borderBottom: '1px solid #eee', padding: '10px 0' }}>
+            <div style={{ flex: 1, overflowY: 'auto', marginBottom: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, borderBottom: `1px solid ${configDesign.cores.borda}`, padding: '10px 0' }}>
                 {carrinho.map((item, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px dashed #f1f5f9' }}>
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
                         <div>
                           <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item.nome}</span>
                           <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'}</div>
@@ -862,6 +850,7 @@ export default function MenuCliente({ usuario }) {
           </div>
         </div>
       )}
+
       <style>{`
         @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
       `}</style>
