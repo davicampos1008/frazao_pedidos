@@ -79,21 +79,31 @@ export default function Fornecedores() {
       return alert("⚠️ V.I.R.T.U.S INFORMA: Para pessoa física (CPF), o NOME COMPLETO é obrigatório!");
     }
 
-    // 🛡️ TRAVA DE DUPLICIDADE: Impede criar novo se já existe nome igual
+    // 🛡️ TRAVA DE DUPLICIDADE: Impede criar novo se já existe nome igual e é um cadastro novo
     if (!dados.id && fornecedores.find(f => f.nome_fantasia === dados.nome_fantasia)) {
        return alert("⚠️ Já existe um fornecedor com este Nome Fantasia! Selecione-o na lista de sugestões se deseja atualizar.");
     }
 
     const { error } = await supabase.from('fornecedores').upsert([dados]);
-    if (!error) { alert("✅ Fornecedor registrado com sucesso!"); setModalAberto(null); carregarFornecedores(); } 
-    else { alert("Erro no Banco de Dados: " + error.message); }
+    if (!error) { 
+      alert("✅ Fornecedor registrado com sucesso!"); 
+      setModalAberto(null); 
+      carregarFornecedores(); 
+    } else { 
+      alert("Erro no Banco de Dados: " + error.message); 
+    }
   }
 
   const filtrados = fornecedores.filter(f => f.nome_fantasia?.toLowerCase().includes(busca.toLowerCase()) || f.nome_completo?.toLowerCase().includes(busca.toLowerCase()));
 
-  // Lógica de pesquisa automática
-  const fornecedoresFiltradosNome = dados.nome_fantasia ? fornecedores.filter(f => f.nome_fantasia?.toLowerCase().includes(dados.nome_fantasia.toLowerCase()) && f.id !== dados.id) : [];
-  const fornecedorTelefoneExistente = dados.telefone ? fornecedores.find(f => f.telefone === dados.telefone && f.id !== dados.id) : null;
+  // 💡 LÓGICA DE PESQUISA AUTOMÁTICA EM TEMPO REAL
+  const fornecedoresFiltradosNome = dados.nome_fantasia && dados.nome_fantasia.length > 2 
+    ? fornecedores.filter(f => f.nome_fantasia?.toLowerCase().includes(dados.nome_fantasia.toLowerCase()) && f.id !== dados.id) 
+    : [];
+    
+  const fornecedorTelefoneExistente = dados.telefone && dados.telefone.length > 13 
+    ? fornecedores.find(f => f.telefone === dados.telefone && f.id !== dados.id) 
+    : null;
 
   const cssLabel = { fontSize: configDesign.inputs.tamanhoTitulos, fontWeight: '900', color: configDesign.inputs.corTitulos, display: 'block', marginBottom: '6px' };
   const cssInput = (bloqueado) => ({ width: '100%', padding: configDesign.inputs.padding, borderRadius: configDesign.inputs.raio, border: configDesign.inputs.borda, backgroundColor: bloqueado ? configDesign.inputs.fundoBloqueado : configDesign.inputs.fundoLivre, outline: 'none', boxSizing: 'border-box' });
@@ -144,13 +154,13 @@ export default function Fornecedores() {
                     placeholder="Ex: DISTRIBUIDORA VALE VERDE" 
                   />
                   
-                  {/* 💡 CAIXA DE SUGESTÃO PARA EVITAR DUPLICAÇÃO */}
+                  {/* 💡 CAIXA DE SUGESTÃO PARA EVITAR DUPLICAÇÃO DE FORNECEDORES */}
                   {mostrarSugestoesNome && editando && fornecedoresFiltradosNome.length > 0 && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', marginTop: '5px' }}>
-                      <div style={{ padding: '10px', fontSize: '11px', color: '#f97316', fontWeight: 'bold', backgroundColor: '#fff7ed' }}>⚠️ Já existe(m) fornecedor(es) com nome parecido:</div>
+                      <div style={{ padding: '10px', fontSize: '11px', color: '#f97316', fontWeight: 'bold', backgroundColor: '#fff7ed' }}>⚠️ Já existe um fornecedor com nome parecido:</div>
                       {fornecedoresFiltradosNome.map(f => (
                         <div key={f.id} onClick={() => { setDados(f); setModalAberto(f); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px', fontWeight: 'bold', color: '#111' }}>
-                          {f.nome_fantasia} <span style={{ color: '#999', fontSize: '10px', marginLeft: '5px' }}>(Clique para editar este)</span>
+                          {f.nome_fantasia} <span style={{ color: '#999', fontSize: '10px', marginLeft: '5px' }}>(Clique para editar este cadastro)</span>
                         </div>
                       ))}
                       <div onClick={() => setMostrarSugestoesNome(false)} style={{ padding: '10px', textAlign: 'center', backgroundColor: '#f8fafc', color: '#ef4444', fontSize: '11px', fontWeight: '900', cursor: 'pointer' }}>FECHAR ✕</div>
@@ -170,7 +180,9 @@ export default function Fornecedores() {
                   
                   {/* 💡 ALERTA DE TELEFONE JÁ EXISTENTE */}
                   {fornecedorTelefoneExistente && editando && (
-                    <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold', display: 'block', marginTop: '5px' }}>⚠️ Este número já está cadastrado para: {fornecedorTelefoneExistente.nome_fantasia}</span>
+                    <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', padding: '10px', borderRadius: '8px', marginTop: '8px', color: '#ef4444', fontSize: '12px', fontWeight: 'bold' }}>
+                      ⚠️ ALERTA: Este número já está sendo usado pelo fornecedor: <br/><span style={{ color: '#b91c1c' }}>{fornecedorTelefoneExistente.nome_fantasia}</span>
+                    </div>
                   )}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '15px' }}>
