@@ -36,9 +36,7 @@ function App() {
   };
 
   const [usuarioLogado, setUsuarioLogado] = useState(null);
-  
-  // 💡 MEMÓRIA DA ÚLTIMA TELA
-  const [telaAtiva, setTelaAtiva] = useState(() => localStorage.getItem('telaAtivaVIRTUS') || 'inicio');
+  const [telaAtiva, setTelaAtiva] = useState('inicio');
   const [menuAberto, setMenuAberto] = useState(false);
 
   // 💡 ESTADOS PWA E NOTIFICAÇÃO (APP)
@@ -51,9 +49,14 @@ function App() {
     if (usuarioSalvo) {
       const dadosUsuario = JSON.parse(usuarioSalvo);
       setUsuarioLogado(dadosUsuario);
-      // Só direciona pro inicio/cliente se não houver memória da última tela
-      if (!localStorage.getItem('telaAtivaVIRTUS')) {
-         setTelaAtiva(dadosUsuario.perfil === 'admin' ? 'inicio' : 'cliente');
+      
+      // 💡 LÓGICA CORRIGIDA: Força a ler a última tela salva na memória
+      const ultimaTela = localStorage.getItem('telaAtivaVIRTUS');
+      if (ultimaTela) {
+        setTelaAtiva(ultimaTela);
+      } else {
+        // Se não tiver tela salva (primeiro acesso), segue a regra padrão
+        setTelaAtiva(dadosUsuario.perfil === 'admin' ? 'inicio' : 'cliente');
       }
     }
 
@@ -70,10 +73,12 @@ function App() {
     return () => window.removeEventListener('beforeinstallprompt', escutarInstalacao);
   }, []);
 
-  // 💡 SALVA A TELA SEMPRE QUE MUDAR
+  // 💡 SALVA A TELA SEMPRE QUE ELA MUDAR (Apenas se o usuário estiver logado)
   useEffect(() => {
-    localStorage.setItem('telaAtivaVIRTUS', telaAtiva);
-  }, [telaAtiva]);
+    if (usuarioLogado && telaAtiva) {
+      localStorage.setItem('telaAtivaVIRTUS', telaAtiva);
+    }
+  }, [telaAtiva, usuarioLogado]);
 
   const instalarApp = async () => {
     if (eventoInstalacao) {
@@ -106,7 +111,7 @@ function App() {
   const fazerLogout = () => {
     if(window.confirm("Sair do sistema?")) {
       localStorage.removeItem('usuarioVIRTUS');
-      localStorage.removeItem('telaAtivaVIRTUS'); // Limpa a memória da tela ao sair
+      localStorage.removeItem('telaAtivaVIRTUS'); // 💡 Limpa a memória da tela ao sair
       setUsuarioLogado(null);
       setTelaAtiva('inicio');
       setMenuAberto(false);
@@ -222,7 +227,7 @@ function App() {
           </div>
         )}
 
-        {/* COMPONENTES CARREGADOS (Passando o Tema para o App Cliente) */}
+        {/* COMPONENTES CARREGADOS */}
         {telaAtiva === 'lojas' && <Lojas setTelaAtiva={setTelaAtiva} />}
         {telaAtiva === 'usuarios' && <Usuarios />}
         {telaAtiva === 'fornecedores' && <Fornecedores />}
