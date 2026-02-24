@@ -22,8 +22,8 @@ export default function MenuCliente({ usuario }) {
       fundo: '#ffffff',
       raioBorda: '16px',
       sombra: '0 4px 12px rgba(0,0,0,0.03)',
-      alturaImgDestaque: '220px', // Altura grande para aba Destaques
-      alturaImgPequena: '85px'    // Altura compacta para as outras abas
+      alturaImgDestaque: '220px', 
+      alturaImgPequena: '85px'    
     },
     animacoes: {
       transicaoSuave: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
@@ -35,7 +35,6 @@ export default function MenuCliente({ usuario }) {
   const [precosLiberados, setPrecosLiberados] = useState(false);
   const [buscaMenu, setBuscaMenu] = useState('');
   
-  // 💡 CARRINHO BLINDADO: Salva e recupera da memória do celular (LocalStorage)
   const [carrinho, setCarrinho] = useState(() => {
     try {
       const salvo = localStorage.getItem('carrinho_virtus');
@@ -59,25 +58,56 @@ export default function MenuCliente({ usuario }) {
   const [banners, setBanners] = useState({ topo: '', logo: '', tematico: '' });
   const [notificacoes, setNotificacoes] = useState([]);
   const [permissaoPush, setPermissaoPush] = useState('default');
+
+  // --- NOVOS ESTADOS V.I.R.T.U.S ---
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [historicoNotificacoes, setHistoricoNotificacoes] = useState(() => {
+    const salvo = localStorage.getItem('notif_history_virtus');
+    return salvo ? JSON.parse(salvo) : [];
+  });
+  const [modalNotificacoesAberto, setModalNotificacoesAberto] = useState(false);
+  const [modalConfigNotifAberto, setModalConfigNotifAberto] = useState(false);
+  const [configNotif, setConfigNotif] = useState({
+    precos: true, edicao: true, promocoes: true, aumento: true
+  });
   
   const prevPrecosRef = useRef(false);
+  const produtosAntigosRef = useRef([]);
   const carrinhoRef = useRef(carrinho);
   const listaHojeRef = useRef(listaEnviadaHoje);
 
   const categorias = ['DESTAQUES', 'TODOS', 'FRUTAS', 'VERDURAS', 'LEGUMES', 'HORTALISSAS', 'CAIXARIAS', 'EMBANDEJADOS', 'SACARIAS', 'VARIADOS'];
   const hoje = new Date().toLocaleDateString('en-CA'); 
 
-  // --- SAUDAÇÃO INTELIGENTE ---
-  const horaAtual = new Date().getHours();
-  const saudacao = horaAtual < 12 ? 'Bom dia' : horaAtual < 18 ? 'Boa tarde' : 'Boa noite';
-  const primeiroNome = (usuario?.nome || 'Cliente').split(' ')[0];
-  const nomeLojaLimpo = (usuario?.loja || 'Matriz').replace(/^\d+\s*-\s*/, '').trim();
+  // 💡 CORREÇÃO DE FUNDO GLOBAL
+  useEffect(() => {
+    document.body.style.backgroundColor = configDesign.cores.fundoGeral;
+  }, [configDesign.cores.fundoGeral]);
 
-  // 💡 SALVAMENTO SILENCIOSO
+  // 💡 CAPTURA INSTALADOR PWA
+  useEffect(() => {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    });
+  }, []);
+
+  const instalarApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') setDeferredPrompt(null);
+  };
+
+  // 💡 SALVAMENTO SILENCIOSO E HISTÓRICO
   useEffect(() => {
     localStorage.setItem('carrinho_virtus', JSON.stringify(carrinho));
     carrinhoRef.current = carrinho;
   }, [carrinho]);
+
+  useEffect(() => {
+    localStorage.setItem('notif_history_virtus', JSON.stringify(historicoNotificacoes));
+  }, [historicoNotificacoes]);
 
   useEffect(() => { listaHojeRef.current = listaEnviadaHoje; }, [listaEnviadaHoje]);
 
@@ -92,20 +122,31 @@ export default function MenuCliente({ usuario }) {
       const permissao = await Notification.requestPermission();
       setPermissaoPush(permissao);
       if (permissao === "granted") {
-        mostrarNotificacao("Notificações ativadas! Avisaremos sobre preços e liberações.", "sucesso");
+        mostrarNotificacao("Notificações ativadas! Você receberá avisos com som.", "sucesso");
       }
     }
   };
 
   const dispararPushNotification = (titulo, mensagem) => {
     if ("Notification" in window && Notification.permission === "granted") {
-      try { new Notification(titulo, { body: mensagem, icon: banners.logo || 'https://cdn-icons-png.flaticon.com/512/3143/3143636.png' }); } catch (e) {}
+      try { 
+        const n = new Notification(titulo, { 
+          body: mensagem, 
+          icon: banners.logo || 'https://cdn-icons-png.flaticon.com/512/3143/3143636.png',
+          silent: false,
+          requireInteraction: true
+        });
+        // Tenta tocar som se o navegador permitir
+        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
+        audio.play().catch(() => {});
+      } catch (e) {}
     }
   };
 
   const mostrarNotificacao = (mensagem, tipo = 'info', tituloPush = 'Frazão Frutas & CIA') => {
     const id = Date.now() + Math.random();
     setNotificacoes(prev => [...prev, { id, mensagem, tipo }]);
+    setHistoricoNotificacoes(prev => [{ id, mensagem, tipo, data: new Date().toLocaleTimeString(), lida: false }, ...prev].slice(0, 20));
     setTimeout(() => { setNotificacoes(prev => prev.filter(n => n.id !== id)); }, 5000);
     dispararPushNotification(tituloPush, mensagem);
   };
@@ -128,22 +169,21 @@ export default function MenuCliente({ usuario }) {
   const tratarPreco = (p) => parseFloat(String(p || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
   const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // 💡 PLURALIZADOR DE UNIDADE DE MEDIDA
   const formatarQtdUnidade = (qtd, und) => {
     const u = (und || 'UN').toUpperCase();
     if (qtd <= 1) return `${qtd} ${u}`;
     if (['UN', 'KG'].includes(u)) return `${qtd} ${u}`;
     if (u === 'MAÇO') return `${qtd} MAÇOS`;
     if (u === 'SACO') return `${qtd} SACOS`;
-    return `${qtd} ${u}S`; // Transforma CX em CXS, PCT em PCTS, DZ em DZS
+    return `${qtd} ${u}S`;
   };
 
   async function carregarDados(silencioso = false) {
     try {
       const { data: configData } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
       if (configData) {
-        if (!prevPrecosRef.current && configData.precos_liberados && silencioso) {
-          mostrarNotificacao("✅ PREÇOS LIBERADOS! Você já pode fazer seu pedido.", 'sucesso');
+        if (!prevPrecosRef.current && configData.precos_liberados && silencioso && configNotif.precos) {
+          mostrarNotificacao("✅ PREÇOS LIBERADOS! Você já pode fazer seu pedido.", 'sucesso', 'Preços Atualizados');
         }
         prevPrecosRef.current = configData.precos_liberados;
         setPrecosLiberados(configData.precos_liberados);
@@ -161,17 +201,39 @@ export default function MenuCliente({ usuario }) {
       }
       
       const { data: pData } = await supabase.from('produtos').select('*').neq('status_cotacao', 'falta').order('nome', { ascending: true });
-      if (pData) setProdutos(pData);
+      if (pData) {
+        // 💡 RADAR DE NOVIDADES E PROMOÇÕES
+        if (silencioso && produtosAntigosRef.current.length > 0 && configNotif.promocoes) {
+          pData.forEach(novo => {
+            const antigo = produtosAntigosRef.current.find(a => a.id === novo.id);
+            if (novo.promocao && !antigo?.promocao) mostrarNotificacao(`🔥 PROMOÇÃO: ${novo.nome} por apenas ${novo.preco}!`, 'promocao', 'Oferta Imperdível');
+            if (novo.novidade && !antigo?.novidade) mostrarNotificacao(`✨ NOVIDADE: Chegou ${novo.nome}! Confira agora.`, 'novidade', 'Novo Item');
+          });
+        }
+
+        // 💡 RADAR DE AUMENTO DE PREÇO NO CARRINHO
+        if (silencioso && configNotif.aumento) {
+          carrinhoRef.current.forEach(itemCart => {
+            const prodAtual = pData.find(p => p.id === itemCart.id);
+            if (prodAtual && tratarPreco(prodAtual.preco) > itemCart.valorUnit) {
+              mostrarNotificacao(`⚠️ O item "${itemCart.nome}" subiu para ${prodAtual.preco}.`, 'alerta', 'Aviso de Preço');
+            }
+          });
+        }
+
+        produtosAntigosRef.current = pData;
+        setProdutos(pData);
+      }
 
       const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
       if (codLoja) {
         const { data: pedidoExistente } = await supabase.from('pedidos').select('*').eq('data_pedido', hoje).eq('loja_id', codLoja);
         if (pedidoExistente && pedidoExistente.length > 0) {
-          if (silencioso && listaHojeRef.current) {
+          if (silencioso && listaHojeRef.current && configNotif.edicao) {
             const estavaAguardando = listaHojeRef.current.some(i => i.solicitou_refazer === true);
             const agoraEstaLiberado = pedidoExistente.some(i => i.liberado_edicao === true);
             if (estavaAguardando && agoraEstaLiberado) {
-              mostrarNotificacao("🔓 PEDIDO APROVADO! Sua lista voltou para o carrinho.", 'sucesso');
+              mostrarNotificacao("🔓 PEDIDO APROVADO! Sua lista foi liberada para edição.", 'sucesso', 'Edição Liberada');
             }
           }
           setListaEnviadaHoje(pedidoExistente);
@@ -184,7 +246,7 @@ export default function MenuCliente({ usuario }) {
 
   useEffect(() => { carregarDados(); }, [usuario]);
   useEffect(() => {
-    const radar = setInterval(() => { carregarDados(true); }, 10000);
+    const radar = setInterval(() => { carregarDados(true); }, 15000);
     return () => clearInterval(radar);
   }, [usuario]);
 
@@ -219,7 +281,7 @@ export default function MenuCliente({ usuario }) {
     const itemEx = carrinho.find(i => i.id === produtoExpandido.id);
     
     if (itemEx) {
-      setCarrinho(carrinho.map(i => i.id === produtoExpandido.id ? { ...i, quantidade: qtdFinal, total: valorTotalItem } : i));
+      setCarrinho(carrinho.map(i => i.id === produtoExpandido.id ? { ...i, quantidade: qtdFinal, total: valorTotalItem, valorUnit: vUnit } : i));
     } else {
       setCarrinho([...carrinho, { ...produtoExpandido, quantidade: qtdFinal, valorUnit: vUnit, total: valorTotalItem }]);
     }
@@ -253,25 +315,16 @@ export default function MenuCliente({ usuario }) {
     }
   };
 
- const confirmarEnvio = async () => {
+  const confirmarEnvio = async () => {
     const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
     if (!codLoja) return alert("🚨 ERRO: Seu usuário não tem uma Loja vinculada.");
 
     setEnviandoPedido(true);
     try {
-      // CORREÇÃO AQUI: Usando a variável 'hoje' que já tem a data local correta
       const dataFixa = hoje; 
-      
       const dadosParaEnviar = carrinho.map(item => ({
-        loja_id: codLoja, 
-        nome_usuario: usuario?.nome || "Operador", 
-        nome_produto: item.nome, 
-        quantidade: item.quantidade,
-        unidade_medida: item.unidade_medida || 'UN', 
-        data_pedido: dataFixa, // Agora salva com a data certa!
-        solicitou_refazer: false, 
-        liberado_edicao: false, 
-        status_compra: 'pendente' 
+        loja_id: codLoja, nome_usuario: usuario?.nome || "Operador", nome_produto: item.nome, quantidade: item.quantidade,
+        unidade_medida: item.unidade_medida || 'UN', data_pedido: dataFixa, solicitou_refazer: false, liberado_edicao: false, status_compra: 'pendente' 
       }));
 
       await supabase.from('pedidos').delete().eq('data_pedido', dataFixa).eq('loja_id', codLoja);
@@ -280,19 +333,12 @@ export default function MenuCliente({ usuario }) {
 
       setCarrinho([]); 
       localStorage.removeItem('carrinho_virtus');
-      
-      setModalRevisaoAberto(false); 
-      setModalCarrinhoAberto(false); 
-      setModoVisualizacao(false);
-      
+      setModalRevisaoAberto(false); setModalCarrinhoAberto(false); setModoVisualizacao(false);
       await carregarDados(false); 
       window.scrollTo(0,0);
       mostrarNotificacao("🚀 LISTA ENVIADA COM SUCESSO!", 'sucesso', 'Pedido Realizado');
-    } catch (err) { 
-        alert("Erro ao gravar: " + err.message); 
-    } finally { 
-        setEnviandoPedido(false); 
-    }
+    } catch (err) { alert("Erro ao gravar: " + err.message); } 
+    finally { setEnviandoPedido(false); }
   };
 
   const pedirParaEditar = async () => {
@@ -335,7 +381,7 @@ export default function MenuCliente({ usuario }) {
         
         <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 99999, display: 'flex', flexDirection: 'column', gap: '10px', width: '90%', maxWidth: '400px' }}>
           {notificacoes.map(notif => (
-            <div key={notif.id} style={{ background: notif.tipo === 'alerta' ? configDesign.cores.alerta : notif.tipo === 'sucesso' ? configDesign.cores.sucesso : configDesign.cores.primaria, color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px', animation: 'fadeInDown 0.4s ease-out' }}>
+            <div key={notif.id} style={{ background: notif.tipo === 'alerta' ? configDesign.cores.alerta : notif.tipo === 'sucesso' ? configDesign.cores.sucesso : (notif.tipo === 'novidade' ? configDesign.cores.novidade : configDesign.cores.primaria), color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px', animation: 'fadeInDown 0.4s ease-out' }}>
               <span>{notif.mensagem}</span>
             </div>
           ))}
@@ -384,14 +430,14 @@ export default function MenuCliente({ usuario }) {
       {/* TOASTS DE NOTIFICAÇÃO */}
       <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 99999, display: 'flex', flexDirection: 'column', gap: '10px', width: '90%', maxWidth: '400px' }}>
         {notificacoes.map(notif => (
-          <div key={notif.id} style={{ background: notif.tipo === 'alerta' ? configDesign.cores.alerta : configDesign.cores.sucesso, color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px' }}>
+          <div key={notif.id} style={{ background: notif.tipo === 'alerta' ? configDesign.cores.alerta : (notif.tipo === 'sucesso' ? configDesign.cores.sucesso : configDesign.cores.primaria), color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px' }}>
             <span>{notif.mensagem}</span>
           </div>
         ))}
       </div>
 
       {/* HEADER DE BOAS VINDAS */}
-      <div style={{ padding: '25px 20px 15px 20px', backgroundColor: '#fff', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '25px 20px 15px 20px', backgroundColor: '#fff', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '22px', color: configDesign.cores.textoForte, fontWeight: '900' }}>
             {saudacao}, {primeiroNome}!
@@ -401,17 +447,26 @@ export default function MenuCliente({ usuario }) {
           </p>
         </div>
 
-        {modoVisualizacao && (
-          <button onClick={() => setModoVisualizacao(false)} style={{ background: '#f1f5f9', color: configDesign.cores.textoForte, border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-            ⬅️ VER PEDIDO
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          {/* BOTÃO DE NOTIFICAÇÕES (SINO) */}
+          <button onClick={() => setModalNotificacoesAberto(true)} style={{ position: 'relative', background: '#f8fafc', border: 'none', width: '45px', height: '45px', borderRadius: '12px', fontSize: '20px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            🔔
+            {historicoNotificacoes.some(n => !n.lida) && <span style={{ position: 'absolute', top: '-5px', right: '-5px', background: configDesign.cores.alerta, width: '10px', height: '10px', borderRadius: '50%', border: '2px solid #fff' }} />}
           </button>
-        )}
-        
-        {permissaoPush === 'default' && !modoVisualizacao && (
-          <button onClick={solicitarPermissaoPush} style={{ background: '#fef3c7', color: '#d97706', border: 'none', padding: '8px 12px', borderRadius: '10px', fontSize: '11px', fontWeight: '900', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
-            🔔 ATIVAR AVISOS
-          </button>
-        )}
+
+          {/* BOTÃO DE INSTALAÇÃO (SÓ APARECE SE PUDER INSTALAR) */}
+          {deferredPrompt && (
+            <button onClick={instalarApp} style={{ background: configDesign.cores.primaria, color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', boxShadow: '0 4px 10px rgba(249,115,22,0.2)' }}>
+              📲 INSTALAR APP
+            </button>
+          )}
+
+          {modoVisualizacao && (
+            <button onClick={() => setModoVisualizacao(false)} style={{ background: '#f1f5f9', color: configDesign.cores.textoForte, border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>
+              ⬅️ VER PEDIDO
+            </button>
+          )}
+        </div>
       </div>
 
       {/* AVISO DE VISUALIZAÇÃO/BLOQUEIO */}
@@ -432,7 +487,7 @@ export default function MenuCliente({ usuario }) {
         </div>
       )}
 
-      {/* 💡 CABEÇALHO DE BUSCA (A Lógica do Topo e Destaques) */}
+      {/* 💡 CABEÇALHO DE BUSCA */}
       <div style={{ 
         position: categoriaAtiva === 'DESTAQUES' ? 'relative' : 'fixed', 
         top: categoriaAtiva === 'DESTAQUES' ? '0' : (navState.show ? '0' : '-100px'), 
@@ -460,10 +515,10 @@ export default function MenuCliente({ usuario }) {
         </div>
       </div>
 
-      {/* ESPAÇADOR INTELIGENTE (Só aparece se a busca tiver subido pra não encavalar) */}
+      {/* ESPAÇADOR */}
       <div style={{ height: categoriaAtiva === 'DESTAQUES' ? '10px' : '110px' }}></div>
 
-      {/* LISTA DE PRODUTOS (ADAPTÁVEL: DESTAQUES É GRANDE, OUTROS SÃO PEQUENOS) */}
+      {/* LISTA DE PRODUTOS */}
       <div style={{ padding: '0 20px 20px 20px', display: 'grid', gridTemplateColumns: categoriaAtiva === 'DESTAQUES' ? '1fr' : 'repeat(auto-fill, minmax(140px, 1fr))', gap: '15px' }}>
         {produtos.filter(p => {
           if (!(p.nome || '').toLowerCase().includes(buscaMenu.toLowerCase())) return false;
@@ -472,7 +527,6 @@ export default function MenuCliente({ usuario }) {
           return p.categoria === categoriaAtiva;
         }).map(p => {
           const itemNoCarrinho = carrinho.find(i => i.id === p.id);
-          
           let corBorda = configDesign.cards.fundo;
           let selo = null;
           
@@ -518,19 +572,65 @@ export default function MenuCliente({ usuario }) {
         </button>
       )}
 
+      {/* 🛎️ CENTRAL DE NOTIFICAÇÕES (MODAL) */}
+      {modalNotificacoesAberto && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 5000, display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ width: '85%', maxWidth: '350px', height: '100%', backgroundColor: '#fff', boxShadow: '-5px 0 20px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontWeight: '900' }}>Notificações</h3>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={() => setModalConfigNotifAberto(true)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>⚙️</button>
+                <button onClick={() => {setModalNotificacoesAberto(false); setHistoricoNotificacoes(prev => prev.map(n => ({...n, lida: true})))}} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '10px' }}>
+              {historicoNotificacoes.length === 0 ? (
+                <p style={{ textAlign: 'center', color: '#999', marginTop: '50px' }}>Nenhuma notificação por aqui.</p>
+              ) : (
+                historicoNotificacoes.map(n => (
+                  <div key={n.id} style={{ padding: '15px', borderRadius: '12px', background: n.lida ? '#f8fafc' : '#fff7ed', marginBottom: '10px', border: n.lida ? '1px solid #eee' : `1px solid ${configDesign.cores.primaria}` }}>
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>{n.mensagem}</div>
+                    <div style={{ fontSize: '10px', color: '#999', marginTop: '5px' }}>{n.data}</div>
+                  </div>
+                ))
+              )}
+            </div>
+            <button onClick={() => setHistoricoNotificacoes([])} style={{ padding: '15px', border: 'none', background: '#fef2f2', color: configDesign.cores.alerta, fontWeight: 'bold', cursor: 'pointer' }}>LIMPAR TUDO</button>
+          </div>
+        </div>
+      )}
+
+      {/* ⚙️ MODAL CONFIGURAÇÃO DE NOTIFICAÇÕES */}
+      {modalConfigNotifAberto && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 6000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+          <div style={{ backgroundColor: '#fff', width: '100%', maxWidth: '300px', borderRadius: '20px', padding: '20px' }}>
+            <h4 style={{ marginTop: 0, textAlign: 'center' }}>Configurar Alertas</h4>
+            {[
+              { key: 'precos', label: 'Liberação de Preços' },
+              { key: 'edicao', label: 'Edição de Lista aprovada' },
+              { key: 'promocoes', label: 'Novidades e Promoções' },
+              { key: 'aumento', label: 'Aviso de Preço no Carrinho' }
+            ].map(item => (
+              <div key={item.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #eee' }}>
+                <span style={{ fontSize: '13px' }}>{item.label}</span>
+                <input type="checkbox" checked={configNotif[item.key]} onChange={() => setConfigNotif({...configNotif, [item.key]: !configNotif[item.key]})} />
+              </div>
+            ))}
+            <button onClick={() => setModalConfigNotifAberto(false)} style={{ width: '100%', marginTop: '20px', padding: '12px', background: configDesign.cores.textoForte, color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold' }}>SALVAR</button>
+          </div>
+        </div>
+      )}
+
       {/* 🛠️ MODAL DO PRODUTO */}
       {produtoExpandido && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column', backdropFilter: 'blur(5px)' }}>
            <button onClick={() => setProdutoExpandido(null)} style={{ alignSelf: 'flex-end', margin: '20px', color: '#fff', fontSize: '28px', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
-           
            <div style={{ flex: 1, backgroundImage: `url(${(produtoExpandido.foto_url || '').split(',')[0]})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', margin: '20px' }} />
-           
            <div style={{ backgroundColor: '#fff', padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', boxShadow: '0 -10px 30px rgba(0,0,0,0.1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <h2 style={{margin: 0, fontSize: '20px', color: configDesign.cores.textoForte, flex: 1}}>{produtoExpandido.nome}</h2>
                 <span style={{ fontSize: '12px', background: '#f1f5f9', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: configDesign.cores.textoSuave }}>Vendido por {produtoExpandido.unidade_medida || 'UN'}</span>
               </div>
-              
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: '1px dashed #e2e8f0' }}>
                 <div>
                   <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário</span>
@@ -541,17 +641,11 @@ export default function MenuCliente({ usuario }) {
                   <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>{formatarMoeda(tratarPreco(produtoExpandido.preco) * (parseInt(quantidade) || 1))}</span>
                 </div>
               </div>
-
               {!isAppTravado ? (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', margin: '25px 0' }}>
                      <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontWeight: 'bold', color: configDesign.cores.textoSuave }}>-</button>
-                     <div style={{ position: 'relative' }}>
-                       <input 
-                         type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)}
-                         style={{ width: '80px', height: '55px', fontSize: '24px', fontWeight: '900', textAlign: 'center', borderRadius: '15px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte }}
-                       />
-                     </div>
+                     <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '80px', height: '55px', fontSize: '24px', fontWeight: '900', textAlign: 'center', borderRadius: '15px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte }} />
                      <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontWeight: 'bold', color: configDesign.cores.textoSuave }}>+</button>
                   </div>
                   <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>
@@ -593,10 +687,8 @@ export default function MenuCliente({ usuario }) {
                   <div onClick={() => setItemEditandoId(item.id)} style={{ cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: '10px' }}>
                     <div style={{ flex: 1 }}>
                       <span style={{ fontSize: '13px' }}><b style={{color: configDesign.cores.primaria, fontSize: '15px'}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item.nome}</span>
-                      {/* 💡 Exibe o Preço Unitário aqui */}
                       <div style={{ fontSize: '11px', color: '#999', marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'} • Toque para editar qtd</div>
                     </div>
-                    {/* 💡 Exibe o Valor Total da Linha aqui */}
                     <div style={{ fontWeight: '900', color: configDesign.cores.textoForte, fontSize: '14px', whiteSpace: 'nowrap' }}>
                       {formatarMoeda(item.total)}
                     </div>
@@ -608,7 +700,7 @@ export default function MenuCliente({ usuario }) {
           </div>
           <div style={{ padding: '20px', borderTop: '1px solid #eee', background: '#f8fafc' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontWeight: '900', fontSize: '18px' }}><span>Total Estimado:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
-            <button onClick={() => setModalRevisaoAberto(true)} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: '#fff', borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.2)' }}>REVISAR E ENVIAR</button>
+            <button onClick={() => setModalRevisaoAberto(true)} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: '#fff', borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>REVISAR E ENVIAR</button>
           </div>
         </div>
       )}
@@ -630,7 +722,7 @@ export default function MenuCliente({ usuario }) {
                 ))}
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '25px', fontWeight: '900', fontSize: '20px', color: '#111' }}><span>TOTAL FINAL:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
-            <button onClick={confirmarEnvio} disabled={enviandoPedido} style={{ width: '100%', padding: '20px', background: configDesign.cores.sucesso, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '16px', cursor: 'pointer', boxShadow: '0 5px 15px rgba(34,197,94,0.3)' }}>{enviandoPedido ? 'ENVIANDO...' : 'CONFIRMAR ENVIO'}</button>
+            <button onClick={confirmarEnvio} disabled={enviandoPedido} style={{ width: '100%', padding: '20px', background: configDesign.cores.sucesso, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '16px', cursor: 'pointer' }}>{enviandoPedido ? 'ENVIANDO...' : 'CONFIRMAR ENVIO'}</button>
             <button onClick={() => setModalRevisaoAberto(false)} style={{ background: 'none', border: 'none', marginTop: '15px', color: '#999', fontWeight: 'bold', cursor: 'pointer' }}>Voltar e editar carrinho</button>
           </div>
         </div>
