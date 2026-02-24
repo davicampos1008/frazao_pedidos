@@ -671,3 +671,401 @@ export default function FechamentoLojas() {
     </div>
   );
 }
+
+
+dados,
+tipoImpressao,
+dataBr
+ {
+
+
+
+
+const formatarMoeda = (valor) => {
+
+return Number(valor || 0).toLocaleString('pt-BR',{
+
+style:'currency',
+currency:'BRL'
+
+})
+
+}
+
+
+
+
+const isMotGlobal =
+
+tipoImpressao === 'motorista_todos' ||
+
+tipoImpressao === 'motorista_unico'
+
+
+
+
+
+return (
+
+
+<div style={{
+
+padding:'30px',
+fontFamily:'Arial'
+
+}}>
+
+
+
+{/* BOTÕES */}
+
+
+<div style={{
+
+marginBottom:'20px',
+display:'flex',
+gap:'10px'
+
+}}>
+
+
+<button
+
+onClick={() => window.print()}
+
+style={{
+
+background:'#22c55e',
+color:'white',
+border:'none',
+padding:'10px 20px',
+borderRadius:'8px',
+fontWeight:'bold',
+cursor:'pointer'
+
+}}
+
+>
+
+🖨️ IMPRIMIR
+
+</button>
+
+
+
+<button
+
+onClick={() => window.print()}
+
+style={{
+
+background:'#2563eb',
+color:'white',
+border:'none',
+padding:'10px 20px',
+borderRadius:'8px',
+fontWeight:'bold',
+cursor:'pointer'
+
+}}
+
+>
+
+📄 BAIXAR PDF
+
+</button>
+
+
+</div>
+
+
+
+
+{/* LOJAS */}
+
+
+{dados.map((loja,index) => (
+
+
+<div key={index}
+
+style={{
+
+marginBottom:'50px',
+pageBreakAfter:'always'
+
+}}
+
+>
+
+
+
+{/* CABEÇALHO MODELO FLAMINGO */}
+
+
+
+<div style={{
+
+borderBottom:'3px solid black',
+
+paddingBottom:'15px',
+
+marginBottom:'20px'
+
+}}>
+
+
+
+<div style={{
+
+display:'flex',
+
+justifyContent:'space-between',
+
+marginBottom:'10px'
+
+}}>
+
+
+
+<div style={{
+
+fontSize:'20px',
+
+fontWeight:'bold'
+
+}}>
+
+LOJA: {loja.nome_fantasia}
+
+</div>
+
+
+
+<div style={{
+
+fontSize:'20px',
+
+fontWeight:'bold'
+
+}}>
+
+DATA: {dataBr}
+
+</div>
+
+
+</div>
+
+
+
+
+
+{!isMotGlobal && (
+
+
+
+<div style={{
+
+fontSize:'22px',
+
+fontWeight:'900',
+
+marginTop:'10px'
+
+}}>
+
+
+
+VALOR TOTAL:
+
+
+
+<span style={{
+
+marginLeft:'20px'
+
+}}>
+
+
+{formatarMoeda(loja.totalFatura)}
+
+
+</span>
+
+
+
+</div>
+
+
+
+)}
+
+
+
+</div>
+
+
+
+
+
+
+{/* TABELA */}
+
+
+
+<table
+
+style={{
+
+width:'100%',
+borderCollapse:'collapse'
+
+}}
+
+>
+
+
+<thead>
+
+<tr>
+
+<th style={celulaCab}>QTD</th>
+
+<th style={celulaCab}>DESCRIÇÃO</th>
+
+{!isMotGlobal && <th style={celulaCab}>VALOR UNIT</th>}
+
+{!isMotGlobal && <th style={celulaCab}>TOTAL</th>}
+
+</tr>
+
+</thead>
+
+
+
+<tbody>
+
+
+
+{loja.itens.map((item,i) => (
+
+
+
+<tr key={i}>
+
+
+<td style={celula}>
+
+{item.quantidade}
+
+</td>
+
+
+
+<td style={celula}>
+
+{item.nome}
+
+</td>
+
+
+
+{!isMotGlobal && (
+
+<td style={celula}>
+
+{formatarMoeda(item.valor)}
+
+</td>
+
+)}
+
+
+
+{!isMotGlobal && (
+
+<td style={celula}>
+
+{formatarMoeda(
+
+item.quantidade *
+
+item.valor
+
+)}
+
+</td>
+
+)}
+
+
+
+</tr>
+
+
+
+))}
+
+
+
+</tbody>
+
+
+
+</table>
+
+
+
+
+
+
+</div>
+
+
+
+))}
+
+
+
+
+
+</div>
+
+
+
+)
+
+
+
+}
+
+
+
+
+
+const celulaCab = {
+
+border:'1px solid black',
+
+padding:'8px',
+
+fontWeight:'bold',
+
+textAlign:'left',
+
+fontSize:'14px'
+
+}
+
+
+
+const celula = {
+
+border:'1px solid black',
+
+padding:'8px',
+
+fontSize:'14px'
+
+}
