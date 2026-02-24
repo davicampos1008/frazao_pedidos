@@ -16,6 +16,9 @@ export default function Produtos() {
   const [modalAberto, setModalAberto] = useState(null);
   const [editando, setEditando] = useState(false);
   
+  // 💡 Controle de Nomes Parecidos (Evitar Duplicidade)
+  const [mostrarSugestoesNome, setMostrarSugestoesNome] = useState(false);
+  
   // 💡 ESTADO INICIAL AJUSTADO PARA O HORTIFRUTI (Limpo)
   const estadoInicial = { nome: '', categoria: 'FRUTAS', unidade_medida: 'KG', status: true };
   const [dados, setDados] = useState(estadoInicial);
@@ -47,8 +50,14 @@ export default function Produtos() {
 
   // --- 🛡️ SALVAMENTO BLINDADO ---
   async function salvar() {
-    if (!dados.nome) {
+    if (!dados.nome.trim()) {
       return alert("⚠️ V.I.R.T.U.S INFORMA: O Nome do Produto é obrigatório!");
+    }
+
+    // 💡 TRAVA: Impede criar produtos com o mesmo nome exato (Cadastro Duplicado).
+    const duplicado = produtos.find(p => p.nome.trim().toUpperCase() === dados.nome.trim().toUpperCase() && p.id !== dados.id);
+    if (duplicado) {
+       return alert(`⚠️ Ação Bloqueada! Já existe um produto com o nome "${dados.nome}" cadastrado no sistema.\n\nPor favor, utilize a lista de sugestões ao digitar o nome para editar o cadastro existente em vez de criar um novo.`);
     }
 
     const { error } = await supabase.from('produtos').upsert([dados]);
@@ -75,6 +84,11 @@ export default function Produtos() {
     p.categoria?.toLowerCase().includes(busca.toLowerCase())
   );
 
+  // 💡 Auto-completar inteligente para nomes parecidos
+  const produtosFiltradosNome = dados.nome && dados.nome.length > 2 
+    ? produtos.filter(p => p.nome?.toLowerCase().includes(dados.nome.toLowerCase()) && p.id !== dados.id) 
+    : [];
+
   // --- ATALHOS CSS ---
   const cssLabel = { fontSize: configDesign.inputs.tamanhoTitulos, fontWeight: '900', color: configDesign.inputs.corTitulos, display: 'block', marginBottom: '6px' };
   const cssInput = (bloqueado) => ({ width: '100%', padding: configDesign.inputs.padding, borderRadius: configDesign.inputs.raio, border: configDesign.inputs.borda, backgroundColor: bloqueado ? configDesign.inputs.fundoBloqueado : configDesign.inputs.fundoLivre, outline: 'none', boxSizing: 'border-box' });
@@ -87,7 +101,7 @@ export default function Produtos() {
       <div style={{ display: 'flex', gap: '15px' }}>
         <input placeholder="Procurar hortifruti por nome ou categoria..." value={busca} onChange={e => setBusca(e.target.value)} style={{ flex: 1, padding: '18px', borderRadius: configDesign.geral.raioBordaGlobal, border: 'none', boxShadow: configDesign.geral.sombraSuave, outline: 'none' }} />
         <button 
-          onClick={() => { setDados(estadoInicial); setModalAberto({novo: true}); setEditando(true); }}
+          onClick={() => { setDados(estadoInicial); setModalAberto({novo: true}); setEditando(true); setMostrarSugestoesNome(false); }}
           style={{ backgroundColor: configDesign.botoes.salvar, color: configDesign.botoes.textoCor, border: 'none', padding: '0 30px', borderRadius: configDesign.geral.raioBordaGlobal, fontWeight: '900', cursor: 'pointer' }}
         >
           + NOVO PRODUTO
@@ -97,7 +111,7 @@ export default function Produtos() {
       {/* LISTAGEM DE PRODUTOS (CARDS) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
         {filtrados.map(p => (
-          <div key={p.id} onClick={() => { setModalAberto(p); setDados(p); setEditando(false); }} style={{ backgroundColor: configDesign.cards.fundo, padding: '20px', borderRadius: configDesign.geral.raioBordaGlobal, boxShadow: configDesign.geral.sombraSuave, display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', transition: '0.2s', opacity: p.status ? 1 : 0.5 }}>
+          <div key={p.id} onClick={() => { setModalAberto(p); setDados(p); setEditando(false); setMostrarSugestoesNome(false); }} style={{ backgroundColor: configDesign.cards.fundo, padding: '20px', borderRadius: configDesign.geral.raioBordaGlobal, boxShadow: configDesign.geral.sombraSuave, display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', transition: '0.2s', opacity: p.status ? 1 : 0.5 }}>
             <div style={{ width: configDesign.cards.tamanhoIcone, height: configDesign.cards.tamanhoIcone, backgroundColor: configDesign.cards.fundoIcone, borderRadius: configDesign.cards.raioIcone, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', color: configDesign.cards.corIcone, fontSize: '20px', position: 'relative' }}>
               {p.nome?.charAt(0).toUpperCase()}
             </div>
@@ -126,9 +140,33 @@ export default function Produtos() {
               
               {/* GRUPO 1: IDENTIFICAÇÃO BÁSICA */}
               <div style={cssGrupo}>
-                <div>
+                <div style={{ position: 'relative' }}>
                   <label style={cssLabel}>NOME DO PRODUTO (Fruta, Verdura, etc) *</label>
-                  <input onKeyDown={handleKeyDown} disabled={!editando} value={dados.nome} onChange={e => setDados({...dados, nome: e.target.value.toUpperCase()})} style={cssInput(!editando)} placeholder="Ex: BANANA PRATA" />
+                  <input 
+                    onKeyDown={handleKeyDown} 
+                    disabled={!editando} 
+                    value={dados.nome} 
+                    onChange={e => {
+                      setDados({...dados, nome: e.target.value.toUpperCase()});
+                      setMostrarSugestoesNome(true);
+                    }} 
+                    onClick={() => { if(editando) setMostrarSugestoesNome(true); }}
+                    style={cssInput(!editando)} 
+                    placeholder="Ex: BANANA PRATA" 
+                  />
+                  
+                  {/* 💡 CAIXA DE SUGESTÃO NOME DO PRODUTO (Evita Duplicidade) */}
+                  {mostrarSugestoesNome && editando && produtosFiltradosNome.length > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', marginTop: '5px' }}>
+                      <div style={{ padding: '10px', fontSize: '11px', color: '#f97316', fontWeight: 'bold', backgroundColor: '#fff7ed' }}>⚠️ Produtos parecidos já cadastrados:</div>
+                      {produtosFiltradosNome.map(p => (
+                        <div key={p.id} onClick={() => { setDados(p); setModalAberto(p); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px', fontWeight: 'bold', color: '#111' }}>
+                          {p.nome} <span style={{ color: '#999', fontSize: '10px', marginLeft: '5px' }}>({p.categoria})</span>
+                        </div>
+                      ))}
+                      <div onClick={() => setMostrarSugestoesNome(false)} style={{ padding: '10px', textAlign: 'center', backgroundColor: '#f8fafc', color: '#ef4444', fontSize: '11px', fontWeight: '900', cursor: 'pointer' }}>FECHAR ✕</div>
+                    </div>
+                  )}
                 </div>
               </div>
 
