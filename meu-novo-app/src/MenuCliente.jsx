@@ -9,14 +9,14 @@ export default function MenuCliente({ usuario }) {
       fontePadrao: "'Inter', sans-serif"
     },
     cores: {
-      fundoGeral: '#f8fafc',    // Mude aqui para #111111 para tema escuro
+      fundoGeral: '#f8fafc', // Mude aqui para cores escuras e o app seguirá
       primaria: '#f97316',      // Laranja Frazão
-      textoForte: '#111111',    // Mude aqui para #ffffff para tema escuro
+      textoForte: '#111111',    // Mude para #ffffff em temas escuros
       textoSuave: '#64748b',
-      promocao: '#eab308',
-      novidade: '#a855f7',
-      sucesso: '#22c55e',
-      alerta: '#ef4444'
+      promocao: '#eab308',      // Amarelo
+      novidade: '#a855f7',      // Roxo
+      sucesso: '#22c55e',       // Verde
+      alerta: '#ef4444'         // Vermelho
     },
     cards: {
       fundo: '#ffffff',
@@ -34,6 +34,7 @@ export default function MenuCliente({ usuario }) {
   const [categoriaAtiva, setCategoriaAtiva] = useState('DESTAQUES');
   const [precosLiberados, setPrecosLiberados] = useState(false);
   const [buscaMenu, setBuscaMenu] = useState('');
+  
   const [carrinho, setCarrinho] = useState(() => {
     try {
       const salvo = localStorage.getItem('carrinho_virtus');
@@ -46,14 +47,18 @@ export default function MenuCliente({ usuario }) {
   const [modalCarrinhoAberto, setModalCarrinhoAberto] = useState(false);
   const [modalRevisaoAberto, setModalRevisaoAberto] = useState(false);
   const [enviandoPedido, setEnviandoPedido] = useState(false);
+  
   const [listaEnviadaHoje, setListaEnviadaHoje] = useState(null);
   const [modoVisualizacao, setModoVisualizacao] = useState(false); 
   const [itemEditandoId, setItemEditandoId] = useState(null);
+
   const [navState, setNavState] = useState({ show: true, shrink: false });
   const ultimoScroll = useRef(0);
+  
   const [banners, setBanners] = useState({ topo: '', logo: '', tematico: '' });
   const [notificacoes, setNotificacoes] = useState([]);
   const [permissaoPush, setPermissaoPush] = useState('default');
+
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [historicoNotificacoes, setHistoricoNotificacoes] = useState(() => {
     const salvo = localStorage.getItem('historico_notif_virtus');
@@ -72,16 +77,20 @@ export default function MenuCliente({ usuario }) {
 
   const categorias = ['DESTAQUES', 'TODOS', 'FRUTAS', 'VERDURAS', 'LEGUMES', 'HORTALISSAS', 'CAIXARIAS', 'EMBANDEJADOS', 'SACARIAS', 'VARIADOS'];
   const hoje = new Date().toLocaleDateString('en-CA'); 
+
   const horaAtual = new Date().getHours();
   const saudacao = horaAtual < 12 ? 'Bom dia' : horaAtual < 18 ? 'Boa tarde' : 'Boa noite';
   const primeiroNome = (usuario?.nome || 'Cliente').split(' ')[0];
   const nomeLojaLimpo = (usuario?.loja || 'Matriz').replace(/^\d+\s*-\s*/, '').trim();
 
-  // 💡 APLICAÇÃO DE TEMA NO FUNDO GLOBAL
+  // 💡 APLICAÇÃO DE TEMA NO FUNDO DO BODY
   useEffect(() => {
     document.body.style.backgroundColor = configDesign.cores.fundoGeral;
     document.body.style.color = configDesign.cores.textoForte;
-    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); setDeferredPrompt(e); });
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    });
   }, [configDesign.cores.fundoGeral, configDesign.cores.textoForte]);
 
   const instalarApp = async () => {
@@ -100,36 +109,60 @@ export default function MenuCliente({ usuario }) {
     localStorage.setItem('historico_notif_virtus', JSON.stringify(historicoNotificacoes));
   }, [historicoNotificacoes]);
 
-  // 💡 CLIQUE NA NOTIFICAÇÃO (VAI PARA O PRODUTO)
+  useEffect(() => { listaHojeRef.current = listaEnviadaHoje; }, [listaEnviadaHoje]);
+
+  useEffect(() => {
+    if ("Notification" in window) {
+      setPermissaoPush(Notification.permission);
+    }
+  }, []);
+
+  const solicitarPermissaoPush = async () => {
+    if ("Notification" in window) {
+      const permissao = await Notification.requestPermission();
+      setPermissaoPush(permissao);
+      if (permissao === "granted") {
+        mostrarNotificacao("Notificações ativadas! Você receberá alertas externos com som.", "sucesso");
+      }
+    }
+  };
+
+  // 💡 LÓGICA DE CLIQUE NA NOTIFICAÇÃO (VAI DIRETO AO ASSUNTO)
   const lidarComCliqueNotificacao = (msg) => {
-    const termo = msg.match(/"([^"]+)"/) || msg.match(/PROMOÇÃO: (.*?) por/);
-    if (termo && termo[1]) {
-      const p = produtos.find(item => item.nome.toLowerCase().includes(termo[1].toLowerCase()));
-      if (p) {
+    const nomeProduto = msg.match(/"([^"]+)"/) || msg.match(/PROMOÇÃO: (.*?) por/);
+    if (nomeProduto && nomeProduto[1]) {
+      const prod = produtos.find(p => p.nome.toLowerCase().includes(nomeProduto[1].toLowerCase()));
+      if (prod) {
         setModalNotificacoesAberto(false);
-        abrirProduto(p);
+        abrirProduto(prod);
       }
     }
   };
 
   const dispararPushNotification = (titulo, mensagem) => {
     if ("Notification" in window && Notification.permission === "granted") {
-      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
-      audio.play().catch(() => {});
+      try { 
+        const options = {
+          body: mensagem,
+          icon: banners.logo || 'https://cdn-icons-png.flaticon.com/512/3143/3143636.png',
+          badge: banners.logo,
+          vibrate: [200, 100, 200],
+          silent: false
+        };
+        const n = new Notification(titulo, options);
+        
+        // 💡 Som de Alerta Externo
+        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
+        audio.play().catch(() => {});
 
-      if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.ready.then(reg => {
-          reg.showNotification(titulo, {
-            body: mensagem,
-            icon: banners.logo || '/logo.png',
-            vibrate: [200, 100, 200],
-            tag: 'virtus-notif'
-          });
-        });
-      } else {
-        const n = new Notification(titulo, { body: mensagem, icon: banners.logo });
-        n.onclick = () => { window.focus(); lidarComCliqueNotificacao(mensagem); n.close(); };
-      }
+        // 💡 Clique na notificação externa
+        n.onclick = (e) => {
+          e.preventDefault();
+          window.focus();
+          lidarComCliqueNotificacao(mensagem);
+          n.close();
+        };
+      } catch (e) {}
     }
   };
 
@@ -141,12 +174,30 @@ export default function MenuCliente({ usuario }) {
     dispararPushNotification(tituloPush, mensagem);
   };
 
-  const solicitarPermissaoPush = async () => {
-    if ("Notification" in window) {
-      const permissao = await Notification.requestPermission();
-      setPermissaoPush(permissao);
-      if (permissao === "granted") mostrarNotificacao("Notificações ativadas com sucesso!", "sucesso");
-    }
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentY = window.scrollY;
+      if (currentY > ultimoScroll.current && currentY > 150) {
+        setNavState({ show: false, shrink: true }); 
+      } else if (currentY < ultimoScroll.current) {
+        setNavState({ show: true, shrink: currentY > 60 }); 
+      }
+      ultimoScroll.current = currentY;
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const tratarPreco = (p) => parseFloat(String(p || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
+  const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  const formatarQtdUnidade = (qtd, und) => {
+    const u = (und || 'UN').toUpperCase();
+    if (qtd <= 1) return `${qtd} ${u}`;
+    if (['UN', 'KG'].includes(u)) return `${qtd} ${u}`;
+    if (u === 'MAÇO') return `${qtd} MAÇOS`;
+    if (u === 'SACO') return `${qtd} SACOS`;
+    return `${qtd} ${u}S`;
   };
 
   async function carregarDados(silencioso = false) {
@@ -160,13 +211,28 @@ export default function MenuCliente({ usuario }) {
         setPrecosLiberados(configData.precos_liberados);
       }
 
+      const { data: dbBanners } = await supabase.from('banners').select('*');
+      if (dbBanners) {
+        const bMap = {};
+        dbBanners.forEach(b => bMap[b.posicao] = b.imagem_url);
+        setBanners({
+          topo: bMap.topo || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=800',
+          logo: bMap.logo || 'https://cdn-icons-png.flaticon.com/512/3143/3143636.png',
+          tematico: bMap.tematico || 'https://images.unsplash.com/photo-1610832958506-aa56368176cf?auto=format&fit=crop&q=80&w=800'
+        });
+      }
+      
       const { data: pData } = await supabase.from('produtos').select('*').neq('status_cotacao', 'falta').order('nome', { ascending: true });
       if (pData) {
         if (silencioso && produtosAntigosRef.current.length > 0) {
           pData.forEach(novo => {
             const antigo = produtosAntigosRef.current.find(a => a.id === novo.id);
-            if (novo.promocao && !antigo?.promocao && configNotif.promocoes) mostrarNotificacao(`🔥 PROMOÇÃO: "${novo.nome}" por apenas ${novo.preco}!`, 'promocao', 'Nova Oferta');
-            if (novo.novidade && !antigo?.novidade && configNotif.novidades) mostrarNotificacao(`✨ NOVIDADE: Chegou "${novo.nome}"!`, 'novidade', 'Chegou Novidade');
+            if (novo.promocao && !antigo?.promocao && configNotif.promocoes) {
+              mostrarNotificacao(`🔥 PROMOÇÃO: "${novo.nome}" por apenas ${novo.preco}!`, 'promocao', 'Nova Oferta');
+            }
+            if (novo.novidade && !antigo?.novidade && configNotif.novidades) {
+              mostrarNotificacao(`✨ NOVIDADE: Chegou "${novo.nome}"!`, 'novidade', 'Chegou Novidade');
+            }
           });
         }
         produtosAntigosRef.current = pData;
@@ -175,212 +241,507 @@ export default function MenuCliente({ usuario }) {
 
       const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
       if (codLoja) {
-        const { data: pedExist } = await supabase.from('pedidos').select('*').eq('data_pedido', hoje).eq('loja_id', codLoja);
-        if (pedExist && pedExist.length > 0) {
+        const { data: pedidoExistente } = await supabase.from('pedidos').select('*').eq('data_pedido', hoje).eq('loja_id', codLoja);
+        if (pedidoExistente && pedidoExistente.length > 0) {
           if (silencioso && listaHojeRef.current && configNotif.edicao) {
-            const aguard = listaHojeRef.current.some(i => i.solicitou_refazer);
-            const lib = pedExist.some(i => i.liberado_edicao);
-            if (aguard && lib) mostrarNotificacao("🔓 PEDIDO APROVADO! Sua lista voltou para o carrinho.", 'sucesso', 'Edição Liberada');
+            const estavaAguardando = listaHojeRef.current.some(i => i.solicitou_refazer === true);
+            const agoraEstaLiberado = pedidoExistente.some(i => i.liberado_edicao === true);
+            if (estavaAguardando && agoraEstaLiberado) {
+              mostrarNotificacao("🔓 PEDIDO APROVADO! Sua lista voltou para o carrinho.", 'sucesso', 'Edição Liberada');
+            }
           }
-          setListaEnviadaHoje(pedExist);
-        } else { setListaEnviadaHoje(null); }
+          setListaEnviadaHoje(pedidoExistente);
+        } else {
+          setListaEnviadaHoje(null);
+        }
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Erro ao carregar:", e); }
   }
 
   useEffect(() => { carregarDados(); }, [usuario]);
-  useEffect(() => { const radar = setInterval(() => carregarDados(true), 10000); return () => clearInterval(radar); }, [usuario]);
+  useEffect(() => {
+    const radar = setInterval(() => { carregarDados(true); }, 10000);
+    return () => clearInterval(radar);
+  }, [usuario]);
 
   const valorTotalCarrinho = carrinho.reduce((acc, item) => acc + (item.total || 0), 0);
-  const isAppTravado = !precosLiberados || (listaEnviadaHoje && !listaEnviadaHoje.some(i => i.liberado_edicao));
 
-  const abrirProduto = (p) => { setProdutoExpandido(p); setQuantidade(carrinho.find(i => i.id === p.id)?.quantidade || 1); };
+  const edicaoLiberadaBD = listaEnviadaHoje?.some(item => item.liberado_edicao === true);
+  const isAppTravado = !precosLiberados || (listaEnviadaHoje && !edicaoLiberadaBD);
+
+  const abrirProduto = (p) => {
+    const prodAtualizado = produtos.find(item => item.id === p.id) || p;
+    setProdutoExpandido(prodAtualizado);
+    const itemNoCarrinho = carrinho.find(i => i.id === p.id);
+    setQuantidade(itemNoCarrinho ? itemNoCarrinho.quantidade : 1);
+  };
   
-  const tratarInputQuantidade = (v) => { const val = parseInt(v, 10); setQuantidade(isNaN(val) || val < 1 ? '' : val); };
+  const tratarInputQuantidade = (valorDigitado) => {
+    const val = parseInt(valorDigitado, 10);
+    if (isNaN(val) || val < 1) setQuantidade(''); 
+    else setQuantidade(val);
+  };
 
   const salvarNoCarrinho = () => {
-    const qtd = parseInt(quantidade) || 1;
+    const qtdFinal = parseInt(quantidade, 10) || 1;
     const vUnit = tratarPreco(produtoExpandido.preco);
-    if (vUnit === 0 && !window.confirm(`Item "${produtoExpandido.nome}" sem preço definido. Confirmar mesmo assim?`)) return;
+    
+    if (vUnit === 0) {
+      const confirma = window.confirm(`⚠️ AVISO DE COTAÇÃO ⚠️\n\nO item "${produtoExpandido.nome}" ainda não possui preço definido para hoje.\n\nO valor final ficará sujeito à cotação do momento da compra. Deseja confirmar este item na lista mesmo assim?`);
+      if (!confirma) return; 
+    }
+
+    const valorTotalItem = vUnit * qtdFinal;
     const itemEx = carrinho.find(i => i.id === produtoExpandido.id);
-    if (itemEx) setCarrinho(carrinho.map(i => i.id === produtoExpandido.id ? { ...i, quantidade: qtd, total: vUnit * qtd } : i));
-    else setCarrinho([...carrinho, { ...produtoExpandido, quantidade: qtd, valorUnit: vUnit, total: vUnit * qtd }]);
+    
+    if (itemEx) {
+      setCarrinho(carrinho.map(i => i.id === produtoExpandido.id ? { ...i, quantidade: qtdFinal, total: valorTotalItem } : i));
+    } else {
+      setCarrinho([...carrinho, { ...produtoExpandido, quantidade: qtdFinal, valorUnit: vUnit, total: valorTotalItem }]);
+    }
     setProdutoExpandido(null);
+  };
+
+  const alterarQtdCart = (id, delta) => {
+    setCarrinho(prev => prev.map(item => {
+      if (item.id === id) {
+        const novaQtd = Math.max(1, item.quantidade + delta);
+        return { ...item, quantidade: novaQtd, total: novaQtd * item.valorUnit };
+      }
+      return item;
+    }));
+  };
+
+  const alterarQtdCartInput = (id, valor) => {
+    const novaQtd = parseInt(valor, 10) || 1;
+    setCarrinho(prev => prev.map(item => {
+      if (item.id === id) {
+        return { ...item, quantidade: novaQtd, total: novaQtd * item.valorUnit };
+      }
+      return item;
+    }));
+  };
+
+  const zerarCarrinho = () => {
+    if (window.confirm("⚠️ Tem certeza que deseja apagar todos os itens do carrinho?")) {
+      setCarrinho([]);
+      setModalCarrinhoAberto(false);
+    }
   };
 
   const confirmarEnvio = async () => {
     const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
+    if (!codLoja) return alert("🚨 ERRO: Seu usuário não tem uma Loja vinculada.");
+
     setEnviandoPedido(true);
     try {
-      const dados = carrinho.map(item => ({ loja_id: codLoja, nome_usuario: usuario?.nome, nome_produto: item.nome, quantidade: item.quantidade, unidade_medida: item.unidade_medida || 'UN', data_pedido: hoje, status_compra: 'pendente' }));
-      await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
-      const { error } = await supabase.from('pedidos').insert(dados);
+      const dataFixa = hoje; 
+      const dadosParaEnviar = carrinho.map(item => ({
+        loja_id: codLoja, 
+        nome_usuario: usuario?.nome || "Operador", 
+        nome_produto: item.nome, 
+        quantidade: item.quantidade,
+        unidade_medida: item.unidade_medida || 'UN', 
+        data_pedido: dataFixa, 
+        solicitou_refazer: false, 
+        liberado_edicao: false, 
+        status_compra: 'pendente' 
+      }));
+
+      await supabase.from('pedidos').delete().eq('data_pedido', dataFixa).eq('loja_id', codLoja);
+      const { error } = await supabase.from('pedidos').insert(dadosParaEnviar);
       if (error) throw error;
-      setCarrinho([]); localStorage.removeItem('carrinho_virtus');
+
+      setCarrinho([]); 
+      localStorage.removeItem('carrinho_virtus');
       setModalRevisaoAberto(false); setModalCarrinhoAberto(false); setModoVisualizacao(false);
-      await carregarDados(false); window.scrollTo(0,0);
+      await carregarDados(false); 
+      window.scrollTo(0,0);
       mostrarNotificacao("🚀 LISTA ENVIADA COM SUCESSO!", 'sucesso', 'Pedido Realizado');
-    } catch (err) { alert("Erro ao gravar: " + err.message); } finally { setEnviandoPedido(false); }
+    } catch (err) { 
+        alert("Erro ao gravar: " + err.message); 
+    } finally { 
+        setEnviandoPedido(false); 
+    }
   };
 
+  const pedirParaEditar = async () => {
+    if(!window.confirm("Pedir ao administrador para liberar a edição da lista?")) return;
+    const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
+    try {
+        await supabase.from('pedidos').update({ solicitou_refazer: true }).eq('data_pedido', hoje).eq('loja_id', codLoja);
+        mostrarNotificacao("✅ Solicitação enviada! O app vai te avisar quando for liberado.", 'sucesso', 'Aguardando Aprovação');
+        await carregarDados(false); 
+    } catch (err) { alert("Erro ao solicitar: " + err.message); }
+  };
+
+  const importarParaCarrinho = async () => {
+    if(!window.confirm("Isso vai voltar os itens para o carrinho para você ajustar. Continuar?")) return;
+    const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
+    try {
+      await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
+      const itensRestaurados = listaEnviadaHoje.map(dbItem => {
+        const prodOriginal = produtos.find(p => p.nome === dbItem.nome_produto);
+        if (prodOriginal) {
+          const vUnit = tratarPreco(prodOriginal.preco);
+          return { ...prodOriginal, quantidade: dbItem.quantidade, valorUnit: vUnit, total: vUnit * dbItem.quantidade };
+        }
+        return { id: Math.random(), nome: dbItem.nome_produto, quantidade: dbItem.quantidade, valorUnit: 0, total: 0, unidade_medida: dbItem.unidade_medida };
+      });
+      setCarrinho(itensRestaurados);
+      setListaEnviadaHoje(null);
+      setModoVisualizacao(false);
+      mostrarNotificacao("🛒 Itens de volta no carrinho! Altere o que precisar.", 'info', 'Carrinho Restaurado');
+    } catch (err) { alert("Erro ao importar: " + err.message); }
+  };
+
+  // --- TELA DE SUCESSO PÓS-ENVIO ---
   if (listaEnviadaHoje && !modoVisualizacao) {
-    const aguard = listaEnviadaHoje.some(i => i.solicitou_refazer);
-    const lib = listaEnviadaHoje.some(i => i.liberado_edicao);
+    const aguardandoLiberacao = listaEnviadaHoje.some(item => item.solicitou_refazer === true);
+    const edicaoLiberada = listaEnviadaHoje.some(item => item.liberado_edicao === true);
+
     return (
-      <div style={{ padding: '20px', textAlign: 'center', backgroundColor: configDesign.cores.fundoGeral, minHeight: '100vh', color: configDesign.cores.textoForte }}>
-        <div style={{ background: lib ? configDesign.cores.sucesso : (aguard ? configDesign.cores.promocao : configDesign.cores.textoForte), color: '#fff', padding: '40px 30px', borderRadius: '30px', marginTop: '20px' }}>
-          <h2>{lib ? '🔓 LIBERADO' : (aguard ? '⏳ AGUARDANDO' : '✅ ENVIADO!')}</h2>
+      <div style={{ padding: '20px', fontFamily: configDesign.geral.fontePadrao, textAlign: 'center', backgroundColor: configDesign.cores.fundoGeral, minHeight: '100vh', paddingBottom: '50px', color: configDesign.cores.textoForte }}>
+        
+        <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 99999, display: 'flex', flexDirection: 'column', gap: '10px', width: '90%', maxWidth: '400px' }}>
+          {notificacoes.map(notif => (
+            <div key={notif.id} onClick={() => lidarComCliqueNotificacao(notif.mensagem)} style={{ background: notif.tipo === 'alerta' ? configDesign.cores.alerta : notif.tipo === 'sucesso' ? configDesign.cores.sucesso : configDesign.cores.primaria, color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px', animation: 'fadeInDown 0.4s ease-out', cursor: 'pointer' }}>
+              <span>{notif.mensagem}</span>
+            </div>
+          ))}
         </div>
-        <button onClick={() => setModoVisualizacao(true)} style={{ background: 'transparent', border: 'none', padding: '20px', color: configDesign.cores.textoSuave, fontWeight: '900', textDecoration: 'underline' }}>VOLTAR AO INÍCIO</button>
+        <style>{`@keyframes fadeInDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+
+        <div style={{ background: edicaoLiberada ? configDesign.cores.sucesso : (aguardandoLiberacao ? configDesign.cores.promocao : configDesign.cores.textoForte), color: '#fff', padding: '40px 30px', borderRadius: '30px', boxShadow: configDesign.cards.sombra, marginTop: '20px' }}>
+          <div style={{fontSize: '50px', marginBottom: '10px'}}>{edicaoLiberada ? '🔓' : (aguardandoLiberacao ? '⏳' : '✅')}</div>
+          <h2 style={{ margin: 0 }}>{edicaoLiberada ? 'EDIÇÃO LIBERADA' : (aguardandoLiberacao ? 'AGUARDANDO ADMIN' : 'PEDIDO ENVIADO!')}</h2>
+          <p style={{ margin: 0, opacity: 0.9, marginTop: '10px' }}>{edicaoLiberada ? 'Sua lista foi devolvida para o carrinho.' : (aguardandoLiberacao ? 'Aguarde a central liberar a edição da sua lista.' : 'Sua loja já enviou a lista de hoje com sucesso.')}</p>
+        </div>
+
+        <div style={{ textAlign: 'left', marginTop: '25px', background: configDesign.cards.fundo, padding: '20px', borderRadius: '20px', border: '1px solid #eee', maxHeight: '40vh', overflowY: 'auto' }}>
+          <h3 style={{ fontSize: '14px', color: configDesign.cores.textoSuave, marginBottom: '15px', marginTop: 0 }}>RESUMO DO PEDIDO:</h3>
+          {listaEnviadaHoje.map((item, i) => (
+            <div key={i} style={{ padding: '12px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', color: configDesign.cores.textoForte }}>
+              <span><b>{item.quantidade}x</b> {item.nome_produto}</span><small style={{ color: configDesign.cores.textoSuave }}>{item.unidade_medida}</small>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <button onClick={() => carregarDados(false)} style={{ background: '#f1f5f9', border: 'none', padding: '18px', borderRadius: '15px', color: '#111', fontWeight: 'bold', cursor: 'pointer' }}>🔄 ATUALIZAR STATUS AGORA</button>
+          
+          {edicaoLiberada ? (
+            <button onClick={importarParaCarrinho} style={{ background: configDesign.cores.sucesso, border: 'none', padding: '18px', borderRadius: '15px', color: '#fff', fontWeight: '900', cursor: 'pointer', boxShadow: '0 5px 15px rgba(34,197,94,0.3)' }}>
+              📥 PUXAR PARA O CARRINHO E EDITAR
+            </button>
+          ) : (
+            <button onClick={aguardandoLiberacao ? null : pedirParaEditar} style={{ background: configDesign.cards.fundo, border: `2px solid ${aguardandoLiberacao ? '#ccc' : configDesign.cores.textoForte}`, padding: '18px', borderRadius: '15px', color: aguardandoLiberacao ? '#ccc' : configDesign.cores.textoForte, fontWeight: 'bold', cursor: aguardandoLiberacao ? 'not-allowed' : 'pointer' }}>
+              {aguardandoLiberacao ? '⏳ SOLICITAÇÃO PENDENTE...' : '✏️ SOLICITAR EDIÇÃO DE LISTA'}
+            </button>
+          )}
+          
+          <button onClick={() => setModoVisualizacao(true)} style={{ background: 'transparent', border: 'none', padding: '20px', color: configDesign.cores.textoSuave, fontWeight: '900', cursor: 'pointer', textDecoration: 'underline' }}>
+            VOLTAR AO INÍCIO (APENAS VISUALIZAR)
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ width: '100%', minHeight: '100vh', backgroundColor: configDesign.cores.fundoGeral, fontFamily: configDesign.geral.fontePadrao, color: configDesign.cores.textoForte }}>
+    <div style={{ width: '100%', minHeight: '100vh', backgroundColor: configDesign.cores.fundoGeral, fontFamily: configDesign.geral.fontePadrao, paddingBottom: '100px', color: configDesign.cores.textoForte }}>
       
-      {/* HEADER */}
-      <div style={{ padding: '25px 20px', backgroundColor: configDesign.cards.fundo, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '22px' }}>{saudacao}, {primeiroNome}!</h2>
-          <p style={{ margin: 0, fontSize: '13px', color: configDesign.cores.primaria, fontWeight: '900' }}>📍 {nomeLojaLimpo}</p>
-        </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          {deferredPrompt && <button onClick={instalarApp} style={{ background: configDesign.cores.primaria, color: '#fff', border: 'none', padding: '10px', borderRadius: '12px', fontWeight: '900' }}>📲 INSTALAR</button>}
-          <button onClick={() => setModalNotificacoesAberto(true)} style={{ background: '#f1f5f9', border: 'none', width: '45px', height: '45px', borderRadius: '12px', position: 'relative' }}>
-            <span style={{fontSize: '20px'}}>🔔</span>
-            {historicoNotificacoes.some(n => !n.lida) && <span style={{ position: 'absolute', top: 0, right: 0, width: '12px', height: '12px', background: configDesign.cores.alerta, borderRadius: '50%', border: '2px solid #fff' }}></span>}
-          </button>
-        </div>
-      </div>
-
-      {/* BUSCA E CATEGORIAS */}
-      <div style={{ padding: '20px', position: 'sticky', top: 0, zIndex: 10, backgroundColor: configDesign.cores.fundoGeral }}>
-        <input placeholder="🔍 Procurar produto..." value={buscaMenu} onChange={e => setBuscaMenu(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid #ddd', background: configDesign.cards.fundo, color: configDesign.cores.textoForte }} />
-      </div>
-
-      {/* LISTA */}
-      <div style={{ padding: '0 20px 100px 20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '15px' }}>
-        {produtos.filter(p => p.nome.toLowerCase().includes(buscaMenu.toLowerCase())).map(p => (
-          <div key={p.id} onClick={() => abrirProduto(p)} style={{ background: configDesign.cards.fundo, padding: '12px', borderRadius: '16px', border: '1px solid #eee', boxShadow: configDesign.cards.sombra }}>
-            <div style={{ height: '100px', borderRadius: '10px', backgroundImage: `url(${p.foto_url?.split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }} />
-            <strong style={{ display: 'block', margin: '10px 0 5px', fontSize: '13px' }}>{p.nome}</strong>
-            <span style={{ color: configDesign.cores.primaria, fontWeight: '900' }}>{p.preco}</span>
+      {/* TOASTS DE NOTIFICAÇÃO (ALERTA RÁPIDO) */}
+      <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 99999, display: 'flex', flexDirection: 'column', gap: '10px', width: '90%', maxWidth: '400px' }}>
+        {notificacoes.map(notif => (
+          <div key={notif.id} onClick={() => lidarComCliqueNotificacao(notif.mensagem)} style={{ background: notif.tipo === 'alerta' ? configDesign.cores.alerta : (notif.tipo === 'sucesso' ? configDesign.cores.sucesso : configDesign.cores.primaria), color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
+            <span>{notif.mensagem}</span>
           </div>
         ))}
       </div>
 
-      {/* MODAL NOTIFICAÇÕES */}
+      {/* HEADER DE BOAS VINDAS */}
+      <div style={{ padding: '25px 20px 15px 20px', backgroundColor: configDesign.cards.fundo, borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: '22px', color: configDesign.cores.textoForte, fontWeight: '900' }}>
+            {saudacao}, {primeiroNome}!
+          </h2>
+          <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: configDesign.cores.primaria, fontWeight: '900', textTransform: 'uppercase' }}>
+            📍 {nomeLojaLimpo}
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {deferredPrompt && (
+            <button onClick={instalarApp} style={{ background: configDesign.cores.primaria, color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '10px', fontSize: '11px', fontWeight: '900', cursor: 'pointer' }}>
+              📲 INSTALAR
+            </button>
+          )}
+
+          <button onClick={() => setModalNotificacoesAberto(true)} style={{ background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', position: 'relative' }}>
+            <span style={{ fontSize: '20px' }}>🔔</span>
+            {historicoNotificacoes.some(n => !n.lida) && <span style={{ position: 'absolute', top: '0', right: '0', width: '10px', height: '10px', background: configDesign.cores.alerta, borderRadius: '50%', border: '2px solid #fff' }}></span>}
+          </button>
+
+          {modoVisualizacao && (
+            <button onClick={() => setModoVisualizacao(false)} style={{ background: '#f1f5f9', color: configDesign.cores.textoForte, border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+              ⬅️ VER PEDIDO
+            </button>
+          )}
+        </div>
+      </div>
+
+      {isAppTravado && (
+        <div style={{ backgroundColor: '#fefce8', color: '#a16207', padding: '12px 20px', fontSize: '12px', fontWeight: 'bold', textAlign: 'center' }}>
+          ⚠️ {modoVisualizacao ? 'Modo de visualização. Seu pedido já foi enviado hoje.' : 'Os preços de hoje ainda estão sendo atualizados pela central.'}
+        </div>
+      )}
+
+      {categoriaAtiva === 'DESTAQUES' && (
+        <div style={{ backgroundColor: configDesign.cores.fundoGeral }}>
+          <div style={{ width: '100%', height: '180px', backgroundImage: `url(${banners.topo})`, backgroundSize: 'cover', backgroundPosition: 'center' }}></div>
+          <div style={{ padding: '0 20px', display: 'flex', justifyContent: 'flex-start', marginTop: '-40px' }}>
+            <div style={{ width: '80px', height: '80px', borderRadius: '50%', border: `4px solid ${configDesign.cores.fundoGeral}`, backgroundImage: `url(${banners.logo})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', backgroundColor: '#fff', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}></div>
+          </div>
+          <div style={{ width: '100%', height: '140px', marginTop: '20px', backgroundImage: `url(${banners.tematico})`, backgroundSize: 'cover', backgroundPosition: 'center', marginBottom: '0' }}></div>
+        </div>
+      )}
+
+      <div style={{ 
+        position: categoriaAtiva === 'DESTAQUES' ? 'relative' : 'fixed', 
+        top: categoriaAtiva === 'DESTAQUES' ? '0' : (navState.show ? '0' : '-100px'), 
+        left: 0, right: 0, 
+        zIndex: 100, 
+        backgroundColor: categoriaAtiva === 'DESTAQUES' ? configDesign.cores.fundoGeral : configDesign.cards.fundo, 
+        backdropFilter: categoriaAtiva === 'DESTAQUES' ? 'none' : 'blur(10px)', 
+        borderBottom: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? '1px solid #e2e8f0' : 'none', 
+        transition: configDesign.animacoes.transicaoSuave,
+        opacity: categoriaAtiva === 'DESTAQUES' || navState.show ? 1 : 0,
+        boxShadow: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? configDesign.cards.sombra : 'none',
+        paddingTop: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? '10px' : '20px', 
+        paddingBottom: '10px',
+        marginTop: categoriaAtiva === 'DESTAQUES' ? '15px' : '0'
+      }}>
+        <div style={{ padding: '0 20px 10px 20px' }}>
+          <div style={{ backgroundColor: '#f1f5f9', borderRadius: '12px', padding: (categoriaAtiva !== 'DESTAQUES' && navState.shrink) ? '8px 12px' : '12px', display: 'flex', gap: '10px', transition: configDesign.animacoes.transicaoSuave }}>
+            <span style={{color: '#111'}}>🔍</span><input placeholder="Procurar produto..." value={buscaMenu} onChange={e => setBuscaMenu(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', color: '#111' }} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', overflowX: 'auto', gap: '20px', padding: '0 20px', scrollbarWidth: 'none' }}>
+          {categorias.map(cat => (
+            <button key={cat} onClick={() => { setCategoriaAtiva(cat); window.scrollTo({top:0, behavior:'smooth'}); }} style={{ paddingBottom: '10px', whiteSpace: 'nowrap', fontWeight: '900', background: 'none', border: 'none', color: categoriaAtiva === cat ? configDesign.cores.primaria : configDesign.cores.textoSuave, borderBottom: categoriaAtiva === cat ? `3px solid ${configDesign.cores.primaria}` : 'none', cursor: 'pointer', fontSize: (categoriaAtiva !== 'DESTAQUES' && navState.shrink) ? '11px' : '13px', transition: configDesign.animacoes.transicaoSuave }}>{cat}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ height: categoriaAtiva === 'DESTAQUES' ? '10px' : '110px' }}></div>
+
+      <div style={{ padding: '0 20px 20px 20px', display: 'grid', gridTemplateColumns: categoriaAtiva === 'DESTAQUES' ? '1fr' : 'repeat(auto-fill, minmax(140px, 1fr))', gap: '15px' }}>
+        {produtos.filter(p => {
+          if (!(p.nome || '').toLowerCase().includes(buscaMenu.toLowerCase())) return false;
+          if (categoriaAtiva === 'TODOS') return true;
+          if (categoriaAtiva === 'DESTAQUES') return p.promocao || p.novidade;
+          return p.categoria === categoriaAtiva;
+        }).map(p => {
+          const itemNoCarrinho = carrinho.find(i => i.id === p.id);
+          let corBorda = configDesign.cards.fundo;
+          let selo = null;
+          
+          if (p.promocao) {
+            corBorda = configDesign.cores.promocao;
+            selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>PROMOÇÃO</div>;
+          } else if (p.novidade) {
+            corBorda = configDesign.cores.novidade;
+            selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>NOVIDADE</div>;
+          } else if (itemNoCarrinho) {
+            corBorda = configDesign.cores.primaria;
+          }
+
+          const alturaImg = categoriaAtiva === 'DESTAQUES' ? configDesign.cards.alturaImgDestaque : configDesign.cards.alturaImgPequena;
+
+          return (
+            <div key={p.id} onClick={() => abrirProduto(p)} style={{ border: `2px solid ${corBorda}`, borderRadius: configDesign.cards.raioBorda, overflow: 'visible', padding: '10px', cursor: 'pointer', position: 'relative', backgroundColor: configDesign.cards.fundo, boxShadow: configDesign.cards.sombra, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: selo ? '10px' : '0' }}>
+               {selo}
+               {itemNoCarrinho && !selo && <div style={{position: 'absolute', top: '-8px', right: '-8px', background: configDesign.cores.primaria, color: '#fff', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: '900', fontSize: '11px', border: '2px solid #fff', zIndex: 2}}>{itemNoCarrinho.quantidade}</div>}
+               
+               <div style={{ height: alturaImg, borderRadius: '8px', backgroundImage: `url(${(p.foto_url || '').split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#f1f5f9' }} />
+               
+               <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                 <strong style={{ fontSize: categoriaAtiva === 'DESTAQUES' ? '14px' : '11px', color: configDesign.cores.textoForte, lineHeight: '1.2', height: categoriaAtiva === 'DESTAQUES' ? 'auto' : '26px', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                   {p.nome}
+                 </strong>
+                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto', paddingTop: '5px' }}>
+                   <span style={{ color: configDesign.cores.primaria, fontWeight: '900', fontSize: categoriaAtiva === 'DESTAQUES' ? '18px' : '13px' }}>{p.preco || 'R$ 0,00'}</span>
+                   <span style={{ fontSize: '10px', color: configDesign.cores.textoSuave, fontWeight: 'bold', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
+                     {itemNoCarrinho ? formatarQtdUnidade(itemNoCarrinho.quantidade, p.unidade_medida) : (p.unidade_medida || 'UN')}
+                   </span>
+                 </div>
+               </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {carrinho.length > 0 && !isAppTravado && (
+        <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.textoForte, color: '#fff', border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer', transition: configDesign.animacoes.transicaoSuave, transform: navState.show ? 'translateY(0)' : 'translateY(20px)' }}>
+          🛒 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.primaria, color: '#fff', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: `2px solid ${configDesign.cores.textoForte}`, fontWeight: 'bold' }}>{carrinho.reduce((a,c)=>a+c.quantidade,0)}</span>
+        </button>
+      )}
+
       {modalNotificacoesAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 5000, display: 'flex', justifyContent: 'flex-end', backdropFilter: 'blur(4px)' }}>
-          <div style={{ width: '85%', maxWidth: '380px', height: '100%', background: configDesign.cards.fundo, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ width: '85%', maxWidth: '380px', height: '100%', background: configDesign.cards.fundo, display: 'flex', flexDirection: 'column', animation: 'slideIn 0.3s ease-out' }}>
             <div style={{ padding: '25px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, color: configDesign.cores.textoForte }}>Notificações</h3>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button onClick={() => setModalConfigNotifAberto(true)} style={{ background: 'none', border: 'none', fontSize: '22px' }}>⚙️</button>
-                <button onClick={() => { setModalNotificacoesAberto(false); setHistoricoNotificacoes(prev => prev.map(n => ({...n, lida: true}))); }} style={{ background: '#f1f5f9', border: 'none', width: '35px', height: '35px', borderRadius: '50%', fontWeight: 'bold', color: '#111' }}>✕</button>
+              <h3 style={{ margin: 0, fontWeight: '900', color: configDesign.cores.textoForte }}>Notificações</h3>
+              <div style={{ display: 'flex', gap: '15px' }}>
+                <button onClick={() => setModalConfigNotifAberto(true)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>⚙️</button>
+                <button onClick={() => { setModalNotificacoesAberto(false); setHistoricoNotificacoes(prev => prev.map(n => ({...n, lida: true}))); }} style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer', color: '#111' }}>✕</button>
               </div>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '15px' }}>
-              {historicoNotificacoes.map(n => (
-                <div key={n.id} onClick={() => lidarComCliqueNotificacao(n.mensagem)} style={{ padding: '15px', borderRadius: '12px', background: n.lida ? configDesign.cores.fundoGeral : configDesign.cores.primaria + '15', marginBottom: '10px', border: `1px solid ${n.lida ? '#eee' : configDesign.cores.primaria}` }}>
-                  <div style={{ fontWeight: 'bold', fontSize: '13px', color: configDesign.cores.textoForte }}>{n.mensagem}</div>
-                  <div style={{ fontSize: '10px', color: configDesign.cores.textoSuave, marginTop: '5px' }}>{n.data}</div>
-                </div>
-              ))}
+              {historicoNotificacoes.length === 0 ? (
+                <div style={{ textAlign: 'center', marginTop: '50px', color: configDesign.cores.textoSuave }}>Nenhuma notificação por enquanto.</div>
+              ) : (
+                historicoNotificacoes.map(n => (
+                  <div key={n.id} onClick={() => lidarComCliqueNotificacao(n.mensagem)} style={{ padding: '15px', borderRadius: '15px', background: n.lida ? (configDesign.cores.fundoGeral) : (configDesign.cores.primaria + '10'), marginBottom: '12px', border: n.lida ? '1px solid #eee' : `1px solid ${configDesign.cores.primaria}`, cursor: 'pointer' }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '13px', color: configDesign.cores.textoForte }}>{n.mensagem}</div>
+                    <div style={{ fontSize: '10px', color: configDesign.cores.textoSuave, marginTop: '5px' }}>{n.data}</div>
+                  </div>
+                ))
+              )}
             </div>
-            <button onClick={() => setHistoricoNotificacoes([])} style={{ margin: '20px', padding: '15px', border: 'none', background: '#fef2f2', color: configDesign.cores.alerta, borderRadius: '12px', fontWeight: 'bold' }}>Limpar Tudo</button>
+            <button onClick={() => setHistoricoNotificacoes([])} style={{ margin: '20px', padding: '15px', border: 'none', background: '#fef2f2', color: configDesign.cores.alerta, borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>Limpar Histórico</button>
           </div>
         </div>
       )}
 
-      {/* MODAL CONFIG NOTIF */}
       {modalConfigNotifAberto && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 6000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 6000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
           <div style={{ background: configDesign.cards.fundo, width: '100%', maxWidth: '320px', borderRadius: '25px', padding: '25px' }}>
-            <h3 style={{ marginTop: 0, textAlign: 'center', color: configDesign.cores.textoForte }}>Alertas</h3>
+            <h3 style={{ marginTop: 0, textAlign: 'center', color: configDesign.cores.textoForte }}>Configurações</h3>
+            <p style={{ fontSize: '12px', color: configDesign.cores.textoSuave, textAlign: 'center', marginBottom: '20px' }}>Escolha quais avisos deseja receber na barra de notificações.</p>
             {[
-              { id: 'precos', label: 'Preços Liberados' },
+              { id: 'precos', label: 'Liberação de Preços' },
               { id: 'edicao', label: 'Edição de Lista' },
               { id: 'promocoes', label: 'Novas Promoções' },
               { id: 'novidades', label: 'Novos Produtos' }
             ].map(item => (
               <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px 0', borderBottom: '1px solid #eee' }}>
                 <span style={{ fontWeight: 'bold', fontSize: '14px', color: configDesign.cores.textoForte }}>{item.label}</span>
-                <input type="checkbox" checked={configNotif[item.id]} onChange={() => setConfigNotif({...configNotif, [item.id]: !configNotif[item.id]})} style={{ width: '20px', height: '20px' }} />
+                <input type="checkbox" checked={configNotif[item.id]} onChange={() => setConfigNotif({...configNotif, [item.id]: !configNotif[item.id]})} style={{ width: '20px', height: '20px', accentColor: configDesign.cores.primaria }} />
               </div>
             ))}
-            <button onClick={() => setModalConfigNotifAberto(false)} style={{ width: '100%', marginTop: '20px', padding: '15px', background: configDesign.cores.primaria, color: '#fff', borderRadius: '15px', fontWeight: 'bold', border: 'none' }}>SALVAR</button>
+            <button onClick={() => setModalConfigNotifAberto(false)} style={{ width: '100%', marginTop: '25px', padding: '15px', background: configDesign.cores.primaria, color: '#fff', borderRadius: '15px', fontWeight: 'bold', border: 'none' }}>Salvar Preferências</button>
           </div>
         </div>
       )}
 
-      {/* MODAL PRODUTO */}
       {produtoExpandido && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column', backdropFilter: 'blur(5px)' }}>
-           <button onClick={() => setProdutoExpandido(null)} style={{ alignSelf: 'flex-end', margin: '20px', color: '#fff', fontSize: '28px', background: 'none', border: 'none' }}>✕</button>
+           <button onClick={() => setProdutoExpandido(null)} style={{ alignSelf: 'flex-end', margin: '20px', color: '#fff', fontSize: '28px', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
            <div style={{ flex: 1, backgroundImage: `url(${(produtoExpandido.foto_url || '').split(',')[0]})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', margin: '20px' }} />
-           <div style={{ backgroundColor: configDesign.cards.fundo, padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px' }}>
-              <h2 style={{margin: 0, color: configDesign.cores.textoForte}}>{produtoExpandido.nome}</h2>
-              <div style={{ display: 'flex', justifyContent: 'space-between', margin: '20px 0' }}>
-                <span style={{color: configDesign.cores.primaria, fontSize: '24px', fontWeight: '900'}}>{produtoExpandido.preco}</span>
-                <span style={{color: configDesign.cores.textoSuave}}>{produtoExpandido.unidade_medida}</span>
+           <div style={{ backgroundColor: configDesign.cards.fundo, padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', boxShadow: '0 -10px 30px rgba(0,0,0,0.1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <h2 style={{margin: 0, fontSize: '20px', color: configDesign.cores.textoForte, flex: 1}}>{produtoExpandido.nome}</h2>
+                <span style={{ fontSize: '12px', background: '#f1f5f9', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: '#111' }}>Vendido por {produtoExpandido.unidade_medida || 'UN'}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px', marginBottom: '25px' }}>
-                <button onClick={() => setQuantidade(Math.max(1, (parseInt(quantidade)||1)-1))} style={{ width: '50px', height: '50px', borderRadius: '15px', border: 'none', fontSize: '20px' }}>-</button>
-                <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '80px', textAlign: 'center', fontSize: '24px', fontWeight: 'bold', border: 'none', background: 'none', color: configDesign.cores.textoForte }} />
-                <button onClick={() => setQuantidade((parseInt(quantidade)||1)+1)} style={{ width: '50px', height: '50px', borderRadius: '15px', border: 'none', fontSize: '20px' }}>+</button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: '1px dashed #e2e8f0' }}>
+                <div>
+                  <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário</span>
+                  <span style={{color: configDesign.cores.primaria, fontSize: '20px', fontWeight: '900'}}>{produtoExpandido.preco}</span>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Total de {formatarQtdUnidade((parseInt(quantidade) || 1), produtoExpandido.unidade_medida)}</span>
+                  <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>{formatarMoeda(tratarPreco(produtoExpandido.preco) * (parseInt(quantidade) || 1))}</span>
+                </div>
               </div>
-              <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '20px', background: configDesign.cores.primaria, color: '#fff', borderRadius: '18px', border: 'none', fontWeight: '900' }}>ADICIONAR</button>
+              {!isAppTravado ? (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', margin: '25px 0' }}>
+                     <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontWeight: 'bold', color: '#111' }}>-</button>
+                     <div style={{ position: 'relative' }}>
+                       <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '80px', height: '55px', fontSize: '24px', fontWeight: '900', textAlign: 'center', borderRadius: '15px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: '#111' }} />
+                     </div>
+                     <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontWeight: 'bold', color: '#111' }}>+</button>
+                  </div>
+                  <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cards.fundo, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>
+                    {carrinho.find(i => i.id === produtoExpandido.id) ? 'ATUALIZAR QUANTIDADE' : 'ADICIONAR AO CARRINHO'}
+                  </button>
+                </>
+              ) : (
+                <div style={{ marginTop: '25px' }}>
+                  <button disabled style={{ width: '100%', padding: '22px', background: '#e2e8f0', color: '#94a3b8', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '13px' }}>
+                    🔒 {modoVisualizacao ? 'PEDIDO JÁ ENVIADO' : 'AGUARDANDO LIBERAÇÃO DE PREÇOS'}
+                  </button>
+                </div>
+              )}
            </div>
         </div>
       )}
 
-      {/* CARRINHO BOTÃO */}
-      {carrinho.length > 0 && !isAppTravado && (
-        <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', background: configDesign.cores.textoForte, color: '#fff', border: 'none', fontSize: '24px', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', zIndex: 100 }}>
-          🛒 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.primaria, color: '#fff', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: '2px solid #fff' }}>{carrinho.reduce((a,c)=>a+c.quantidade,0)}</span>
-        </button>
-      )}
-
-      {/* MODAL CARRINHO */}
       {modalCarrinhoAberto && (
-        <div style={{ position: 'fixed', inset: 0, background: configDesign.cores.fundoGeral, zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '20px', background: configDesign.cards.fundo, display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eee' }}>
-            <h2 style={{margin:0, color: configDesign.cores.textoForte}}>Meu Carrinho</h2>
-            <button onClick={() => setModalCarrinhoAberto(false)} style={{background: 'none', border:'none', fontSize: '24px', color: configDesign.cores.textoForte}}>✕</button>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: configDesign.cards.fundo, zIndex: 2000, display: 'flex', flexDirection: 'column', color: configDesign.cores.textoForte }}>
+          <div style={{ padding: '20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ margin: 0, fontWeight: '900' }}>Meu Carrinho</h2>
+            <button onClick={() => { setModalCarrinhoAberto(false); setItemEditandoId(null); }} style={{ border: 'none', background: '#f1f5f9', borderRadius: '50%', width: '40px', height: '40px', fontWeight: 'bold', cursor: 'pointer', color: '#111' }}>✕</button>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+          <div style={{ padding: '10px 20px' }}>
+            <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>🗑️ ESVAZIAR CARRINHO</button>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px' }}>
             {carrinho.map(item => (
-              <div key={item.id} style={{ padding: '15px 0', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between' }}>
-                <div>
-                  <span style={{fontWeight: 'bold', color: configDesign.cores.textoForte}}>{item.quantidade}x {item.nome}</span>
-                  <div style={{fontSize: '11px', color: configDesign.cores.textoSuave}}>{formatarMoeda(item.total)}</div>
-                </div>
-                <button onClick={() => setCarrinho(carrinho.filter(i => i.id !== item.id))} style={{color: configDesign.cores.alerta, border: 'none', background: 'none'}}>Remover</button>
+              <div key={item.id} style={{ padding: '15px 0', borderBottom: '1px solid #f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                {itemEditandoId === item.id ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                     <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: '#f1f5f9', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold', color: '#111'}}>-</button>
+                     <input type="number" value={item.quantidade} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: '1px solid #ccc', color: '#111' }} />
+                     <button onClick={() => alterarQtdCart(item.id, 1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: '#f1f5f9', fontSize: '18px', cursor: 'pointer', fontWeight: 'bold', color: '#111'}}>+</button>
+                     <button onClick={() => setItemEditandoId(null)} style={{marginLeft: 'auto', background: configDesign.cores.sucesso, color: 'white', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer'}}>OK</button>
+                  </div>
+                ) : (
+                  <div onClick={() => setItemEditandoId(item.id)} style={{ cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: '10px' }}>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: '13px' }}><b style={{color: configDesign.cores.primaria, fontSize: '15px'}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item.nome}</span>
+                      <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'} • Toque para editar qtd</div>
+                    </div>
+                    <div style={{ fontWeight: '900', color: configDesign.cores.textoForte, fontSize: '14px', whiteSpace: 'nowrap' }}>{formatarMoeda(item.total)}</div>
+                  </div>
+                )}
+                {itemEditandoId !== item.id && ( <button onClick={() => setCarrinho(carrinho.filter(i => i.id !== item.id))} style={{ color: configDesign.cores.alerta, border: 'none', background: 'none', fontWeight: 'bold', cursor: 'pointer', padding: '10px' }}>Remover</button> )}
               </div>
             ))}
           </div>
-          <div style={{ padding: '20px', background: configDesign.cards.fundo, borderTop: '1px solid #eee' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 'bold', marginBottom: '20px', color: configDesign.cores.textoForte }}>
-              <span>Total:</span>
-              <span>{formatarMoeda(valorTotalCarrinho)}</span>
-            </div>
-            <button onClick={() => setModalRevisaoAberto(true)} style={{ width: '100%', padding: '20px', background: configDesign.cores.textoForte, color: '#fff', borderRadius: '18px', border: 'none', fontWeight: '900' }}>ENVIAR LISTA</button>
+          <div style={{ padding: '20px', borderTop: '1px solid #eee', background: configDesign.cores.fundoGeral }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontWeight: '900', fontSize: '18px' }}><span>Total Estimado:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
+            <button onClick={() => setModalRevisaoAberto(true)} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cards.fundo, borderRadius: '18px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}>REVISAR E ENVIAR</button>
           </div>
         </div>
       )}
 
       {modalRevisaoAberto && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
-          <div style={{ backgroundColor: configDesign.cards.fundo, width: '100%', maxWidth: '400px', borderRadius: '28px', padding: '30px' }}>
-            <h3 style={{marginTop: 0, textAlign: 'center', color: configDesign.cores.textoForte}}>Confirmar Pedido?</h3>
-            <button onClick={confirmarEnvio} disabled={enviandoPedido} style={{ width: '100%', padding: '20px', background: configDesign.cores.sucesso, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '16px' }}>{enviandoPedido ? 'ENVIANDO...' : 'CONFIRMAR AGORA'}</button>
-            <button onClick={() => setModalRevisaoAberto(false)} style={{ background: 'none', border: 'none', marginTop: '15px', color: configDesign.cores.textoSuave, width: '100%' }}>Cancelar</button>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
+          <div style={{ backgroundColor: configDesign.cards.fundo, width: '100%', maxWidth: '400px', borderRadius: '28px', padding: '30px', display: 'flex', flexDirection: 'column', maxHeight: '80vh' }}>
+            <h3 style={{marginTop: 0, textAlign: 'center', fontWeight: '900', color: configDesign.cores.textoForte}}>Confirmação do Pedido</h3>
+            <div style={{ flex: 1, overflowY: 'auto', marginBottom: '20px', borderTop: '1px solid #eee', borderBottom: '1px solid #eee', padding: '10px 0' }}>
+                {carrinho.map((item, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px dashed #f1f5f9' }}>
+                        <div>
+                          <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item.nome}</span>
+                          <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'}</div>
+                        </div>
+                        <span style={{fontWeight: 'bold', color: configDesign.cores.textoSuave}}>{formatarMoeda(item.total)}</span>
+                    </div>
+                ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '25px', fontWeight: '900', fontSize: '20px', color: configDesign.cores.textoForte }}><span>TOTAL FINAL:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
+            <button onClick={confirmarEnvio} disabled={enviandoPedido} style={{ width: '100%', padding: '20px', background: configDesign.cores.sucesso, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '16px', cursor: 'pointer' }}>{enviandoPedido ? 'ENVIANDO...' : 'CONFIRMAR ENVIO'}</button>
+            <button onClick={() => setModalRevisaoAberto(false)} style={{ background: 'none', border: 'none', marginTop: '15px', color: configDesign.cores.textoSuave, fontWeight: 'bold', cursor: 'pointer' }}>Voltar e editar carrinho</button>
           </div>
         </div>
       )}
-
+      <style>{`
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+      `}</style>
     </div>
   );
 }
