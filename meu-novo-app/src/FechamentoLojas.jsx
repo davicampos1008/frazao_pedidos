@@ -254,6 +254,32 @@ export default function FechamentoLojas() {
     }));
   };
 
+  const baixarPDF = () => {
+    const elemento = document.getElementById('area-impressao');
+    if (!elemento) return;
+
+    const gerar = () => {
+      const opt = {
+        margin:       10,
+        filename:     `Fechamento_${dataBr.replace(/\//g, '-')}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak:    { mode: 'css', after: '.print-break' }
+      };
+      window.html2pdf().set(opt).from(elemento).save();
+    };
+
+    if (!window.html2pdf) {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      script.onload = gerar;
+      document.body.appendChild(script);
+    } else {
+      gerar();
+    }
+  };
+
   const fornecedoresExibidos = fornecedores.filter(f => {
     const isPago = f.statusPagamento === 'pago';
     const isBoletoOnly = f.totalPix === 0 && f.totalBoleto > 0;
@@ -285,17 +311,17 @@ export default function FechamentoLojas() {
       <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
         <thead>
           <tr>
-            <th style={{...thStyle, width: '6%'}}>QUANT</th>
+            <th style={{...thStyle, width: '6%'}}>QUANT.</th>
             <th style={{...thStyle, width: '25%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '10%'}}>VAL UNIT</th>
-            <th style={{...thStyle, width: '10%'}}>VAL TOTAL</th>
+            <th style={{...thStyle, width: '10%'}}>VAL. UNIT.</th>
+            <th style={{...thStyle, width: '10%'}}>VAL. TOTAL.</th>
             
             <th style={tdSpacer}></th> {/* RESPIRO */}
             
-            <th style={{...thStyle, width: '6%'}}>QUANT</th>
+            <th style={{...thStyle, width: '6%'}}>QUANT.</th>
             <th style={{...thStyle, width: '25%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '10%'}}>VAL UNIT</th>
-            <th style={{...thStyle, width: '10%'}}>VAL TOTAL</th>
+            <th style={{...thStyle, width: '10%'}}>VAL. UNIT.</th>
+            <th style={{...thStyle, width: '10%'}}>VAL. TOTAL.</th>
           </tr>
         </thead>
         <tbody>
@@ -353,46 +379,47 @@ export default function FechamentoLojas() {
         
         <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', backgroundColor: '#333', padding: '15px 20px', borderRadius: '8px', marginBottom: '20px', position: 'sticky', top: '10px', zIndex: 1000, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
            <button onClick={() => setModoVisualizacaoImp(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>⬅ VOLTAR</button>
-           <button onClick={() => window.print()} style={{ background: '#22c55e', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px' }}>🖨️ SALVAR COMO PDF / IMPRIMIR</button>
+           <div>
+             <button onClick={baixarPDF} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px', marginRight: '10px' }}>⬇️ BAIXAR PDF</button>
+             <button onClick={() => window.print()} style={{ background: '#22c55e', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px' }}>🖨️ IMPRIMIR</button>
+           </div>
         </div>
 
-        <div className="print-section" style={{ backgroundColor: 'white', color: 'black', maxWidth: '1000px', margin: '0 auto', boxShadow: '0 0 10px rgba(0,0,0,0.2)' }}>
+        <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', maxWidth: '1000px', margin: '0 auto', boxShadow: '0 0 10px rgba(0,0,0,0.2)' }}>
            
            {lojasParaRenderizar.map((loja, idx) => (
               <div key={loja.loja_id} className="print-break" style={{ padding: '30px', position: 'relative', minHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-                  
-                  {/* 💡 CABEÇALHO DA NOTA CENTRALIZADO */}
-                  <div style={{ borderBottom: '3px solid black', paddingBottom: '15px', marginBottom: '20px', display: 'flex', flexDirection: 'column' }}>
-                    <h2 style={{ margin: '0 0 15px 0', textTransform: 'uppercase', fontSize: '42px', fontWeight: '900', fontFamily: 'Impact, sans-serif', textAlign: 'center', width: '100%', letterSpacing: '2px' }}>
-                      {loja.nome_fantasia}
-                    </h2>
-                    
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', width: '100%', padding: '0 10px' }}>
-                      <span style={{ fontSize: '20px', fontWeight: 'bold' }}>DATA: {dataBr}</span>
-                      
-                      {/* O valor total some na via do motorista */}
-                      {!isMotGlobal && (
-                        <div style={{ textAlign: 'right' }}>
-                          <span style={{ fontSize: '14px', fontWeight: 'bold', display: 'block', textTransform: 'uppercase' }}>VALOR TOTAL DA NOTA</span>
-                          <span style={{ fontSize: '32px', fontWeight: '900' }}>{formatarMoeda(loja.totalFatura)}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                 
+                 {/* 💡 CABEÇALHO DA NOTA CENTRALIZADO */}
+                 <div style={{ borderBottom: '3px solid black', paddingBottom: '15px', marginBottom: '20px', display: 'flex', flexDirection: 'column' }}>
+                   <h2 style={{ margin: '0 0 15px 0', textTransform: 'uppercase', fontSize: '32px', fontWeight: '900', fontFamily: 'Impact, sans-serif', textAlign: 'center', width: '100%', letterSpacing: '1px' }}>
+                     LOJA: {loja.nome_fantasia}
+                   </h2>
+                   
+                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', width: '100%', padding: '0 10px' }}>
+                     <span style={{ fontSize: '20px', fontWeight: 'bold' }}>DATA: {dataBr}</span>
+                   </div>
+                 </div>
 
-                  {/* TABELA DE 8 COLUNAS COM RESPIRO */}
-                  <div style={{ flex: 1 }}>
-                     {renderTabelaDupla(loja.itens, isMotGlobal)}
-                  </div>
+                 {/* TABELA DE 8 COLUNAS COM RESPIRO */}
+                 <div style={{ flex: 1 }}>
+                    {renderTabelaDupla(loja.itens, isMotGlobal)}
+                 </div>
 
-                  {/* RODAPÉ COM ASSINATURA */}
-                  <div style={{ marginTop: '40px', borderTop: '2px solid black', paddingTop: '15px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '30px', paddingBottom: '20px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{ fontSize: '24px' }}>🍎</span>
-                      <strong style={{ fontSize: '22px', textTransform: 'uppercase', fontWeight: '900' }}>Frazão Frutas & Cia</strong>
-                    </div>
-                    <span style={{ fontSize: '20px', fontWeight: 'bold' }}>📞 (61) 99130-3416</span>
-                  </div>
+                 {/* RODAPÉ COM ASSINATURA E TOTAL */}
+                 <div style={{ marginTop: '20px', borderTop: '2px solid black', paddingTop: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '20px' }}>
+                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                     <span style={{ fontSize: '20px', fontWeight: 'bold' }}>Frazão (61) 99130-3416 Frutas & Cia</span>
+                   </div>
+                   
+                   {/* O valor total some na via do motorista */}
+                   {!isMotGlobal && (
+                     <div style={{ textAlign: 'right' }}>
+                       <span style={{ fontSize: '20px', fontWeight: 'bold', textTransform: 'uppercase' }}>VALOR TOTAL: </span>
+                       <span style={{ fontSize: '24px', fontWeight: '900' }}>{formatarMoeda(loja.totalFatura)}</span>
+                     </div>
+                   )}
+                 </div>
 
               </div>
            ))}
@@ -670,402 +697,4 @@ export default function FechamentoLojas() {
 
     </div>
   );
-}
-
-
-dados,
-tipoImpressao,
-dataBr
- {
-
-
-
-
-const formatarMoeda = (valor) => {
-
-return Number(valor || 0).toLocaleString('pt-BR',{
-
-style:'currency',
-currency:'BRL'
-
-})
-
-}
-
-
-
-
-const isMotGlobal =
-
-tipoImpressao === 'motorista_todos' ||
-
-tipoImpressao === 'motorista_unico'
-
-
-
-
-
-return (
-
-
-<div style={{
-
-padding:'30px',
-fontFamily:'Arial'
-
-}}>
-
-
-
-{/* BOTÕES */}
-
-
-<div style={{
-
-marginBottom:'20px',
-display:'flex',
-gap:'10px'
-
-}}>
-
-
-<button
-
-onClick={() => window.print()}
-
-style={{
-
-background:'#22c55e',
-color:'white',
-border:'none',
-padding:'10px 20px',
-borderRadius:'8px',
-fontWeight:'bold',
-cursor:'pointer'
-
-}}
-
->
-
-🖨️ IMPRIMIR
-
-</button>
-
-
-
-<button
-
-onClick={() => window.print()}
-
-style={{
-
-background:'#2563eb',
-color:'white',
-border:'none',
-padding:'10px 20px',
-borderRadius:'8px',
-fontWeight:'bold',
-cursor:'pointer'
-
-}}
-
->
-
-📄 BAIXAR PDF
-
-</button>
-
-
-</div>
-
-
-
-
-{/* LOJAS */}
-
-
-{dados.map((loja,index) => (
-
-
-<div key={index}
-
-style={{
-
-marginBottom:'50px',
-pageBreakAfter:'always'
-
-}}
-
->
-
-
-
-{/* CABEÇALHO MODELO FLAMINGO */}
-
-
-
-<div style={{
-
-borderBottom:'3px solid black',
-
-paddingBottom:'15px',
-
-marginBottom:'20px'
-
-}}>
-
-
-
-<div style={{
-
-display:'flex',
-
-justifyContent:'space-between',
-
-marginBottom:'10px'
-
-}}>
-
-
-
-<div style={{
-
-fontSize:'20px',
-
-fontWeight:'bold'
-
-}}>
-
-LOJA: {loja.nome_fantasia}
-
-</div>
-
-
-
-<div style={{
-
-fontSize:'20px',
-
-fontWeight:'bold'
-
-}}>
-
-DATA: {dataBr}
-
-</div>
-
-
-</div>
-
-
-
-
-
-{!isMotGlobal && (
-
-
-
-<div style={{
-
-fontSize:'22px',
-
-fontWeight:'900',
-
-marginTop:'10px'
-
-}}>
-
-
-
-VALOR TOTAL:
-
-
-
-<span style={{
-
-marginLeft:'20px'
-
-}}>
-
-
-{formatarMoeda(loja.totalFatura)}
-
-
-</span>
-
-
-
-</div>
-
-
-
-)}
-
-
-
-</div>
-
-
-
-
-
-
-{/* TABELA */}
-
-
-
-<table
-
-style={{
-
-width:'100%',
-borderCollapse:'collapse'
-
-}}
-
->
-
-
-<thead>
-
-<tr>
-
-<th style={celulaCab}>QTD</th>
-
-<th style={celulaCab}>DESCRIÇÃO</th>
-
-{!isMotGlobal && <th style={celulaCab}>VALOR UNIT</th>}
-
-{!isMotGlobal && <th style={celulaCab}>TOTAL</th>}
-
-</tr>
-
-</thead>
-
-
-
-<tbody>
-
-
-
-{loja.itens.map((item,i) => (
-
-
-
-<tr key={i}>
-
-
-<td style={celula}>
-
-{item.quantidade}
-
-</td>
-
-
-
-<td style={celula}>
-
-{item.nome}
-
-</td>
-
-
-
-{!isMotGlobal && (
-
-<td style={celula}>
-
-{formatarMoeda(item.valor)}
-
-</td>
-
-)}
-
-
-
-{!isMotGlobal && (
-
-<td style={celula}>
-
-{formatarMoeda(
-
-item.quantidade *
-
-item.valor
-
-)}
-
-</td>
-
-)}
-
-
-
-</tr>
-
-
-
-))}
-
-
-
-</tbody>
-
-
-
-</table>
-
-
-
-
-
-
-</div>
-
-
-
-))}
-
-
-
-
-
-</div>
-
-
-
-)
-
-
-
-}
-
-
-
-
-
-const celulaCab = {
-
-border:'1px solid black',
-
-padding:'8px',
-
-fontWeight:'bold',
-
-textAlign:'left',
-
-fontSize:'14px'
-
-}
-
-
-
-const celula = {
-
-border:'1px solid black',
-
-padding:'8px',
-
-fontSize:'14px'
-
 }
