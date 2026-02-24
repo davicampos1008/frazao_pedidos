@@ -15,6 +15,9 @@ export default function Fornecedores() {
   const [modalAberto, setModalAberto] = useState(null);
   const [editando, setEditando] = useState(false);
   
+  // 💡 Controle de sugestões para evitar duplicidades
+  const [mostrarSugestoesNome, setMostrarSugestoesNome] = useState(false);
+
   const estadoInicial = { nome_fantasia: '', nome_completo: '', telefone: '', tipo_documento: 'CNPJ', documento: '', tipo_pix: 'CNPJ/CPF', chave_pix: '' };
   const [dados, setDados] = useState(estadoInicial);
 
@@ -25,7 +28,6 @@ export default function Fornecedores() {
 
   useEffect(() => { carregarFornecedores(); }, []);
 
-  // --- ⚡ NAVEGAÇÃO RÁPIDA (V.I.R.T.U.S ENTER FLOW) ---
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault(); 
@@ -69,14 +71,17 @@ export default function Fornecedores() {
   };
 
   async function salvar() {
-    // 💡 TRAVA INTELIGENTE: Razão Social só é exigida se for CPF
     if (!dados.nome_fantasia || !dados.telefone || !dados.documento || !dados.chave_pix) {
       return alert("⚠️ V.I.R.T.U.S INFORMA: Faltam campos obrigatórios (Fantasia, Telefone, Documento ou Pix)!");
     }
     
-    // Se for Pessoa Física, o nome completo é obrigatório
     if (dados.tipo_documento === 'CPF' && !dados.nome_completo) {
       return alert("⚠️ V.I.R.T.U.S INFORMA: Para pessoa física (CPF), o NOME COMPLETO é obrigatório!");
+    }
+
+    // 🛡️ TRAVA DE DUPLICIDADE: Impede criar novo se já existe nome igual
+    if (!dados.id && fornecedores.find(f => f.nome_fantasia === dados.nome_fantasia)) {
+       return alert("⚠️ Já existe um fornecedor com este Nome Fantasia! Selecione-o na lista de sugestões se deseja atualizar.");
     }
 
     const { error } = await supabase.from('fornecedores').upsert([dados]);
@@ -85,6 +90,10 @@ export default function Fornecedores() {
   }
 
   const filtrados = fornecedores.filter(f => f.nome_fantasia?.toLowerCase().includes(busca.toLowerCase()) || f.nome_completo?.toLowerCase().includes(busca.toLowerCase()));
+
+  // Lógica de pesquisa automática
+  const fornecedoresFiltradosNome = dados.nome_fantasia ? fornecedores.filter(f => f.nome_fantasia?.toLowerCase().includes(dados.nome_fantasia.toLowerCase()) && f.id !== dados.id) : [];
+  const fornecedorTelefoneExistente = dados.telefone ? fornecedores.find(f => f.telefone === dados.telefone && f.id !== dados.id) : null;
 
   const cssLabel = { fontSize: configDesign.inputs.tamanhoTitulos, fontWeight: '900', color: configDesign.inputs.corTitulos, display: 'block', marginBottom: '6px' };
   const cssInput = (bloqueado) => ({ width: '100%', padding: configDesign.inputs.padding, borderRadius: configDesign.inputs.raio, border: configDesign.inputs.borda, backgroundColor: bloqueado ? configDesign.inputs.fundoBloqueado : configDesign.inputs.fundoLivre, outline: 'none', boxSizing: 'border-box' });
@@ -120,9 +129,33 @@ export default function Fornecedores() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={cssGrupo}>
-                <div>
+                <div style={{ position: 'relative' }}>
                   <label style={cssLabel}>NOME FANTASIA (NOME COMERCIAL) *</label>
-                  <input onKeyDown={handleKeyDown} disabled={!editando} value={dados.nome_fantasia} onChange={e => setDados({...dados, nome_fantasia: e.target.value.toUpperCase()})} style={cssInput(!editando)} placeholder="Ex: DISTRIBUIDORA VALE VERDE" />
+                  <input 
+                    onKeyDown={handleKeyDown} 
+                    disabled={!editando} 
+                    value={dados.nome_fantasia} 
+                    onChange={e => {
+                      setDados({...dados, nome_fantasia: e.target.value.toUpperCase()});
+                      setMostrarSugestoesNome(true);
+                    }} 
+                    onClick={() => { if(editando) setMostrarSugestoesNome(true); }}
+                    style={cssInput(!editando)} 
+                    placeholder="Ex: DISTRIBUIDORA VALE VERDE" 
+                  />
+                  
+                  {/* 💡 CAIXA DE SUGESTÃO PARA EVITAR DUPLICAÇÃO */}
+                  {mostrarSugestoesNome && editando && fornecedoresFiltradosNome.length > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', marginTop: '5px' }}>
+                      <div style={{ padding: '10px', fontSize: '11px', color: '#f97316', fontWeight: 'bold', backgroundColor: '#fff7ed' }}>⚠️ Já existe(m) fornecedor(es) com nome parecido:</div>
+                      {fornecedoresFiltradosNome.map(f => (
+                        <div key={f.id} onClick={() => { setDados(f); setModalAberto(f); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px', fontWeight: 'bold', color: '#111' }}>
+                          {f.nome_fantasia} <span style={{ color: '#999', fontSize: '10px', marginLeft: '5px' }}>(Clique para editar este)</span>
+                        </div>
+                      ))}
+                      <div onClick={() => setMostrarSugestoesNome(false)} style={{ padding: '10px', textAlign: 'center', backgroundColor: '#f8fafc', color: '#ef4444', fontSize: '11px', fontWeight: '900', cursor: 'pointer' }}>FECHAR ✕</div>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label style={cssLabel}>NOME COMPLETO / RAZÃO SOCIAL {dados.tipo_documento === 'CPF' ? '*' : '(Opcional para CNPJ)'}</label>
@@ -134,6 +167,11 @@ export default function Fornecedores() {
                 <div>
                   <label style={cssLabel}>TELEFONE / WHATSAPP *</label>
                   <input onKeyDown={handleKeyDown} disabled={!editando} value={dados.telefone} onChange={e => setDados({...dados, telefone: formatarTelefone(e.target.value)})} style={cssInput(!editando)} placeholder="(00) 00000-0000" />
+                  
+                  {/* 💡 ALERTA DE TELEFONE JÁ EXISTENTE */}
+                  {fornecedorTelefoneExistente && editando && (
+                    <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold', display: 'block', marginTop: '5px' }}>⚠️ Este número já está cadastrado para: {fornecedorTelefoneExistente.nome_fantasia}</span>
+                  )}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '15px' }}>
                   <div>

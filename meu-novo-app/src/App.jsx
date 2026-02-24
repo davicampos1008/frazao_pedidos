@@ -36,7 +36,9 @@ function App() {
   };
 
   const [usuarioLogado, setUsuarioLogado] = useState(null);
-  const [telaAtiva, setTelaAtiva] = useState('inicio');
+  
+  // 💡 MEMÓRIA DA ÚLTIMA TELA
+  const [telaAtiva, setTelaAtiva] = useState(() => localStorage.getItem('telaAtivaVIRTUS') || 'inicio');
   const [menuAberto, setMenuAberto] = useState(false);
 
   // 💡 ESTADOS PWA E NOTIFICAÇÃO (APP)
@@ -49,7 +51,10 @@ function App() {
     if (usuarioSalvo) {
       const dadosUsuario = JSON.parse(usuarioSalvo);
       setUsuarioLogado(dadosUsuario);
-      setTelaAtiva(dadosUsuario.perfil === 'admin' ? 'inicio' : 'cliente');
+      // Só direciona pro inicio/cliente se não houver memória da última tela
+      if (!localStorage.getItem('telaAtivaVIRTUS')) {
+         setTelaAtiva(dadosUsuario.perfil === 'admin' ? 'inicio' : 'cliente');
+      }
     }
 
     // Verifica se já está instalado (Modo Standalone)
@@ -64,6 +69,11 @@ function App() {
     window.addEventListener('beforeinstallprompt', escutarInstalacao);
     return () => window.removeEventListener('beforeinstallprompt', escutarInstalacao);
   }, []);
+
+  // 💡 SALVA A TELA SEMPRE QUE MUDAR
+  useEffect(() => {
+    localStorage.setItem('telaAtivaVIRTUS', telaAtiva);
+  }, [telaAtiva]);
 
   const instalarApp = async () => {
     if (eventoInstalacao) {
@@ -96,6 +106,7 @@ function App() {
   const fazerLogout = () => {
     if(window.confirm("Sair do sistema?")) {
       localStorage.removeItem('usuarioVIRTUS');
+      localStorage.removeItem('telaAtivaVIRTUS'); // Limpa a memória da tela ao sair
       setUsuarioLogado(null);
       setTelaAtiva('inicio');
       setMenuAberto(false);

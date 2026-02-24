@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
 export default function Usuarios() {
-  // 🎛️ PAINEL DE CONTROLE V.I.R.T.U.S - EDIÇÃO COMPLETA E AGRUPADA
   const design = {
     geral: { 
       fonte: "'Inter', sans-serif", 
@@ -27,8 +26,8 @@ export default function Usuarios() {
       labelTamanho: '10px'
     },
     botoes: { 
-      primario: '#f97316', // Laranja Frazão
-      secundario: '#111111', // Preto Profissional
+      primario: '#f97316', 
+      secundario: '#111111', 
       texto: '#ffffff',
       altura: '54px',
       raio: '16px'
@@ -39,7 +38,10 @@ export default function Usuarios() {
   const [listaLojas, setListaLojas] = useState([]); 
   const [busca, setBusca] = useState('');
   const [lojaDigitada, setLojaDigitada] = useState('');
-  const [mostrarSugestoes, setMostrarSugestoes] = useState(false);
+  
+  const [mostrarSugestoesLoja, setMostrarSugestoesLoja] = useState(false);
+  const [mostrarSugestoesNome, setMostrarSugestoesNome] = useState(false); // 💡 Controle de Nomes
+  
   const [usuarioAberto, setUsuarioAberto] = useState(null);
   const [editando, setEditando] = useState(false);
   const [dados, setDados] = useState({ nome: '', codigo: '', senha: '', telefone: '', perfil: 'operador', status: true, loja: '' });
@@ -83,14 +85,20 @@ export default function Usuarios() {
     
     setDados({ ...dados, loja: nomeDaLoja, codigo: `${prefixo}${proximoNumero}` });
     setLojaDigitada(nomeDaLoja);
-    setMostrarSugestoes(false);
+    setMostrarSugestoesLoja(false);
   };
 
-  // 🛡️ TRAVA V.I.R.T.U.S: Validação rigorosa antes de salvar
+  // 🛡️ TRAVA V.I.R.T.U.S: Validação rigorosa
   async function salvar() {
     if (!dados.nome.trim()) return alert("⚠️ V.I.R.T.U.S INFORMA: O campo NOME COMPLETO é obrigatório!");
     if (!dados.loja.trim() || !dados.codigo) return alert("⚠️ V.I.R.T.U.S INFORMA: Você precisa buscar e selecionar uma LOJA para gerar o código de acesso!");
     if (!dados.senha.trim()) return alert("⚠️ V.I.R.T.U.S INFORMA: A SENHA é obrigatória!");
+
+    // 💡 TRAVA: Impede criar usuários com o mesmo nome exato na mesma loja.
+    const duplicado = usuarios.find(u => u.nome === dados.nome && u.loja === dados.loja && u.codigo !== dados.codigo);
+    if (duplicado) {
+       return alert(`⚠️ V.I.R.T.U.S INFORMA: Já existe um usuário com o nome "${dados.nome}" cadastrado nesta loja! Selecione na lista de sugestões caso queira apenas atualizar.`);
+    }
 
     const { error } = await supabase.from('usuarios').upsert([dados]);
     if (!error) { 
@@ -116,7 +124,8 @@ export default function Usuarios() {
     return nome.toUpperCase().includes(lojaDigitada.toUpperCase());
   });
 
-  // --- ESTILOS DE REUSO (ATALHOS) ---
+  const usuariosFiltradosNome = dados.nome ? usuarios.filter(u => u.nome?.toLowerCase().includes(dados.nome.toLowerCase()) && u.codigo !== dados.codigo) : [];
+
   const cssLabel = { fontSize: design.inputs.labelTamanho, fontWeight: '900', color: design.inputs.labelCor, display: 'block', marginBottom: '6px' };
   const cssInput = (bloqueado) => ({ width: '100%', padding: design.inputs.padding, borderRadius: design.inputs.raio, border: design.inputs.borda, backgroundColor: bloqueado ? design.inputs.fundoBloqueado : design.inputs.fundo, outline: 'none', boxSizing: 'border-box' });
   const cssGrupo = { display: 'flex', flexDirection: 'column', gap: '15px', padding: '20px', backgroundColor: '#fdfdfd', borderRadius: '20px', border: '1px solid #f1f5f9' };
@@ -124,7 +133,6 @@ export default function Usuarios() {
   return (
     <div style={{ width: '95%', maxWidth: '1000px', margin: '0 auto', fontFamily: design.geral.fonte, display: 'flex', flexDirection: 'column', gap: '25px', paddingBottom: '50px' }}>
       
-      {/* HEADER BUSCA */}
       <div style={{ display: 'flex', gap: '15px' }}>
         <input placeholder="Procurar funcionário..." value={busca} onChange={e => setBusca(e.target.value)} style={{ flex: 1, padding: '18px', borderRadius: design.geral.raioBordaGlobal, border: 'none', boxShadow: design.geral.sombraPadrao, outline: 'none' }} />
         <button 
@@ -135,10 +143,9 @@ export default function Usuarios() {
         </button>
       </div>
 
-      {/* GRID DE CARDS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
         {usuarios.filter(u => u.nome?.toLowerCase().includes(busca.toLowerCase())).map(u => (
-          <div key={u.codigo} onClick={() => { setUsuarioAberto(u); setDados({ ...u, telefone: u.telefone || '' }); setLojaDigitada(u.loja || ''); setEditando(false); setMostrarSugestoes(false); }} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: design.geral.raioBordaGlobal, boxShadow: design.geral.sombraPadrao, display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', opacity: u.status !== false ? 1 : 0.6 }}>
+          <div key={u.codigo} onClick={() => { setUsuarioAberto(u); setDados({ ...u, telefone: u.telefone || '' }); setLojaDigitada(u.loja || ''); setEditando(false); setMostrarSugestoesLoja(false); setMostrarSugestoesNome(false); }} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: design.geral.raioBordaGlobal, boxShadow: design.geral.sombraPadrao, display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', opacity: u.status !== false ? 1 : 0.6 }}>
             <div style={{ width: '50px', height: '50px', backgroundColor: '#f1f5f9', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', color: design.botoes.primario }}>{u.nome?.charAt(0)}</div>
             <div style={{ flex: 1 }}>
               <strong style={{ display: 'block', textTransform: 'uppercase', fontSize: '13px' }}>{u.nome}</strong>
@@ -149,7 +156,6 @@ export default function Usuarios() {
         ))}
       </div>
 
-      {/* MODAL SUSPENSO */}
       {usuarioAberto && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: design.modal.overlay, zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(5px)' }}>
           <div style={{ backgroundColor: design.modal.fundo, width: '90%', maxWidth: '520px', padding: design.modal.padding, borderRadius: design.modal.raio, position: 'relative', maxHeight: '90vh', overflowY: 'auto' }}>
@@ -161,11 +167,32 @@ export default function Usuarios() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               
-              {/* GRUPO 1: IDENTIDADE */}
               <div style={cssGrupo}>
-                <div>
+                <div style={{ position: 'relative' }}>
                   <label style={cssLabel}>NOME COMPLETO *</label>
-                  <input disabled={!editando} value={dados.nome} onChange={e => setDados({...dados, nome: e.target.value.toUpperCase()})} style={cssInput(!editando)} placeholder="EX: JOÃO DA SILVA" />
+                  <input 
+                    disabled={!editando} 
+                    value={dados.nome} 
+                    onChange={e => {
+                      setDados({...dados, nome: e.target.value.toUpperCase()});
+                      setMostrarSugestoesNome(true);
+                    }} 
+                    onClick={() => { if(editando) setMostrarSugestoesNome(true); }}
+                    style={cssInput(!editando)} 
+                    placeholder="EX: JOÃO DA SILVA" 
+                  />
+                  {/* 💡 CAIXA DE SUGESTÃO NOME USUÁRIO */}
+                  {mostrarSugestoesNome && editando && usuariosFiltradosNome.length > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', marginTop: '5px' }}>
+                      <div style={{ padding: '10px', fontSize: '11px', color: '#f97316', fontWeight: 'bold', backgroundColor: '#fff7ed' }}>⚠️ Nomes parecidos já cadastrados:</div>
+                      {usuariosFiltradosNome.map(u => (
+                        <div key={u.codigo} onClick={() => { setDados(u); setUsuarioAberto(u); setLojaDigitada(u.loja || ''); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px', fontWeight: 'bold', color: '#111' }}>
+                          {u.nome} <span style={{ color: '#999', fontSize: '10px', marginLeft: '5px' }}>(Loja: {u.loja})</span>
+                        </div>
+                      ))}
+                      <div onClick={() => setMostrarSugestoesNome(false)} style={{ padding: '10px', textAlign: 'center', backgroundColor: '#f8fafc', color: '#ef4444', fontSize: '11px', fontWeight: '900', cursor: 'pointer' }}>FECHAR ✕</div>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label style={cssLabel}>TELEFONE (WHATSAPP)</label>
@@ -173,7 +200,6 @@ export default function Usuarios() {
                 </div>
               </div>
 
-              {/* GRUPO 2: VÍNCULO E ACESSO (O CORAÇÃO DO SISTEMA) */}
               <div style={{ ...cssGrupo, borderColor: '#ffedd5', backgroundColor: '#fff7ed' }}>
                 <div style={{ position: 'relative' }}>
                   <label style={cssLabel}>BUSCAR UNIDADE DE TRABALHO *</label>
@@ -181,11 +207,11 @@ export default function Usuarios() {
                     disabled={!editando}
                     placeholder="DIGITE O NOME DA LOJA..."
                     value={lojaDigitada}
-                    onChange={(e) => { setLojaDigitada(e.target.value.toUpperCase()); setMostrarSugestoes(true); }}
-                    onClick={() => { if(editando) setMostrarSugestoes(true); }}
+                    onChange={(e) => { setLojaDigitada(e.target.value.toUpperCase()); setMostrarSugestoesLoja(true); }}
+                    onClick={() => { if(editando) setMostrarSugestoesLoja(true); }}
                     style={{ ...cssInput(!editando), borderColor: '#fed7aa' }}
                   />
-                  {mostrarSugestoes && editando && (
+                  {mostrarSugestoesLoja && editando && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', marginTop: '5px' }}>
                       {lojasFiltradas.length > 0 ? (
                         lojasFiltradas.map(loja => (
@@ -197,7 +223,7 @@ export default function Usuarios() {
                       ) : (
                         <div style={{ padding: '15px', fontSize: '12px', color: '#999', textAlign: 'center', fontWeight: 'bold' }}>Nenhuma loja encontrada.</div>
                       )}
-                      <div onClick={() => setMostrarSugestoes(false)} style={{ padding: '10px', textAlign: 'center', backgroundColor: '#f8fafc', color: '#ef4444', fontSize: '11px', fontWeight: '900', cursor: 'pointer' }}>FECHAR LISTA ✕</div>
+                      <div onClick={() => setMostrarSugestoesLoja(false)} style={{ padding: '10px', textAlign: 'center', backgroundColor: '#f8fafc', color: '#ef4444', fontSize: '11px', fontWeight: '900', cursor: 'pointer' }}>FECHAR LISTA ✕</div>
                     </div>
                   )}
                 </div>
@@ -214,7 +240,6 @@ export default function Usuarios() {
                 </div>
               </div>
 
-              {/* GRUPO 3: PERMISSÕES */}
               <div style={cssGrupo}>
                 <label style={cssLabel}>NÍVEL DE PERMISSÃO NO SISTEMA *</label>
                 <select disabled={!editando} value={dados.perfil} onChange={e => setDados({...dados, perfil: e.target.value})} style={cssInput(!editando)}>
@@ -225,7 +250,6 @@ export default function Usuarios() {
 
             </div>
 
-            {/* BOTÕES DE AÇÃO */}
             <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {editando ? (
                 <button onClick={salvar} style={{ height: design.botoes.altura, backgroundColor: design.botoes.primario, color: design.botoes.texto, borderRadius: design.botoes.raio, border: 'none', fontWeight: '900', cursor: 'pointer' }}>SALVAR CADASTRO</button>
