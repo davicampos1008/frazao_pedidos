@@ -87,9 +87,9 @@ export default function MenuCliente({ usuario }) {
     }
   }, []);
 
-  const solicitarPermissaoPush = async () => {
+const solicitarPermissaoPush = async () => {
     if ("Notification" in window) {
-      const permissao = await Notification.requestPermission();
+      const permissao = await Notification.requestPermission(); // Isso AQUI chama a caixinha do sistema
       setPermissaoPush(permissao);
       if (permissao === "granted") {
         mostrarNotificacao("Notificações ativadas! Avisaremos sobre preços e liberações.", "sucesso");
@@ -254,30 +254,63 @@ export default function MenuCliente({ usuario }) {
   };
 
   const confirmarEnvio = async () => {
+    // 1. Verifica se tem loja vinculada
     const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
     if (!codLoja) return alert("🚨 ERRO: Seu usuário não tem uma Loja vinculada.");
 
     setEnviandoPedido(true);
     try {
+      // 2. Prepara a data atual (padrão YYYY-MM-DD)
       const dataFixa = new Date().toISOString().split('T')[0];
+      
+      // 3. Monta os dados EXATAMENTE como a tabela de pedidos espera (sem campos de preço/total)
       const dadosParaEnviar = carrinho.map(item => ({
-        loja_id: codLoja, nome_usuario: usuario?.nome || "Operador", nome_produto: item.nome, quantidade: item.quantidade,
-        unidade_medida: item.unidade_medida || 'UN', data_pedido: dataFixa, solicitou_refazer: false, liberado_edicao: false, status_compra: 'pendente' 
+        loja_id: codLoja, 
+        nome_usuario: usuario?.nome || "Operador", 
+        nome_produto: item.nome, 
+        quantidade: item.quantidade,
+        unidade_medida: item.unidade_medida || 'UN', 
+        data_pedido: dataFixa, 
+        solicitou_refazer: false, 
+        liberado_edicao: false, 
+        status_compra: 'pendente' 
       }));
 
-      await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
+      // 4. Deleta qualquer pedido anterior de hoje (para evitar duplicidade se ele estiver re-enviando)
+      await supabase
+        .from('pedidos')
+        .delete()
+        .eq('data_pedido', hoje)
+        .eq('loja_id', codLoja);
+        
+      // 5. Salva os itens novos no banco
       const { error } = await supabase.from('pedidos').insert(dadosParaEnviar);
-      if (error) throw error;
+      
+      // Se deu erro no Supabase, ele avisa e para aqui
+      if (error) {
+        console.error("Erro do Supabase:", error);
+        throw new Error(error.message);
+      }
 
+      // 6. Limpa o carrinho local
       setCarrinho([]); 
       localStorage.removeItem('carrinho_virtus');
       
-      setModalRevisaoAberto(false); setModalCarrinhoAberto(false); setModoVisualizacao(false);
+      // 7. Fecha os modais e muda o status para mostrar a tela de sucesso
+      setModalRevisaoAberto(false); 
+      setModalCarrinhoAberto(false); 
+      setModoVisualizacao(false);
+      
+      // 8. Atualiza os dados para a tela de Sucesso aparecer
       await carregarDados(false); 
       window.scrollTo(0,0);
       mostrarNotificacao("🚀 LISTA ENVIADA COM SUCESSO!", 'sucesso', 'Pedido Realizado');
-    } catch (err) { alert("Erro ao gravar: " + err.message); } 
-    finally { setEnviandoPedido(false); }
+      
+    } catch (err) { 
+      alert("Erro ao gravar pedido: " + err.message); 
+    } finally { 
+      setEnviandoPedido(false); 
+    }
   };
 
   const pedirParaEditar = async () => {

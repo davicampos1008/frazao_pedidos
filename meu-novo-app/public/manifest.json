@@ -1,7 +1,7 @@
 {
   "name": "Frazão Frutas & Cia",
   "short_name": "Frazão App",
-  "start_url": "/",
+  "start_url": "/?source=pwa",
   "display": "standalone",
   "background_color": "#f5f5f4",
   "theme_color": "#111111",
@@ -12,6 +12,12 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }
