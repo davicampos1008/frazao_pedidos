@@ -1,23 +1,23 @@
 {
   "name": "Frazão Frutas & Cia",
   "short_name": "Frazão App",
-  "start_url": "/?source=pwa",
+  "start_url": "/",
   "display": "standalone",
-  "background_color": "#f5f5f4",
+  "background_color": "#f8fafc",
   "theme_color": "#111111",
   "description": "Sistema de Gestão e Pedidos Frazão Frutas & Cia",
   "icons": [
     {
-      "src": "/logo.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/logo.png",
-      "sizes": "192x192",
+      "src": "logo.png",
+      "sizes": "400x400",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
