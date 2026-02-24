@@ -116,7 +116,7 @@ export default function FechamentoLojas() {
           totalDisplay = formatarMoeda(totalItem); 
         }
 
-        // 💡 AGRUPAMENTO: Evita itens repetidos somando as quantidades
+        // AGRUPAMENTO PARA EVITAR ITENS REPETIDOS
         const nomeUpper = p.nome_produto.toUpperCase();
         const idxExistente = mapaLojas[idLoja].itens.findIndex(i => i.nome === nomeUpper);
 
@@ -269,7 +269,7 @@ export default function FechamentoLojas() {
         filename:     `Fechamento_${dataBr.replace(/\//g, '-')}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
         html2canvas:  { scale: 2, useCORS: true },
-        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }, // Landscape para caber a tabela
         pagebreak:    { mode: 'css', after: '.print-break' }
       };
       window.html2pdf().set(opt).from(elemento).save();
@@ -298,7 +298,7 @@ export default function FechamentoLojas() {
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>Carregando dados...</div>;
 
   // ============================================
-  // 💡 MÁQUINA DE TABELAS DUPLAS (COMO NO PDF)
+  // TABELA EXATAMENTE COMO NO PDF (8 COLUNAS SEM ESPAÇO)
   // ============================================
   const renderTabelaDupla = (itensLoja, isMotorista) => {
     const half = Math.ceil(itensLoja.length / 2);
@@ -307,25 +307,21 @@ export default function FechamentoLojas() {
       rows.push({ left: itensLoja[i], right: itensLoja[i + half] });
     }
 
-    // Estilos fiéis ao PDF limpo
-    const thStyle = { border: '1px solid black', padding: '6px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#fff' };
-    const tdStyle = { border: '1px solid black', padding: '6px', textAlign: 'center', fontSize: '11px' };
-    const tdDesc = { ...tdStyle, textAlign: 'left' }; 
-    const tdSpacer = { border: 'none', width: '15px' };
+    const thStyle = { border: '1px solid black', padding: '6px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#e5e7eb' };
+    const tdStyle = { border: '1px solid black', padding: '6px', textAlign: 'center', fontSize: '11px', fontWeight: '500' };
+    const tdDesc = { ...tdStyle, textAlign: 'left', fontWeight: 'bold' }; 
 
     return (
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '5px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
-            <th style={{...thStyle, width: '7%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '28%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '8%'}}>QUANT.</th>
+            <th style={{...thStyle, width: '27%'}}>DESCRIÇÃO</th>
             <th style={{...thStyle, width: '10%'}}>VAL. UNIT.</th>
             <th style={{...thStyle, width: '10%'}}>VAL. TOTAL.</th>
             
-            <th style={tdSpacer}></th>
-            
-            <th style={{...thStyle, width: '7%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '28%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '8%'}}>QUANT.</th>
+            <th style={{...thStyle, width: '27%'}}>DESCRIÇÃO</th>
             <th style={{...thStyle, width: '10%'}}>VAL. UNIT.</th>
             <th style={{...thStyle, width: '10%'}}>VAL. TOTAL.</th>
           </tr>
@@ -361,7 +357,6 @@ export default function FechamentoLojas() {
              return (
                <tr key={idx}>
                  {renderCell(row.left)}
-                 <td style={tdSpacer}></td>
                  {renderCell(row.right)}
                </tr>
              )
@@ -372,70 +367,95 @@ export default function FechamentoLojas() {
   };
 
   // ============================================
-  // MODO VISUALIZAÇÃO E IMPRESSÃO (ESTILO PDF)
+  // MODO VISUALIZAÇÃO E IMPRESSÃO (ESTILO PLANILHA EXATA)
   // ============================================
   if (modoVisualizacaoImp) {
     const isMotGlobal = (tipoImpressao === 'motorista_todos' || tipoImpressao === 'motorista_unico');
     const lojasParaRenderizar = (tipoImpressao === 'motorista_todos') ? fechamentos : [lojaParaImprimir];
 
     return (
-      <div style={{ backgroundColor: '#525659', minHeight: '100vh', padding: '20px', fontFamily: 'sans-serif' }}>
+      <div style={{ backgroundColor: '#525659', minHeight: '100vh', padding: '10px', fontFamily: 'Arial, sans-serif' }}>
         
-        <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', backgroundColor: '#333', padding: '15px 20px', borderRadius: '8px', marginBottom: '20px', position: 'sticky', top: '10px', zIndex: 1000, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
-           <button onClick={() => setModoVisualizacaoImp(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>⬅ VOLTAR</button>
-           <div>
-             <button onClick={baixarPDF} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px', marginRight: '10px' }}>⬇️ BAIXAR PDF</button>
-             <button onClick={() => window.print()} style={{ background: '#22c55e', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px' }}>🖨️ IMPRIMIR</button>
+        {/* Barra de Ações Responsiva */}
+        <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', backgroundColor: '#333', padding: '15px', borderRadius: '8px', marginBottom: '20px', position: 'sticky', top: '10px', zIndex: 1000, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
+           <button onClick={() => setModoVisualizacaoImp(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬅ VOLTAR</button>
+           <div style={{ display: 'flex', gap: '10px', flex: '1 1 auto', flexWrap: 'wrap' }}>
+             <button onClick={baixarPDF} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
+             <button onClick={() => window.print()} style={{ background: '#22c55e', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🖨️ IMPRIMIR</button>
            </div>
         </div>
 
-        <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', maxWidth: '1000px', margin: '0 auto' }}>
-           
-           {lojasParaRenderizar.map((loja, idx) => (
-              <div key={loja.loja_id} className="print-break" style={{ padding: '30px', position: 'relative', minHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-                 
-                 {/* 💡 CABEÇALHO IDÊNTICO AO PDF */}
-                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
-                    <div style={{ fontWeight: 'bold', fontSize: '16px', textTransform: 'uppercase' }}>
-                       LOJA: {loja.nome_fantasia}
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontWeight: 'bold', fontSize: '14px' }}>
-                       <span>DATA:</span>
-                       <span>{dataBr}</span>
-                    </div>
-                 </div>
+        {/* Wrapper com Overflow para ver a nota inteira no celular sem quebrar */}
+        <div style={{ overflowX: 'auto', paddingBottom: '20px' }}>
+            <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', minWidth: '900px', maxWidth: '1000px', margin: '0 auto' }}>
+               
+               {lojasParaRenderizar.map((loja, idx) => (
+                  <div key={loja.loja_id} className="print-break" style={{ padding: '20px', position: 'relative', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+                     
+                     {/* Borda Grossa Envolvendo Cabeçalho e Tabela */}
+                     <div style={{ border: '2px solid black', boxSizing: 'border-box' }}>
+                         
+                         {/* CABEÇALHO IDÊNTICO À IMAGEM */}
+                         <div style={{ display: 'flex', flexDirection: 'row', width: '100%', borderBottom: '2px solid black' }}>
+                            
+                            {/* BLOCO 1: LOJA */}
+                            <div style={{ flex: '1.2', borderRight: '2px solid black', padding: '10px', display: 'flex', alignItems: 'center' }}>
+                                <span style={{ fontWeight: '900', fontSize: '18px', color: 'black', marginRight: '5px' }}>LOJA:</span>
+                                <span style={{ fontWeight: '900', fontSize: '18px', color: 'red', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
+                            </div>
 
-                 {/* TABELA DUPLA */}
-                 <div style={{ flex: 1 }}>
-                    {renderTabelaDupla(loja.itens, isMotGlobal)}
-                 </div>
+                            {/* BLOCO 2: LOGO (Recriada com Emojis/Texto para ficar igual a referência) */}
+                            <div style={{ flex: '1', borderRight: '2px solid black', padding: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
+                                <span style={{ fontSize: '26px' }}>🍓🍋</span>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                    <strong style={{ fontSize: '22px', color: '#111', lineHeight: '1' }}>Frazão</strong>
+                                    <span style={{ fontSize: '11px', color: '#333', fontWeight: 'bold' }}>Frutas & Cia</span>
+                                </div>
+                                <span style={{ fontSize: '12px', fontWeight: '900', marginLeft: '5px', color: '#111' }}>(61) 99130-3416</span>
+                            </div>
 
-                 {/* RODAPÉ SIMPLES */}
-                 <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '20px' }}>
-                   <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                     Frazão (61) 99130-3416 Frutas & Cia
-                   </div>
-                   
-                   {!isMotGlobal && (
-                     <div style={{ textAlign: 'right', fontSize: '14px', fontWeight: 'bold' }}>
-                       VALOR TOTAL: {formatarMoeda(loja.totalFatura)}
+                            {/* BLOCO 3: VALORES E DATA */}
+                            <div style={{ flex: '0.8', display: 'flex', flexDirection: 'column' }}>
+                                {/* Linha 1: Valor Total */}
+                                <div style={{ display: 'flex', flex: 1, borderBottom: '2px solid black' }}>
+                                    <div style={{ flex: 1, borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '14px', color: 'black' }}>
+                                        VALOR TOTAL:
+                                    </div>
+                                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '14px', color: 'red' }}>
+                                        {!isMotGlobal ? formatarMoeda(loja.totalFatura) : ''}
+                                    </div>
+                                </div>
+                                {/* Linha 2: Data */}
+                                <div style={{ display: 'flex', flex: 1 }}>
+                                    <div style={{ flex: 1, borderRight: '2px solid black', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px', color: 'black' }}>
+                                        DATA:
+                                    </div>
+                                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px', color: 'red' }}>
+                                        {dataBr}
+                                    </div>
+                                </div>
+                            </div>
+
+                         </div>
+
+                         {/* TABELA DUPLA */}
+                         {renderTabelaDupla(loja.itens, isMotGlobal)}
+
                      </div>
-                   )}
-                 </div>
-
-              </div>
-           ))}
+                  </div>
+               ))}
+            </div>
         </div>
 
-        {/* 💡 CSS DE IMPRESSÃO */}
+        {/* CSS DE IMPRESSÃO */}
         <style>{`
           @media print {
             .no-print { display: none !important; }
             .print-break { page-break-after: always !important; break-after: page !important; }
             html, body { height: auto !important; overflow: visible !important; background: white; margin: 0; padding: 0; }
             #root, div { overflow: visible !important; height: auto !important; }
-            .print-section { box-shadow: none !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; }
-            @page { margin: 10mm; size: auto; }
+            .print-section { box-shadow: none !important; min-width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; }
+            @page { margin: 10mm; size: landscape; }
           }
         `}</style>
       </div>
@@ -446,28 +466,28 @@ export default function FechamentoLojas() {
   // TELA PRINCIPAL
   // ============================================
   return (
-    <div style={{ backgroundColor: '#f5f5f4', minHeight: '100vh', padding: '20px', paddingBottom: '100px', fontFamily: 'sans-serif' }}>
+    <div style={{ backgroundColor: '#f5f5f4', minHeight: '100vh', padding: '10px', paddingBottom: '100px', fontFamily: 'sans-serif' }}>
       
-      {/* HEADER TELA */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: '1000px', margin: '0 auto 20px auto', backgroundColor: '#111', padding: '25px', borderRadius: '24px', color: '#fff' }}>
+      {/* HEADER TELA RESPONSIVO */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'space-between', alignItems: 'center', maxWidth: '1000px', margin: '0 auto 20px auto', backgroundColor: '#111', padding: '20px', borderRadius: '16px', color: '#fff' }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: '22px', fontWeight: '900' }}>🧮 GESTÃO DE FECHAMENTOS</h2>
-          <p style={{ margin: '5px 0 0 0', color: '#94a3b8', fontSize: '13px' }}>{dataBr}</p>
+          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '900' }}>🧮 GESTÃO DE FECHAMENTOS</h2>
+          <p style={{ margin: '5px 0 0 0', color: '#94a3b8', fontSize: '12px' }}>{dataBr}</p>
         </div>
         
         {abaAtiva === 'lojas' && (
-          <button onClick={() => abrirPreviewImpressao('motorista_todos')} style={{ backgroundColor: '#fff', color: '#111', border: 'none', padding: '12px 20px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', display: 'flex', gap: '10px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>
+          <button onClick={() => abrirPreviewImpressao('motorista_todos')} style={{ backgroundColor: '#fff', color: '#111', border: 'none', padding: '12px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', display: 'flex', gap: '10px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.1)', flex: '1 1 auto', justifyContent: 'center' }}>
             <span>🚚</span> VISUALIZAR TODAS VIAS (MOTORISTAS)
           </button>
         )}
       </div>
 
-      {/* ABAS NAVEGAÇÃO */}
-      <div style={{ display: 'flex', gap: '5px', marginBottom: '20px', maxWidth: '1000px', margin: '0 auto 20px auto' }}>
-        <button onClick={() => setAbaAtiva('lojas')} style={{ flex: 1, padding: '15px 20px', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '13px', cursor: 'pointer', backgroundColor: abaAtiva === 'lojas' ? '#3b82f6' : '#fff', color: abaAtiva === 'lojas' ? '#fff' : '#64748b', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
+      {/* ABAS NAVEGAÇÃO RESPONSIVA */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px', maxWidth: '1000px', margin: '0 auto 20px auto' }}>
+        <button onClick={() => setAbaAtiva('lojas')} style={{ flex: 1, minWidth: '150px', padding: '15px 10px', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '12px', cursor: 'pointer', backgroundColor: abaAtiva === 'lojas' ? '#3b82f6' : '#fff', color: abaAtiva === 'lojas' ? '#fff' : '#64748b', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
           🏪 NOTAS DAS LOJAS
         </button>
-        <button onClick={() => setAbaAtiva('fornecedores')} style={{ flex: 1, padding: '15px 20px', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '13px', cursor: 'pointer', backgroundColor: abaAtiva === 'fornecedores' ? '#f97316' : '#fff', color: abaAtiva === 'fornecedores' ? '#fff' : '#64748b', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
+        <button onClick={() => setAbaAtiva('fornecedores')} style={{ flex: 1, minWidth: '150px', padding: '15px 10px', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '12px', cursor: 'pointer', backgroundColor: abaAtiva === 'fornecedores' ? '#f97316' : '#fff', color: abaAtiva === 'fornecedores' ? '#fff' : '#64748b', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
           🏢 PAGAR FORNECEDORES
         </button>
       </div>
@@ -481,45 +501,45 @@ export default function FechamentoLojas() {
             <p style={{ textAlign: 'center', color: '#666', backgroundColor: '#fff', padding: '40px', borderRadius: '16px' }}>Nenhum fechamento de loja disponível.</p>
           ) : (
             fechamentos.map((loja) => (
-              <div key={loja.loja_id} style={{ backgroundColor: '#fff', padding: '30px', borderRadius: '24px', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', marginBottom: '30px', border: '1px solid #e2e8f0' }}>
+              <div key={loja.loja_id} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', marginBottom: '20px', border: '1px solid #e2e8f0' }}>
                 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #f1f5f9', paddingBottom: '15px', marginBottom: '20px' }}>
-                  <div>
-                    <h1 style={{ margin: 0, fontSize: '20px', fontWeight: '900', textTransform: 'uppercase', color: '#111' }}>{loja.nome_fantasia}</h1>
-                    <span style={{ color: loja.liberadoCliente ? '#22c55e' : '#f59e0b', fontSize: '11px', fontWeight: 'bold', display: 'inline-block', marginTop: '5px', padding: '4px 8px', borderRadius: '6px', backgroundColor: loja.liberadoCliente ? '#dcfce7' : '#fef3c7' }}>
+                {/* CABEÇALHO DO CARD DA LOJA (Responsivo) */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #f1f5f9', paddingBottom: '15px', marginBottom: '15px' }}>
+                  <div style={{ flex: '1 1 100%' }}>
+                    <h1 style={{ margin: 0, fontSize: '18px', fontWeight: '900', textTransform: 'uppercase', color: '#111' }}>{loja.nome_fantasia}</h1>
+                    <span style={{ color: loja.liberadoCliente ? '#22c55e' : '#f59e0b', fontSize: '10px', fontWeight: 'bold', display: 'inline-block', marginTop: '5px', padding: '4px 8px', borderRadius: '6px', backgroundColor: loja.liberadoCliente ? '#dcfce7' : '#fef3c7' }}>
                       {loja.liberadoCliente ? '✅ LIBERADO NO APP DA LOJA' : '⏳ AGUARDANDO LIBERAÇÃO'}
                     </span>
                   </div>
                   
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                    <div style={{ textAlign: 'right' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', alignItems: 'center', width: '100%', justifyContent: 'space-between' }}>
+                    <div>
                       <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 'bold', display: 'block' }}>TOTAL DA NOTA</span>
-                      <span style={{ fontSize: '24px', fontWeight: '900', color: '#111' }}>{formatarMoeda(loja.totalFatura)}</span>
+                      <span style={{ fontSize: '20px', fontWeight: '900', color: '#111' }}>{formatarMoeda(loja.totalFatura)}</span>
                     </div>
                     
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                      <div style={{ display: 'flex', gap: '5px' }}>
-                        <button onClick={() => abrirEdicao(loja)} style={{ flex: 1, background: '#111', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>✏️ EDITAR</button>
-                        <button onClick={() => abrirPreviewImpressao('motorista_unico', loja)} style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }} title="Imprimir Motorista Unitário">🚚</button>
-                      </div>
-                      <button onClick={() => abrirPreviewImpressao('loja_unica', loja)} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>📄 VISUALIZAR VIA</button>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', flex: '1 1 auto', justifyContent: 'flex-end' }}>
+                      <button onClick={() => abrirEdicao(loja)} style={{ background: '#111', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>✏️ EDITAR</button>
+                      <button onClick={() => abrirPreviewImpressao('motorista_unico', loja)} style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }} title="Imprimir Motorista Unitário">🚚 MOTORISTA</button>
+                      <button onClick={() => abrirPreviewImpressao('loja_unica', loja)} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>📄 VIA LOJA</button>
                       {!loja.liberadoCliente && (
-                        <button onClick={() => liberarParaOCliente(loja.loja_id)} style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>📤 LIBERAR CLIENTE</button>
+                        <button onClick={() => liberarParaOCliente(loja.loja_id)} style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>📤 LIBERAR</button>
                       )}
                     </div>
                   </div>
                 </div>
 
-                <div style={{ columnCount: 2, columnGap: '40px', fontSize: '12px' }}>
+                {/* Grid Responsivo para Itens na Tela Inicial */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px', fontSize: '12px' }}>
                   {loja.itens.map((item, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px dashed #f1f5f9', breakInside: 'avoid', color: item.isFalta ? '#ef4444' : '#333' }}>
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px dashed #f1f5f9', color: item.isFalta ? '#ef4444' : '#333' }}>
                       <div style={{ flex: 1, paddingRight: '10px' }}>
                         <span style={{ fontWeight: item.isBoleto ? '900' : 'bold', color: 'black' }}>
                           {item.qtdEntregue}x {formatarNomeItem(item.nome)}
                         </span>
                       </div>
                       <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        <span style={{ color: item.isBoleto ? '#d97706' : item.isFalta ? 'red' : '#94a3b8', marginRight: '10px' }}>{item.isBoleto ? 'BOLETO' : item.isFalta ? 'FALTA' : item.unitDisplay}</span>
+                        <span style={{ color: item.isBoleto ? '#d97706' : item.isFalta ? 'red' : '#94a3b8', marginRight: '5px' }}>{item.isBoleto ? 'BOLETO' : item.isFalta ? 'FALTA' : item.unitDisplay}</span>
                         <strong style={{ fontWeight: '900', color: item.isBoleto ? '#d97706' : item.isFalta ? 'red' : '#111' }}>{item.isBoleto ? 'BOLETO' : item.isFalta ? 'FALTA' : item.totalDisplay}</strong>
                       </div>
                     </div>
@@ -538,10 +558,10 @@ export default function FechamentoLojas() {
       {abaAtiva === 'fornecedores' && (
         <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
           
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-            <button onClick={() => setAbaForn('pendentes')} style={{ padding: '10px 15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', background: abaForn === 'pendentes' ? '#fcd34d' : '#fff', color: abaForn === 'pendentes' ? '#b45309' : '#64748b' }}>PENDENTES</button>
-            <button onClick={() => setAbaForn('finalizados')} style={{ padding: '10px 15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', background: abaForn === 'finalizados' ? '#22c55e' : '#fff', color: abaForn === 'finalizados' ? '#fff' : '#64748b' }}>FINALIZADOS</button>
-            <button onClick={() => setAbaForn('boletos')} style={{ padding: '10px 15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', background: abaForn === 'boletos' ? '#3b82f6' : '#fff', color: abaForn === 'boletos' ? '#fff' : '#64748b' }}>BOLETOS</button>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
+            <button onClick={() => setAbaForn('pendentes')} style={{ flex: '1 1 auto', padding: '10px 15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', background: abaForn === 'pendentes' ? '#fcd34d' : '#fff', color: abaForn === 'pendentes' ? '#b45309' : '#64748b' }}>PENDENTES</button>
+            <button onClick={() => setAbaForn('finalizados')} style={{ flex: '1 1 auto', padding: '10px 15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', background: abaForn === 'finalizados' ? '#22c55e' : '#fff', color: abaForn === 'finalizados' ? '#fff' : '#64748b' }}>FINALIZADOS</button>
+            <button onClick={() => setAbaForn('boletos')} style={{ flex: '1 1 auto', padding: '10px 15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', background: abaForn === 'boletos' ? '#3b82f6' : '#fff', color: abaForn === 'boletos' ? '#fff' : '#64748b' }}>BOLETOS</button>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '15px' }}>
@@ -632,51 +652,51 @@ export default function FechamentoLojas() {
       {/* MODAL DE EDIÇÃO MANUAL DE NOTA DA LOJA */}
       {/* ============================================ */}
       {lojaEmEdicao && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
-          <div style={{ backgroundColor: '#fff', width: '100%', maxWidth: '800px', borderRadius: '24px', padding: '30px', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '10px' }}>
+          <div style={{ backgroundColor: '#fff', width: '100%', maxWidth: '800px', borderRadius: '16px', padding: '20px', display: 'flex', flexDirection: 'column', maxHeight: '95vh' }}>
             
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: '20px', fontWeight: '900' }}>✏️ EDITAR NOTA</h3>
-                <span style={{ color: '#f97316', fontWeight: 'bold', fontSize: '13px' }}>{lojaEmEdicao.nome_fantasia}</span>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '900' }}>✏️ EDITAR NOTA</h3>
+                <span style={{ color: '#f97316', fontWeight: 'bold', fontSize: '12px' }}>{lojaEmEdicao.nome_fantasia}</span>
               </div>
               <button onClick={() => setLojaEmEdicao(null)} style={{ background: '#f1f5f9', border: 'none', width: '35px', height: '35px', borderRadius: '50%', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', paddingRight: '10px' }}>
+            <div style={{ flex: 1, overflowY: 'auto', paddingRight: '5px' }}>
               {itensEditados.map((item) => {
                 const corInputValores = item.isFalta ? 'red' : item.isBoleto ? '#d97706' : '#111';
 
                 return (
-                  <div key={item.id_pedido} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: '10px', alignItems: 'center', padding: '15px', backgroundColor: '#f8fafc', marginBottom: '10px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                  <div key={item.id_pedido} style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', padding: '15px', backgroundColor: '#f8fafc', marginBottom: '10px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                     
-                    <div>
-                      <strong style={{ fontSize: '12px', display: 'block', lineHeight: '1.1', color: 'black' }}>
+                    <div style={{ flex: '1 1 100%' }}>
+                      <strong style={{ fontSize: '13px', display: 'block', lineHeight: '1.2', color: 'black' }}>
                         {formatarNomeItem(item.nome)}
                       </strong>
                       
                       <div style={{ display: 'flex', gap: '5px', marginTop: '6px' }}>
-                        <button onClick={() => setStatusRapido(item.id_pedido, 'boleto')} style={{ fontSize: '9px', background: item.isBoleto ? '#d97706' : '#fef3c7', color: item.isBoleto ? '#fff' : '#d97706', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontWeight: 'bold' }}>BOLETO</button>
-                        <button onClick={() => setStatusRapido(item.id_pedido, 'falta')} style={{ fontSize: '9px', background: item.isFalta ? '#ef4444' : '#fef2f2', color: item.isFalta ? '#fff' : '#ef4444', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontWeight: 'bold' }}>FALTA</button>
+                        <button onClick={() => setStatusRapido(item.id_pedido, 'boleto')} style={{ fontSize: '10px', background: item.isBoleto ? '#d97706' : '#fef3c7', color: item.isBoleto ? '#fff' : '#d97706', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>BOLETO</button>
+                        <button onClick={() => setStatusRapido(item.id_pedido, 'falta')} style={{ fontSize: '10px', background: item.isFalta ? '#ef4444' : '#fef2f2', color: item.isFalta ? '#fff' : '#ef4444', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>FALTA</button>
                         {(item.isFalta || item.isBoleto) && (
-                          <button onClick={() => setStatusRapido(item.id_pedido, 'normal')} style={{ fontSize: '9px', background: '#e2e8f0', color: '#333', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer', fontWeight: 'bold' }}>🔙 DESFAZER</button>
+                          <button onClick={() => setStatusRapido(item.id_pedido, 'normal')} style={{ fontSize: '10px', background: '#e2e8f0', color: '#333', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>🔙 DESFAZER</button>
                         )}
                       </div>
                     </div>
 
-                    <div>
-                      <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#94a3b8', display: 'block' }}>QTD</label>
-                      <input type="text" value={item.qtdEntregue} onChange={e => handleChangeEdicao(item.id_pedido, 'qtdEntregue', e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', outline: 'none', textAlign: 'center', fontWeight: 'bold', color: 'black' }} />
+                    <div style={{ flex: '1 1 20%' }}>
+                      <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', display: 'block' }}>QTD</label>
+                      <input type="text" value={item.qtdEntregue} onChange={e => handleChangeEdicao(item.id_pedido, 'qtdEntregue', e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc', outline: 'none', textAlign: 'center', fontWeight: 'bold', color: 'black' }} />
                     </div>
 
-                    <div>
-                      <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#94a3b8', display: 'block' }}>V. UNIT</label>
-                      <input type="text" value={item.unitDisplay} onChange={e => handleChangeEdicao(item.id_pedido, 'unitDisplay', e.target.value)} onBlur={e => handleBlurPreco(item.id_pedido, 'unitDisplay', e.target.value)} disabled={item.isFalta || item.isBoleto} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold', color: corInputValores }} />
+                    <div style={{ flex: '1 1 35%' }}>
+                      <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', display: 'block' }}>V. UNIT</label>
+                      <input type="text" value={item.unitDisplay} onChange={e => handleChangeEdicao(item.id_pedido, 'unitDisplay', e.target.value)} onBlur={e => handleBlurPreco(item.id_pedido, 'unitDisplay', e.target.value)} disabled={item.isFalta || item.isBoleto} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold', color: corInputValores }} />
                     </div>
 
-                    <div>
-                      <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#94a3b8', display: 'block' }}>TOTAL</label>
-                      <input type="text" value={item.totalDisplay} onChange={e => handleChangeEdicao(item.id_pedido, 'totalDisplay', e.target.value)} disabled={item.isFalta || item.isBoleto} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold', color: corInputValores }} />
+                    <div style={{ flex: '1 1 35%' }}>
+                      <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', display: 'block' }}>TOTAL</label>
+                      <input type="text" value={item.totalDisplay} onChange={e => handleChangeEdicao(item.id_pedido, 'totalDisplay', e.target.value)} disabled={item.isFalta || item.isBoleto} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold', color: corInputValores }} />
                     </div>
 
                   </div>
@@ -684,8 +704,8 @@ export default function FechamentoLojas() {
               })}
             </div>
 
-            <button onClick={salvarEdicaoLoja} style={{ width: '100%', padding: '20px', backgroundColor: '#22c55e', color: '#fff', border: 'none', borderRadius: '16px', fontWeight: '900', fontSize: '16px', marginTop: '20px', cursor: 'pointer', boxShadow: '0 4px 15px rgba(34,197,94,0.3)' }}>
-              💾 SALVAR EDIÇÕES - TOTAL: {formatarMoeda(totalAoVivoEdicao)}
+            <button onClick={salvarEdicaoLoja} style={{ width: '100%', padding: '15px', backgroundColor: '#22c55e', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '14px', marginTop: '15px', cursor: 'pointer', boxShadow: '0 4px 15px rgba(34,197,94,0.3)' }}>
+              💾 SALVAR - TOTAL: {formatarMoeda(totalAoVivoEdicao)}
             </button>
           </div>
         </div>
