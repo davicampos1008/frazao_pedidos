@@ -10,7 +10,7 @@ export default function MenuCliente({ usuario }) {
     },
     cores: {
       fundoGeral: '#f8fafc',
-      fundoCards: '#ffffff',    // Nova variável para controlar o fundo branco dos cards
+      fundoCards: '#ffffff',
       primaria: '#f97316',      // Laranja Frazão
       textoForte: '#111111',
       textoSuave: '#64748b',
@@ -70,7 +70,8 @@ export default function MenuCliente({ usuario }) {
     precos: true, edicao: true, promocoes: true, novidades: true
   });
   
-  // --- NOVOS ESTADOS PARA SENHA ---
+  // --- NOVOS ESTADOS MENU DE CONFIG E SENHA ---
+  const [modalConfiguracoesAberto, setModalConfiguracoesAberto] = useState(false);
   const [modalSenhaAberto, setModalSenhaAberto] = useState(false);
   const [dadosSenha, setDadosSenha] = useState({ antiga: '', nova: '', confirma: '' });
   const [mostrarSenha, setMostrarSenha] = useState(false);
@@ -90,7 +91,7 @@ export default function MenuCliente({ usuario }) {
   const primeiroNome = (usuario?.nome || 'Cliente').split(' ')[0];
   const nomeLojaLimpo = (usuario?.loja || 'Matriz').replace(/^\d+\s*-\s*/, '').trim();
 
-  // 💡 CONFIGURAÇÃO DE TEMA (FUNDO GERAL) E PWA
+  // 💡 CONFIGURAÇÃO DE TEMA E PWA
   useEffect(() => {
     document.body.style.backgroundColor = configDesign.cores.fundoGeral;
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -101,7 +102,6 @@ export default function MenuCliente({ usuario }) {
 
   // 💡 AVISO PARA TROCAR SENHA
   useEffect(() => {
-    // Aqui assumimos que a senha padrão inicial do sistema é '123456' ou igual ao código da loja
     if (usuario?.senha === '123456' || usuario?.senha === usuario?.codigo_loja?.toString()) {
       alert("⚠️ Aviso de Segurança: Detectamos que você está usando uma senha padrão. Por favor, clique na engrenagem no topo da tela e altere sua senha para proteger sua conta.");
     }
@@ -141,7 +141,6 @@ export default function MenuCliente({ usuario }) {
     }
   };
 
-  // 💡 LÓGICA DE CLIQUE NA NOTIFICAÇÃO (VAI DIRETO AO PRODUTO)
   const lidarComCliqueNotificacao = (msg) => {
     const nomeProduto = msg.match(/"([^"]+)"/) || msg.match(/PROMOÇÃO: (.*?) por/);
     if (nomeProduto && nomeProduto[1]) {
@@ -164,7 +163,6 @@ export default function MenuCliente({ usuario }) {
         };
 
         let notification;
-        // Tenta usar ServiceWorker para notificações externas robustas (Android/iOS)
         if (navigator.serviceWorker && navigator.serviceWorker.controller) {
           navigator.serviceWorker.ready.then(reg => {
             reg.showNotification(titulo, options);
@@ -179,7 +177,6 @@ export default function MenuCliente({ usuario }) {
            };
         }
         
-        // Toca o som (se o navegador não bloquear auto-play)
         const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
         audio.play().catch(() => {});
       } catch (e) { console.error("Erro ao disparar notificação:", e); }
@@ -415,7 +412,7 @@ export default function MenuCliente({ usuario }) {
     } catch (err) { alert("Erro ao importar: " + err.message); }
   };
 
-  // 💡 MUDANÇA DE SENHA
+  // 💡 NOVA MUDANÇA DE SENHA CORRIGIDA
   const salvarNovaSenha = async () => {
     if(!dadosSenha.antiga || !dadosSenha.nova || !dadosSenha.confirma) return setErroSenha("Preencha todos os campos.");
     if(dadosSenha.nova !== dadosSenha.confirma) return setErroSenha("A nova senha não confere com a repetição.");
@@ -424,12 +421,20 @@ export default function MenuCliente({ usuario }) {
     setCarregandoSenha(true);
     setErroSenha('');
     try {
+      // Usa o código do usuário para buscar com segurança, caso 'id' não exista
+      const identificador = usuario?.codigo || usuario?.id;
+      const campoBusca = usuario?.codigo ? 'codigo' : 'id';
+
+      if (!identificador) throw new Error("Erro de sessão: Faça login novamente.");
+
       // Verifica senha antiga
-      const { data: userAtual } = await supabase.from('usuarios').select('senha').eq('id', usuario.id).single();
-      if(userAtual.senha !== dadosSenha.antiga) throw new Error("A senha antiga está incorreta.");
+      const { data: userAtual, error: errUser } = await supabase.from('usuarios').select('senha').eq(campoBusca, identificador).single();
+      
+      if (errUser || !userAtual) throw new Error("Usuário não encontrado no banco de dados.");
+      if (userAtual.senha !== dadosSenha.antiga) throw new Error("A senha antiga está incorreta.");
       
       // Atualiza senha
-      const { error } = await supabase.from('usuarios').update({ senha: dadosSenha.nova }).eq('id', usuario.id);
+      const { error } = await supabase.from('usuarios').update({ senha: dadosSenha.nova }).eq(campoBusca, identificador);
       if(error) throw error;
       
       mostrarNotificacao("🔒 Senha alterada com sucesso!", 'sucesso');
@@ -519,8 +524,9 @@ export default function MenuCliente({ usuario }) {
         </div>
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          {/* BOTÃO DE SENHA */}
-          <button onClick={() => setModalSenhaAberto(true)} style={{ background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', fontSize: '20px' }}>
+          
+          {/* 💡 NOVO BOTÃO DE CONFIGURAÇÕES (ANTIGA ENGRENAGEM) */}
+          <button onClick={() => setModalConfiguracoesAberto(true)} style={{ background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', fontSize: '20px' }}>
             ⚙️
           </button>
 
@@ -685,6 +691,31 @@ export default function MenuCliente({ usuario }) {
               </button>
             )}
             <button onClick={() => setModalConfigNotifAberto(false)} style={{ width: '100%', marginTop: '15px', padding: '15px', background: configDesign.cores.textoForte, color: '#fff', borderRadius: '15px', fontWeight: 'bold', border: 'none' }}>Salvar Preferências</button>
+          </div>
+        </div>
+      )}
+
+      {/* ⚙️ NOVO MENU DE CONFIGURAÇÕES GERAIS */}
+      {modalConfiguracoesAberto && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 6500, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
+          <div style={{ background: configDesign.cores.fundoCards, width: '100%', maxWidth: '320px', borderRadius: '25px', padding: '25px' }}>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, color: configDesign.cores.textoForte }}>Configurações</h3>
+              <button onClick={() => setModalConfiguracoesAberto(false)} style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer', color: '#111', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>✕</button>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button onClick={() => { setModalConfiguracoesAberto(false); setModalSenhaAberto(true); }} style={{ width: '100%', padding: '18px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '15px', fontWeight: 'bold', color: configDesign.cores.textoForte, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px' }}>
+                🔒 Alterar Minha Senha
+              </button>
+              
+              {/* Espaço reservado para futuras funções */}
+              <div style={{ padding: '20px', marginTop: '10px', background: '#f1f5f9', borderRadius: '15px', border: '1px dashed #cbd5e1', color: configDesign.cores.textoSuave, fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}>
+                 Mais opções em breve...
+              </div>
+            </div>
+
           </div>
         </div>
       )}
