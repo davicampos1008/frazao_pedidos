@@ -31,7 +31,6 @@ export default function FechamentoLojas({ isEscuro }) {
   const themeCard = isEscuro ? '#1e293b' : '#ffffff';
   const themeText = isEscuro ? '#f8fafc' : '#111111';
   const themeBorder = isEscuro ? '#334155' : '#e2e8f0';
-  const themeMenuTop = isEscuro ? '#020617' : '#111111';
 
   useEffect(() => {
     if (!window.html2pdf) {
@@ -73,35 +72,7 @@ export default function FechamentoLojas({ isEscuro }) {
       const mapaForn = {};
 
       (pedData || []).forEach(p => {
-        // 💡 IGNORA ITEMS QUE JÁ FORAM DEVOLVIDOS PRO PENDENTE PARA NÃO SOMAR NOS FORNECEDORES
-        if (p.status_compra === 'pendente') {
-            // Apenas registra na loja como pendente para bloquear o PDF. Não vai pro fornecedor.
-            const idLoja = extrairNum(p.loja_id);
-            if (!idLoja || idLoja <= 1) return;
-            if (!mapaLojas[idLoja]) {
-              const lInfo = lojasData.find(l => extrairNum(l.codigo_loja) === idLoja);
-              mapaLojas[idLoja] = { loja_id: idLoja, nome_fantasia: lInfo ? lInfo.nome_fantasia : `Loja ${idLoja}`, itens: [], totalFatura: 0, liberadoCliente: false, temPendencia: true };
-            }
-            
-            mapaLojas[idLoja].itens.push({
-                id_pedido: p.id,
-                nome: p.nome_produto.toUpperCase(),
-                unidade: p.unidade_medida || 'UN',
-                qtdOriginal: p.quantidade,
-                qtdEntregue: p.quantidade,
-                unitDisplay: 'AGUARDANDO COMPRA',
-                totalDisplay: 'PENDENTE',
-                valorNumerico: 0,
-                isFalta: false,
-                isBoleto: false,
-                precoOriginal: '0,00',
-                isBonif: false,
-                isPendente: true, // 💡 Flag vital
-                fornecedor_original: p.fornecedor_compra
-            });
-            mapaLojas[idLoja].temPendencia = true;
-            return;
-        }
+        if (p.status_compra === 'pendente') return;
 
         // --- FORNECEDORES ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
@@ -134,7 +105,8 @@ export default function FechamentoLojas({ isEscuro }) {
                qtdBonificadaGeral: 0,
                itens: [], 
                lojasEnvolvidas: {},
-               statusPagamento: 'pendente' 
+               statusPagamento: 'pendente',
+               precisaRefazer: false
             };
           }
 
@@ -144,7 +116,7 @@ export default function FechamentoLojas({ isEscuro }) {
           
           mapaForn[fNome].lojasEnvolvidas[nomeLojaForn] = lInfoForn || { nome_fantasia: nomeLojaForn, placa_caminhao: 'SEM PLACA' };
 
-          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => i.nomeItem === p.nome_produto && i.isBoleto === isBoleto && i.valUnit === baseVal);
+          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => i.nomeItem === p.nome_produto && i.valUnit === baseVal);
 
           if (itemExistenteIndex >= 0) {
               const itEx = mapaForn[fNome].itens[itemExistenteIndex];
@@ -174,9 +146,13 @@ export default function FechamentoLojas({ isEscuro }) {
           } else {
             mapaForn[fNome].totalPix += totalItemFornCobrado;
           }
+
+          if (p.status_compra === 'falta' || p.qtd_atendida === 0 || p.fornecedor_compra === 'REFAZER') {
+             mapaForn[fNome].precisaRefazer = true;
+          }
         }
 
-        // --- LOJAS (Itens Atendidos/Falta) ---
+        // --- LOJAS ---
         const idLoja = extrairNum(p.loja_id);
         if (!idLoja || idLoja <= 1) return;
 
@@ -187,8 +163,7 @@ export default function FechamentoLojas({ isEscuro }) {
             nome_fantasia: lInfo ? lInfo.nome_fantasia : `Loja ${idLoja}`,
             itens: [],
             totalFatura: 0,
-            liberadoCliente: false,
-            temPendencia: false
+            liberadoCliente: false 
           };
         }
 
@@ -269,8 +244,7 @@ export default function FechamentoLojas({ isEscuro }) {
             isFalta: isFalta,
             isBoleto: isBoleto,
             precoOriginal: precoOriginal,
-            isBonif: isBonif,
-            isPendente: false
+            isBonif: isBonif
           });
         }
 
@@ -320,7 +294,7 @@ export default function FechamentoLojas({ isEscuro }) {
   };
 
   const handleBlurPreco = (idPedido, campo, valorAtual) => {
-    if (!valorAtual || valorAtual === 'FALTA' || valorAtual === 'BOLETO' || valorAtual.includes('BONIFIC') || valorAtual === 'AGUARDANDO COMPRA') return;
+    if (!valorAtual || valorAtual === 'FALTA' || valorAtual === 'BOLETO' || valorAtual.includes('BONIF')) return;
     let v = String(valorAtual).replace(/[^\d,.]/g, '');
     if (!v.includes(',') && !v.includes('.')) { v = v + ',00'; }
     if(v.includes('.') && !v.includes(',')) v = v.replace('.', ',');
@@ -331,20 +305,36 @@ export default function FechamentoLojas({ isEscuro }) {
     handleChangeEdicao(idPedido, campo, finalStr);
   };
 
-  // 💡 BOTÃO DE DESFAZER DIRETO NA LINHA! (Joga pra aba de Pendentes automaticamente)
-  const devolverParaPendenteDireto = async (item) => {
-     if (item.isPendente) return alert("Este item já está aguardando compra.");
-     if (!window.confirm(`Isso apagará o preço e devolverá "${item.nome}" para a aba de PENDENTES na Planilha de Compras. O fornecedor original será alertado. Deseja continuar?`)) return;
-     
+  const setStatusRapido = (idPedido, tipo) => {
+    setItensEditados(prev => prev.map(item => {
+      if (item.id_pedido === idPedido) {
+        if (tipo === 'boleto') return { ...item, isBoleto: true, isFalta: false, isBonif: false, desfazerVoltar: false, unitDisplay: 'BOLETO', totalDisplay: 'BOLETO', valorNumerico: 0 };
+        
+        if (tipo === 'falta') return { ...item, isFalta: true, isBoleto: false, isBonif: false, desfazerVoltar: true, unitDisplay: 'FALTA', totalDisplay: 'FALTA', valorNumerico: 0 };
+        
+        if (tipo === 'normal') {
+           const pb = item.precoOriginal && !item.precoOriginal.includes('BONIF') ? item.precoOriginal : '0,00';
+           if (pb === '0,00') {
+               return { ...item, isFalta: false, isBoleto: false, isBonif: false, desfazerVoltar: true, unitDisplay: '0,00', totalDisplay: 'R$ 0,00', valorNumerico: 0 };
+           }
+           const t = parseInt(item.qtdEntregue) * tratarPrecoNum(pb);
+           return { ...item, isFalta: false, isBoleto: false, isBonif: false, desfazerVoltar: false, unitDisplay: pb, totalDisplay: formatarMoeda(t), valorNumerico: t };
+        }
+      }
+      return item;
+    }));
+  };
+
+  // 💡 MUDANÇA: BOTÃO DE REFAZER DIRETO NA LINHA! (Joga pra aba de Pendentes automaticamente)
+  const devolverParaPendenteDireto = async (idPedido) => {
+     if (!window.confirm("Isso apagará o preço e devolverá esse item para a aba de PENDENTES. Deseja continuar?")) return;
      setCarregando(true);
      await supabase.from('pedidos').update({
         status_compra: 'pendente',
-        fornecedor_compra: `ALERTA|${item.fornecedor_original || ''}`, // 💡 Salva o prefixo pro Fornecedor ficar vermelho
+        fornecedor_compra: 'REFAZER',
         custo_unit: '',
         qtd_atendida: 0
-     }).eq('id', item.id_pedido);
-     
-     setLojaEmEdicao(null);
+     }).eq('id', idPedido);
      carregar();
   };
 
@@ -352,8 +342,16 @@ export default function FechamentoLojas({ isEscuro }) {
     setCarregando(true);
     try {
       for (const item of itensEditados) {
-        if (item.isPendente) continue; // Não edita itens que ainda estão pendentes
-        
+        if (item.desfazerVoltar) {
+            await supabase.from('pedidos').update({
+              qtd_atendida: 0,
+              custo_unit: '',
+              fornecedor_compra: 'REFAZER',
+              status_compra: 'pendente'
+            }).eq('id', item.id_pedido);
+            continue;
+        }
+
         const statusFinal = item.isFalta ? 'falta' : item.isBoleto ? 'boleto' : 'atendido';
         const updatePayload = {
           qtd_atendida: Number(item.qtdEntregue) || 0,
@@ -370,37 +368,31 @@ export default function FechamentoLojas({ isEscuro }) {
     }
   };
 
+  const refazerPedidoFornecedor = async (nomeForn) => {
+     if (!window.confirm(`Isso vai APAGAR as notas de ${nomeForn} e devolver tudo para a aba PENDENTES. Deseja continuar?`)) return;
+     setCarregando(true);
+     await supabase.from('pedidos').update({
+        status_compra: 'pendente',
+        fornecedor_compra: '',
+        custo_unit: '',
+        qtd_atendida: 0
+     }).eq('data_pedido', hoje).eq('fornecedor_compra', nomeForn).in('status_compra', ['atendido', 'boleto', 'pendente']); 
+     carregar();
+  };
+
   const totalAoVivoEdicao = itensEditados.reduce((acc, item) => {
-     if(item.isFalta || item.isBoleto || item.isPendente || (item.isBonif && item.unitDisplay.includes('BONIFIC'))) return acc;
+     if(item.isFalta || item.isBoleto || (item.isBonif && item.unitDisplay.includes('BONIFIC')) || item.desfazerVoltar) return acc;
      const val = tratarPrecoNum(item.totalDisplay);
      return acc + (isNaN(val) ? 0 : val);
   }, 0);
 
-  // 💡 TRAVA DO PDF CASO EXISTA PENDÊNCIA
   const abrirPreviewImpressao = (tipo, loja = null) => {
-    if (loja && loja.temPendencia) {
-        alert('⚠️ Ação bloqueada! Esta loja possui itens com status PENDENTE.\nVá na Planilha de Compras e resolva o fornecedor/falta antes de fechar a nota.');
-        return;
-    }
-    if (tipo === 'motorista_todos') {
-        const lojasPendentes = fechamentos.filter(l => l.temPendencia);
-        if (lojasPendentes.length > 0) {
-            alert('⚠️ Ação bloqueada! Algumas lojas possuem itens PENDENTES.\nResolva todas as compras pendentes do dia na Planilha antes de gerar o bloco dos motoristas.');
-            return;
-        }
-    }
-
     setTipoImpressao(tipo);
     setLojaParaImprimir(loja);
     setModoVisualizacaoImp(true);
   };
 
   const liberarParaOCliente = async (idLoja) => {
-    const lojaObj = fechamentos.find(l => l.loja_id === idLoja);
-    if (lojaObj && lojaObj.temPendencia) {
-        alert('⚠️ Ação bloqueada! Esta loja possui itens com status PENDENTE.\nVá na Planilha de Compras e resolva antes de liberar para o cliente.');
-        return;
-    }
     if (!window.confirm("Isso vai disponibilizar esse fechamento no aplicativo do Gerente dessa loja. Confirmar?")) return;
     setCarregando(true);
     await supabase.from('pedidos').update({ nota_liberada: true }).eq('data_pedido', hoje).eq('loja_id', idLoja);
@@ -525,9 +517,6 @@ export default function FechamentoLojas({ isEscuro }) {
                   corTotal = '#ef4444';
                   uDisp = 'FALTA';
                   tDisp = 'FALTA';
-               } else if (item.isPendente) {
-                  corUnit = '#f97316'; 
-                  corTotal = '#f97316';
                } else {
                   if (uDisp.includes('BONIFIC.')) corUnit = '#16a34a'; 
                   else if (uDisp === 'BOLETO') corUnit = '#d97706'; 
@@ -536,7 +525,7 @@ export default function FechamentoLojas({ isEscuro }) {
                   else if (tDisp === 'BOLETO') corTotal = '#d97706'; 
                }
 
-               if (isMotorista && !item.isFalta && !item.isPendente) {
+               if (isMotorista && !item.isFalta) {
                   uDisp = '';
                   tDisp = '';
                } 
@@ -646,7 +635,7 @@ export default function FechamentoLojas({ isEscuro }) {
   return (
     <div style={{ backgroundColor: themeBg, minHeight: '100vh', padding: '10px', paddingBottom: '100px', fontFamily: 'sans-serif', transition: '0.3s' }}>
       
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'space-between', alignItems: 'center', maxWidth: '1000px', margin: '0 auto 20px auto', backgroundColor: themeMenuTop, padding: '20px', borderRadius: '16px', color: '#fff', border: isEscuro ? '1px solid #334155' : 'none' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'space-between', alignItems: 'center', maxWidth: '1000px', margin: '0 auto 20px auto', backgroundColor: isEscuro ? '#1e293b' : '#111', padding: '20px', borderRadius: '16px', color: '#fff', border: isEscuro ? '1px solid #334155' : 'none' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '900' }}>🧮 GESTÃO DE FECHAMENTOS</h2>
           <p style={{ margin: '5px 0 0 0', color: '#94a3b8', fontSize: '12px' }}>{dataBr}</p>
@@ -678,9 +667,7 @@ export default function FechamentoLojas({ isEscuro }) {
                 
                 <div onClick={() => setLojaExpandida(lojaExpandida === loja.loja_id ? null : loja.loja_id)} style={{ padding: '20px', cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'space-between', alignItems: 'center', backgroundColor: lojaExpandida === loja.loja_id ? (isEscuro ? '#0f172a' : '#f8fafc') : themeCard, transition: '0.2s' }}>
                   <div style={{ flex: '1 1 auto' }}>
-                    <h1 style={{ margin: 0, fontSize: '18px', fontWeight: '900', textTransform: 'uppercase', color: themeText }}>
-                       {loja.nome_fantasia} {loja.temPendencia && <span style={{color: '#ef4444', fontSize: '14px'}}>⚠️</span>}
-                    </h1>
+                    <h1 style={{ margin: 0, fontSize: '18px', fontWeight: '900', textTransform: 'uppercase', color: themeText }}>{loja.nome_fantasia}</h1>
                     <span style={{ color: loja.liberadoCliente ? '#22c55e' : '#f59e0b', fontSize: '10px', fontWeight: 'bold', display: 'inline-block', marginTop: '5px', padding: '4px 8px', borderRadius: '6px', backgroundColor: loja.liberadoCliente ? (isEscuro ? '#166534' : '#dcfce7') : (isEscuro ? '#78350f' : '#fef3c7') }}>
                       {loja.liberadoCliente ? '✅ LIBERADO' : '⏳ AGUARDANDO'}
                     </span>
@@ -713,24 +700,21 @@ export default function FechamentoLojas({ isEscuro }) {
                          const isRed = item.isFalta;
                          const isOrange = item.isBoleto;
                          const isGreen = item.isBonif || unitF.includes('BONIFIC');
-                         const isPendente = item.isPendente;
 
                          return (
-                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', borderBottom: `1px dashed ${themeBorder}`, backgroundColor: isPendente ? (isEscuro ? '#451a03' : '#fff7ed') : (isEscuro ? '#0f172a' : '#f8fafc'), borderRadius: '8px', border: isPendente ? '1px solid #f97316' : 'none' }}>
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', borderBottom: `1px dashed ${themeBorder}`, backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', borderRadius: '8px' }}>
                               <div style={{ flex: 1, paddingRight: '10px' }}>
                                 <span style={{ fontWeight: 'bold', color: themeText }}>
                                   {item.qtdEntregue}x {formatarNomeItem(item.nome)}
                                 </span>
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '15px', whiteSpace: 'nowrap' }}>
-                                {/* 💡 BOTÃO DIRETO DE REFAZER (VOLTAR PRO PENDENTE) */}
-                                {!isPendente && (
-                                   <button onClick={() => devolverParaPendenteDireto(item)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer' }} title="Desfazer e jogar para pendentes">🔙</button>
-                                )}
+                                {/* 💡 NOVO BOTÃO DE REFAZER DIRETO NA LINHA! JOGA O ITEM INTEIRO PRO PENDENTE */}
+                                <button onClick={() => devolverParaPendenteDireto(item.id_pedido)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer' }} title="Desfazer e jogar para pendentes">🔙</button>
                                 
                                 <div style={{ textAlign: 'right' }}>
-                                  <span style={{ color: isPendente ? '#f97316' : (isOrange ? '#d97706' : isRed ? '#ef4444' : isGreen ? '#16a34a' : '#94a3b8'), marginRight: '5px', fontWeight: 'bold' }}>{unitF}</span>
-                                  <strong style={{ fontWeight: '900', color: isPendente ? '#f97316' : (isOrange ? '#d97706' : isRed ? '#ef4444' : (totF === 'BONIFIC.' ? '#16a34a' : themeText)) }}>{totF}</strong>
+                                  <span style={{ color: isOrange ? '#d97706' : isRed ? '#ef4444' : isGreen ? '#16a34a' : '#94a3b8', marginRight: '5px', fontWeight: 'bold' }}>{unitF}</span>
+                                  <strong style={{ fontWeight: '900', color: isOrange ? '#d97706' : isRed ? '#ef4444' : (totF === 'BONIFIC.' ? '#16a34a' : themeText) }}>{totF}</strong>
                                 </div>
                               </div>
                             </div>
@@ -745,83 +729,126 @@ export default function FechamentoLojas({ isEscuro }) {
         </div>
       )}
 
-      {/* 💡 ABA 4 NOVA: LISTA RESUMO DE ITENS CONSOLIDADA */}
-      {abaAtiva === 'lista_fornecedores' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+      {abaAtiva === 'fornecedores' && (
+        <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
           
-          <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '10px 15px', display: 'flex', gap: '10px', border: '1px solid #e2e8f0' }}>
-            <span>🔍</span><input placeholder="Buscar produto..." value={buscaFornList} onChange={e => setBuscaFornList(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
+            <button onClick={() => setAbaForn('pendentes')} style={{ flex: '1 1 auto', padding: '10px 15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', background: abaForn === 'pendentes' ? '#fcd34d' : themeCard, color: abaForn === 'pendentes' ? '#b45309' : '#64748b' }}>PENDENTES</button>
+            <button onClick={() => setAbaForn('finalizados')} style={{ flex: '1 1 auto', padding: '10px 15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', background: abaForn === 'finalizados' ? '#22c55e' : themeCard, color: abaForn === 'finalizados' ? '#fff' : '#64748b' }}>FINALIZADOS</button>
+            <button onClick={() => setAbaForn('boletos')} style={{ flex: '1 1 auto', padding: '10px 15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', background: abaForn === 'boletos' ? '#3b82f6' : themeCard, color: abaForn === 'boletos' ? '#fff' : '#64748b' }}>BOLETOS</button>
           </div>
 
-          <div style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'center', fontSize: '11px', fontWeight: 'bold' }}>
-             <span style={{ color: '#16a34a' }}>🟢 Comprado 100%</span>
-             <span style={{ color: '#ef4444' }}>🔴 Falta Comprar (Pendente)</span>
-             <span style={{ color: '#d97706' }}>🟡 Comprado Parcial</span>
-             <span style={{ color: '#64748b', textDecoration: 'line-through' }}>⚫ Falta Assumida</span>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {listaGeralItens.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '20px' }}>Nenhum pedido hoje.</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '15px' }}>
+            {fornecedoresExibidos.length === 0 ? (
+              <p style={{ gridColumn: '1/-1', textAlign: 'center', color: '#666', backgroundColor: themeCard, padding: '40px', borderRadius: '16px' }}>Nenhum fornecedor nesta categoria.</p>
             ) : (
-              listaGeralItens.filter(f => f.nome.toLowerCase().includes(buscaFornList.toLowerCase())).map((item, idx) => {
+              fornecedoresExibidos.map((forn, idx) => {
+                const isPago = forn.statusPagamento === 'pago';
+                const isBoletoOnly = forn.totalPix === 0 && forn.totalBoleto > 0;
                 
-                let corFundo = '#fff';
-                let corBorda = '#e2e8f0';
-                let corTexto = '#111';
-                let statusMsg = '';
-                let textoRiscado = 'none';
+                let corBorda = '#fcd34d'; 
+                let corFundo = isEscuro ? '#451a03' : '#fffbeb';
+                let corTexto = isEscuro ? '#fcd34d' : '#b45309';
+                let tagStatus = 'PENDENTE';
 
-                if (item.isFaltaTotal) {
-                   corFundo = '#f1f5f9';
-                   corBorda = '#cbd5e1';
-                   corTexto = '#64748b';
-                   textoRiscado = 'line-through';
-                   statusMsg = 'FALTA ASSUMIDA';
-                } else if (item.total_comprado === 0) {
-                   corFundo = '#fef2f2';
-                   corBorda = '#fecaca';
-                   corTexto = '#ef4444';
-                   statusMsg = 'PENDENTE 100%';
-                } else if (item.total_comprado < item.total_solicitado) {
-                   corFundo = '#fffbeb';
-                   corBorda = '#fde68a';
-                   corTexto = '#d97706';
-                   statusMsg = `FALTA COMPRAR: ${item.total_solicitado - item.total_comprado}`;
-                } else if (item.total_comprado >= item.total_solicitado) {
-                   corFundo = '#dcfce7';
-                   corBorda = '#bbf7d0';
-                   corTexto = '#166534';
-                   statusMsg = 'COMPLETO';
+                // 💡 SE PRECISAR REFAZER (Um item dessa lista virou falta ou mudou no fechamento)
+                if (forn.precisaRefazer) {
+                    corBorda = '#ef4444';
+                    corFundo = isEscuro ? '#450a0a' : '#fef2f2';
+                    corTexto = '#ef4444';
+                    tagStatus = '⚠️ REFAZER PEDIDO';
+                } else if (isPago) {
+                  corBorda = '#22c55e'; 
+                  corFundo = isEscuro ? '#14532d' : '#dcfce7';
+                  corTexto = isEscuro ? '#86efac' : '#166534';
+                  tagStatus = 'PAGO ✅';
+                } else if (isBoletoOnly) {
+                  corBorda = '#60a5fa'; 
+                  corFundo = isEscuro ? '#1e3a8a' : '#eff6ff';
+                  corTexto = isEscuro ? '#93c5fd' : '#1d4ed8';
+                  tagStatus = 'BOLETO 📄';
                 }
 
-                const cardExpandido = itemResumoExpandido === item.nome;
+                const expandido = fornExpandido === forn.nome;
 
                 return (
-                  <div key={idx} onClick={() => setItemResumoExpandido(cardExpandido ? null : item.nome)} style={{ backgroundColor: corFundo, borderRadius: '12px', padding: '15px', border: `1px solid ${corBorda}`, cursor: 'pointer', transition: '0.2s' }}>
+                  <div key={idx} style={{ backgroundColor: themeCard, borderRadius: '16px', border: `2px solid ${corBorda}`, overflow: 'hidden', boxShadow: '0 4px 10px rgba(0,0,0,0.03)', opacity: isPago ? 0.9 : 1, transition: '0.3s' }}>
                     
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <strong style={{ fontSize: '15px', color: corTexto, textDecoration: textoRiscado, display: 'block' }}>{formatarNomeItem(item.nome)}</strong>
-                        <span style={{ fontSize: '11px', color: corTexto, fontWeight: 'bold', display: 'block', marginTop: '2px', opacity: 0.8 }}>Total Pedido Lojas: {item.total_solicitado} {item.unidade}</span>
+                    <div onClick={() => setFornExpandido(expandido ? null : forn.nome)} style={{ padding: '15px', backgroundColor: corFundo, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h3 style={{ margin: 0, fontSize: '13px', color: corTexto, textTransform: 'uppercase', fontWeight: '900' }}>{forn.nome}</h3>
+                        <span style={{ fontSize: '9px', fontWeight: '900', color: corTexto, padding: '3px 8px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.2)' }}>{tagStatus}</span>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                         <div style={{ fontSize: '10px', fontWeight: '900', color: corTexto, padding: '4px 8px', background: 'rgba(255,255,255,0.7)', borderRadius: '6px', display: 'inline-block' }}>
-                             {statusMsg}
-                         </div>
+                      
+                      <div style={{ fontSize: '20px', fontWeight: '900', color: corTexto }}>
+                         {forn.precisaRefazer ? 'ALERTA!' : (isBoletoOnly && !expandido ? 'BOLETO' : formatarMoeda(forn.totalPix + forn.totalBoleto))}
                       </div>
                     </div>
 
-                    {/* EXPANSÃO COM DETALHES DOS FORNECEDORES */}
-                    {cardExpandido && Object.keys(item.fornecedores_comprados).length > 0 && (
-                      <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: `1px dashed ${corBorda}` }}>
-                         <span style={{ fontSize: '10px', fontWeight: 'bold', color: corTexto, opacity: 0.8, display: 'block', marginBottom: '8px' }}>COMPRADO COM:</span>
-                         {Object.entries(item.fornecedores_comprados).map(([fornNome, qtd]) => (
-                             <div key={fornNome} style={{ fontSize: '12px', color: corTexto, fontWeight: 'bold', marginBottom: '4px', display: 'flex', justifyContent: 'space-between' }}>
-                                 <span>🏢 {fornNome}</span>
-                                 <span>{qtd}x</span>
-                             </div>
-                         ))}
+                    {expandido && (
+                      <div style={{ padding: '15px' }}>
+                        
+                        {/* 💡 BOTÃO PARA REFAZER A COMPRA DO FORNECEDOR (DEVOLVE PRO PENDENTE) */}
+                        {forn.precisaRefazer && (
+                           <div style={{ backgroundColor: '#fef2f2', border: '1px dashed #ef4444', padding: '12px', borderRadius: '8px', marginBottom: '15px', textAlign: 'center' }}>
+                              <strong style={{ color: '#ef4444', fontSize: '11px', display: 'block', marginBottom: '5px' }}>🚨 ITENS FORAM CANCELADOS NAS LOJAS</strong>
+                              <button onClick={() => refazerPedidoFornecedor(forn.nome)} style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>🔄 DEVOLVER PARA PENDENTES</button>
+                           </div>
+                        )}
+
+                        {!isBoletoOnly && !forn.precisaRefazer && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', border: `1px dashed ${themeBorder}`, padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
+                            <div>
+                               <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>Chave PIX:</span>
+                               <strong style={{ fontSize: '12px', color: themeText }}>{forn.chavePix || 'Não cadastrada'}</strong>
+                            </div>
+                            <button onClick={() => copiarPixFornecedor(forn.chavePix, forn.nome)} style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>COPIAR PIX</button>
+                          </div>
+                        )}
+
+                        <div style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          {forn.itens.map((i, k) => {
+                             const qtdCobrada = i.qtd - i.qtdBonificada;
+                             if (qtdCobrada > 0) {
+                               return (
+                                 <div key={`norm_${k}`} style={{ fontSize: '11px', color: themeText, fontWeight: 'bold' }}>
+                                   {qtdCobrada} - {formatarNomeItem(i.nomeItem)} - {i.valUnit} = {formatarMoeda(i.totalCobrado)} <span style={{color: '#d97706', fontWeight: '900'}}>{i.isBoleto && '(BOLETO)'}</span>
+                                 </div>
+                               );
+                             }
+                             return null;
+                          })}
+                        </div>
+
+                        {forn.totalDescontoBonif > 0 && (
+                          <div style={{ borderTop: `1px dashed ${themeBorder}`, paddingTop: '10px', marginTop: '10px' }}>
+                            <div style={{ fontSize: '12px', fontWeight: '900', color: '#16a34a', marginBottom: '5px' }}>Bonificações:</div>
+                            <div style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              {forn.itens.filter(i => i.qtdBonificada > 0).map((i, k) => {
+                                 const basePriceNum = tratarPrecoNum(i.valUnit);
+                                 const valBonif = basePriceNum * i.qtdBonificada;
+                                 return (
+                                   <div key={`bonif_${k}`} style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold' }}>
+                                     {i.qtdBonificada} - {formatarNomeItem(i.nomeItem)} - {formatarMoeda(valBonif)}
+                                   </div>
+                                 );
+                              })}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '10px', fontWeight: 'bold' }}>
+                               Valor bruto = {formatarMoeda(forn.totalBruto)}
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{ fontSize: '14px', fontWeight: '900', color: themeText, marginTop: '10px', borderTop: `1px solid ${themeBorder}`, paddingTop: '10px' }}>
+                           Total a pagar = {formatarMoeda(forn.totalPix + forn.totalBoleto)}
+                        </div>
+
+                        {!isBoletoOnly && !forn.precisaRefazer && (
+                          <button onClick={() => alternarStatusPagamento(forn.nome)} style={{ width: '100%', marginTop: '15px', padding: '12px', backgroundColor: isPago ? (isEscuro ? '#1e293b' : '#f1f5f9') : '#22c55e', color: isPago ? '#64748b' : '#fff', border: 'none', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
+                            {isPago ? 'DESFAZER PAGAMENTO' : 'PIX FEITO / CONCLUIR'}
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -833,7 +860,7 @@ export default function FechamentoLojas({ isEscuro }) {
         </div>
       )}
 
-      {/* 💡 MODAL DE EDIÇÃO DA LOJA COM BARRA DE BUSCA INTELIGENTE */}
+      {/* 💡 MODAL DE EDIÇÃO COM BARRA DE BUSCA INTELIGENTE */}
       {lojaEmEdicao && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '10px' }}>
           <div style={{ backgroundColor: themeCard, width: '100%', maxWidth: '800px', borderRadius: '16px', padding: '20px', display: 'flex', flexDirection: 'column', maxHeight: '95vh' }}>
