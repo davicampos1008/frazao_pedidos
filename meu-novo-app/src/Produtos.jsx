@@ -16,12 +16,13 @@ export default function Produtos() {
   const [modalAberto, setModalAberto] = useState(null);
   const [editando, setEditando] = useState(false);
   
-  // 💡 Controle de Nomes Parecidos (Evitar Duplicidade)
   const [mostrarSugestoesNome, setMostrarSugestoesNome] = useState(false);
   
-  // 💡 ESTADO INICIAL AJUSTADO PARA O HORTIFRUTI (Limpo)
-  const estadoInicial = { nome: '', categoria: 'FRUTAS', unidade_medida: 'KG', status: true };
+  // 💡 ESTADO INICIAL ATUALIZADO
+  const estadoInicial = { nome: '', categoria: 'Frutas', unidade_medida: 'KG', status: true };
   const [dados, setDados] = useState(estadoInicial);
+  // 💡 Guarda o estado original para verificar se houve alteração na edição
+  const [dadosOriginais, setDadosOriginais] = useState(null);
 
   async function carregarProdutos() {
     const { data, error } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
@@ -30,34 +31,42 @@ export default function Produtos() {
 
   useEffect(() => { carregarProdutos(); }, []);
 
-  // --- ⚡ NAVEGAÇÃO RÁPIDA (V.I.R.T.U.S ENTER FLOW COM AUTO-SALVAMENTO) ---
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault(); 
       const campos = Array.from(document.querySelectorAll('.modal-virtus input:not([disabled]):not([readonly]), .modal-virtus select:not([disabled]), .modal-virtus button:not([disabled])'));
       const indexAtual = campos.indexOf(e.target);
       
-      // Se não for o último, pula para o próximo
       if (indexAtual > -1 && indexAtual < campos.length - 1) {
         campos[indexAtual + 1].focus();
       } 
-      // 💡 V.I.R.T.U.S MÁGICA: Se for o último (o botão), clica nele!
       else if (indexAtual === campos.length - 1) {
         campos[indexAtual].click();
       }
     }
   };
 
-  // --- 🛡️ SALVAMENTO BLINDADO ---
   async function salvar() {
     if (!dados.nome.trim()) {
       return alert("⚠️ V.I.R.T.U.S INFORMA: O Nome do Produto é obrigatório!");
     }
 
-    // 💡 TRAVA: Impede criar produtos com o mesmo nome exato (Cadastro Duplicado).
     const duplicado = produtos.find(p => p.nome.trim().toUpperCase() === dados.nome.trim().toUpperCase() && p.id !== dados.id);
     if (duplicado) {
        return alert(`⚠️ Ação Bloqueada! Já existe um produto com o nome "${dados.nome}" cadastrado no sistema.\n\nPor favor, utilize a lista de sugestões ao digitar o nome para editar o cadastro existente em vez de criar um novo.`);
+    }
+
+    // 💡 ALERTA DE MODIFICAÇÃO (Apenas para produtos já existentes que sofreram alterações de nome, categoria ou unidade)
+    if (dadosOriginais && dados.id) {
+       const houveMudanca = 
+          dados.nome !== dadosOriginais.nome || 
+          dados.categoria !== dadosOriginais.categoria || 
+          dados.unidade_medida !== dadosOriginais.unidade_medida;
+          
+       if (houveMudanca) {
+          const confirma = window.confirm(`⚠️ ATENÇÃO: Você está alterando as informações do produto original "${dadosOriginais.nome}".\n\nIsso pode afetar históricos. Deseja realmente salvar essas modificações?`);
+          if (!confirma) return;
+       }
     }
 
     const { error } = await supabase.from('produtos').upsert([dados]);
@@ -84,12 +93,10 @@ export default function Produtos() {
     p.categoria?.toLowerCase().includes(busca.toLowerCase())
   );
 
-  // 💡 Auto-completar inteligente para nomes parecidos
   const produtosFiltradosNome = dados.nome && dados.nome.length > 2 
     ? produtos.filter(p => p.nome?.toLowerCase().includes(dados.nome.toLowerCase()) && p.id !== dados.id) 
     : [];
 
-  // --- ATALHOS CSS ---
   const cssLabel = { fontSize: configDesign.inputs.tamanhoTitulos, fontWeight: '900', color: configDesign.inputs.corTitulos, display: 'block', marginBottom: '6px' };
   const cssInput = (bloqueado) => ({ width: '100%', padding: configDesign.inputs.padding, borderRadius: configDesign.inputs.raio, border: configDesign.inputs.borda, backgroundColor: bloqueado ? configDesign.inputs.fundoBloqueado : configDesign.inputs.fundoLivre, outline: 'none', boxSizing: 'border-box' });
   const cssGrupo = { display: 'flex', flexDirection: 'column', gap: '15px', padding: '20px', backgroundColor: '#fdfdfd', borderRadius: '20px', border: '1px solid #f1f5f9' };
@@ -97,21 +104,19 @@ export default function Produtos() {
   return (
     <div style={{ width: '95%', maxWidth: '1000px', margin: '0 auto', fontFamily: configDesign.geral.fontePadrao, display: 'flex', flexDirection: 'column', gap: '25px', paddingBottom: '50px' }}>
       
-      {/* HEADER DE BUSCA INTELIGENTE */}
       <div style={{ display: 'flex', gap: '15px' }}>
         <input placeholder="Procurar hortifruti por nome ou categoria..." value={busca} onChange={e => setBusca(e.target.value)} style={{ flex: 1, padding: '18px', borderRadius: configDesign.geral.raioBordaGlobal, border: 'none', boxShadow: configDesign.geral.sombraSuave, outline: 'none' }} />
         <button 
-          onClick={() => { setDados(estadoInicial); setModalAberto({novo: true}); setEditando(true); setMostrarSugestoesNome(false); }}
+          onClick={() => { setDados(estadoInicial); setDadosOriginais(null); setModalAberto({novo: true}); setEditando(true); setMostrarSugestoesNome(false); }}
           style={{ backgroundColor: configDesign.botoes.salvar, color: configDesign.botoes.textoCor, border: 'none', padding: '0 30px', borderRadius: configDesign.geral.raioBordaGlobal, fontWeight: '900', cursor: 'pointer' }}
         >
           + NOVO PRODUTO
         </button>
       </div>
 
-      {/* LISTAGEM DE PRODUTOS (CARDS) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
         {filtrados.map(p => (
-          <div key={p.id} onClick={() => { setModalAberto(p); setDados(p); setEditando(false); setMostrarSugestoesNome(false); }} style={{ backgroundColor: configDesign.cards.fundo, padding: '20px', borderRadius: configDesign.geral.raioBordaGlobal, boxShadow: configDesign.geral.sombraSuave, display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', transition: '0.2s', opacity: p.status ? 1 : 0.5 }}>
+          <div key={p.id} onClick={() => { setModalAberto(p); setDados(p); setDadosOriginais(p); setEditando(false); setMostrarSugestoesNome(false); }} style={{ backgroundColor: configDesign.cards.fundo, padding: '20px', borderRadius: configDesign.geral.raioBordaGlobal, boxShadow: configDesign.geral.sombraSuave, display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', transition: '0.2s', opacity: p.status ? 1 : 0.5 }}>
             <div style={{ width: configDesign.cards.tamanhoIcone, height: configDesign.cards.tamanhoIcone, backgroundColor: configDesign.cards.fundoIcone, borderRadius: configDesign.cards.raioIcone, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', color: configDesign.cards.corIcone, fontSize: '20px', position: 'relative' }}>
               {p.nome?.charAt(0).toUpperCase()}
             </div>
@@ -124,7 +129,6 @@ export default function Produtos() {
         ))}
       </div>
 
-      {/* MODAL DE CADASTRO/EDIÇÃO */}
       {modalAberto && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: configDesign.modal.fundoEscuro, zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(5px)' }}>
           <div className="modal-virtus" style={{ backgroundColor: configDesign.modal.fundoModal, width: '90%', maxWidth: '500px', padding: configDesign.modal.paddingInterno, borderRadius: configDesign.modal.raioBorda, position: 'relative', maxHeight: '90vh', overflowY: 'auto' }}>
@@ -138,7 +142,6 @@ export default function Produtos() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               
-              {/* GRUPO 1: IDENTIFICAÇÃO BÁSICA */}
               <div style={cssGrupo}>
                 <div style={{ position: 'relative' }}>
                   <label style={cssLabel}>NOME DO PRODUTO (Fruta, Verdura, etc) *</label>
@@ -155,12 +158,11 @@ export default function Produtos() {
                     placeholder="Ex: BANANA PRATA" 
                   />
                   
-                  {/* 💡 CAIXA DE SUGESTÃO NOME DO PRODUTO (Evita Duplicidade) */}
                   {mostrarSugestoesNome && editando && produtosFiltradosNome.length > 0 && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', marginTop: '5px' }}>
                       <div style={{ padding: '10px', fontSize: '11px', color: '#f97316', fontWeight: 'bold', backgroundColor: '#fff7ed' }}>⚠️ Produtos parecidos já cadastrados:</div>
                       {produtosFiltradosNome.map(p => (
-                        <div key={p.id} onClick={() => { setDados(p); setModalAberto(p); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px', fontWeight: 'bold', color: '#111' }}>
+                        <div key={p.id} onClick={() => { setDados(p); setDadosOriginais(p); setModalAberto(p); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px', fontWeight: 'bold', color: '#111' }}>
                           {p.nome} <span style={{ color: '#999', fontSize: '10px', marginLeft: '5px' }}>({p.categoria})</span>
                         </div>
                       ))}
@@ -170,31 +172,38 @@ export default function Produtos() {
                 </div>
               </div>
 
-              {/* GRUPO 2: CLASSIFICAÇÃO */}
               <div style={cssGrupo}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                   <div>
                     <label style={cssLabel}>CATEGORIA *</label>
-                    <select onKeyDown={handleKeyDown} disabled={!editando} value={dados.categoria} onChange={e => setDados({...dados, categoria: e.target.value.toUpperCase()})} style={cssInput(!editando)}>
-                      <option value="FRUTAS">🍎 FRUTAS</option>
-                      <option value="VERDURAS">🥬 VERDURAS</option>
-                      <option value="LEGUMES">🥕 LEGUMES</option>
-                      <option value="HORTALISSAS">🌿 HORTALIÇAS</option>
-                      <option value="CAIXARIAS">📦 CAIXARIAS</option>
-                      <option value="EMBANDEJADOS">🍱 EMBANDEJADOS</option>
-                      <option value="SACARIAS">🥔 SACARIAS</option>
-                      <option value="VARIADOS">🛒 VARIADOS</option>
+                    <select onKeyDown={handleKeyDown} disabled={!editando} value={dados.categoria} onChange={e => setDados({...dados, categoria: e.target.value})} style={cssInput(!editando)}>
+                      {/* 💡 CATEGORIAS ATUALIZADAS */}
+                      <option value="Frutas">🍎 Frutas</option>
+                      <option value="Verduras & Fungos">🥬 Verduras & Fungos</option>
+                      <option value="Legumes">🥕 Legumes</option>
+                      <option value="Raízes, Tubérculos & Grãos">🥔 Raízes, Tubérculos & Grãos</option>
+                      <option value="Outros">🧀 Outros</option>
+                      <option value="Bandejados">🍱 Bandejados</option>
+                      <option value="Avulsos">🛒 Avulsos</option>
+                      <option value="Folhagens">🌿 Folhagens</option>
+                      <option value="Caixaria">📦 Caixaria</option>
+                      <option value="BRADISBA">🍟 BRADISBA</option>
+                      <option value="POTY COCOS">🥥 POTY COCOS</option>
+                      <option value="MEGA">🧅 MEGA</option>
                     </select>
                   </div>
                   <div>
                     <label style={cssLabel}>VENDIDO POR *</label>
                     <select onKeyDown={handleKeyDown} disabled={!editando} value={dados.unidade_medida} onChange={e => setDados({...dados, unidade_medida: e.target.value})} style={cssInput(!editando)}>
+                      {/* 💡 UNIDADES ATUALIZADAS */}
                       <option value="KG">KG (Quilo)</option>
                       <option value="UN">UN (Unidade)</option>
                       <option value="BDJ">Bandeja</option>
                       <option value="MAÇO">Maço</option>
                       <option value="DZ">Dúzia</option>
                       <option value="CX">Caixa</option>
+                      <option value="CX com 4 bandejas">CX com 4 bandejas</option>
+                      <option value="CX com 10 bandejas">CX com 10 bandejas</option>
                       <option value="SACO">Saco</option>
                     </select>
                   </div>
@@ -203,10 +212,8 @@ export default function Produtos() {
 
             </div>
 
-            {/* BOTÕES DE AÇÃO */}
             <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {editando ? (
-                // 💡 Botão agora tem o onKeyDown, e quando recebe o Enter pela função principal, ele é clicado virtualmente
                 <button onKeyDown={handleKeyDown} onClick={salvar} style={{ height: configDesign.botoes.altura, backgroundColor: configDesign.botoes.salvar, color: configDesign.botoes.textoCor, borderRadius: configDesign.botoes.raio, border: 'none', fontWeight: '900', cursor: 'pointer' }}>SALVAR PRODUTO</button>
               ) : (
                 <>
