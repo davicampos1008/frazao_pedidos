@@ -276,9 +276,13 @@ export default function MenuCliente({ usuario }) {
       await carregarDados(false); 
       window.scrollTo(0,0);
       mostrarNotificacao("🚀 LISTA ENVIADA COM SUCESSO!", 'sucesso', 'Pedido Realizado');
-    } catch (err) { alert("Erro ao gravar: " + err.message); } 
-    finally { setEnviandoPedido(false); }
-  };
+    } catch (err) { 
+      // Isso vai forçar o erro aparecer na sua tela
+      alert("ERRO SUPABASE: " + JSON.stringify(err));
+      console.error("ERRO COMPLETO:", err);
+    } finally { 
+      setEnviandoPedido(false); 
+    };
 
   const pedirParaEditar = async () => {
     if(!window.confirm("Pedir ao administrador para liberar a edição da lista?")) return;
@@ -622,4 +626,5 @@ export default function MenuCliente({ usuario }) {
       )}
     </div>
   );
+}
 }
