@@ -13,7 +13,7 @@ import PlanilhaCompras from './PlanilhaCompras';
 import FechamentoLojas from './FechamentoLojas';
 
 function App() {
-  // 💡 TEMA CLARO E ESCURO SALVO NA MEMÓRIA
+  // 💡 TEMA CLARO E ESCURO
   const [tema, setTema] = useState(() => localStorage.getItem('temaVIRTUS') || 'claro');
   const isEscuro = tema === 'escuro';
 
@@ -21,14 +21,15 @@ function App() {
     localStorage.setItem('temaVIRTUS', tema);
   }, [tema]);
 
+  // 💡 CONFIGURAÇÃO DE CORES (Mais escuras para o tema Dark)
   const config = {
     identidade: {
       corDestaque: '#f97316',
-      corFundoApp: isEscuro ? '#121212' : '#f5f5f4',
-      corMenuLateral: isEscuro ? '#0a0a0a' : '#111111',
-      corCard: isEscuro ? '#1e1e1e' : '#ffffff',
-      corTexto: isEscuro ? '#f1f5f9' : '#111111',
-      corTextoSecundario: isEscuro ? '#94a3b8' : '#666666',
+      corFundoApp: isEscuro ? '#0a0a0a' : '#f5f5f4', // Fundo mais profundo
+      corMenuLateral: isEscuro ? '#000000' : '#111111',
+      corCard: isEscuro ? '#171717' : '#ffffff', // Card suave no escuro
+      corTexto: isEscuro ? '#f8fafc' : '#111111',
+      corTextoSecundario: isEscuro ? '#64748b' : '#666666',
       fontePrincipal: 'sans-serif',
       raioBordaPadrao: '15px'
     },
@@ -50,19 +51,21 @@ function App() {
       const dadosUsuario = JSON.parse(usuarioSalvo);
       setUsuarioLogado(dadosUsuario);
       
-      // 💡 LÓGICA CORRIGIDA: Força a ler a última tela salva na memória
-      const ultimaTela = localStorage.getItem('telaAtivaVIRTUS');
+      // 💡 LÓGICA DE SESSÃO: 
+      // O sessionStorage só mantém os dados enquanto a aba/app estiver aberta.
+      // Se fechar e abrir de novo, volta pro início.
+      const ultimaTela = sessionStorage.getItem('telaAtivaVIRTUS');
       if (ultimaTela) {
         setTelaAtiva(ultimaTela);
       } else {
-        // Se não tiver tela salva (primeiro acesso), segue a regra padrão
-        setTelaAtiva(dadosUsuario.perfil === 'admin' ? 'inicio' : 'cliente');
+        const telaPadrao = dadosUsuario.perfil === 'admin' ? 'inicio' : 'cliente';
+        setTelaAtiva(telaPadrao);
+        sessionStorage.setItem('telaAtivaVIRTUS', telaPadrao);
       }
     }
 
-    // Verifica se já está instalado (Modo Standalone)
+    // Verifica se já está instalado
     setIsStandalone(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone);
-
     if ("Notification" in window) setPermissaoPush(Notification.permission);
 
     const escutarInstalacao = (e) => {
@@ -70,13 +73,36 @@ function App() {
       setEventoInstalacao(e);
     };
     window.addEventListener('beforeinstallprompt', escutarInstalacao);
-    return () => window.removeEventListener('beforeinstallprompt', escutarInstalacao);
+    
+    // 💡 INTERCEPTAR BOTÃO VOLTAR DO CELULAR
+    const lidarComVoltar = (e) => {
+      e.preventDefault();
+      const telaAtual = sessionStorage.getItem('telaAtivaVIRTUS');
+      
+      // Se não estiver no início, o botão voltar apenas leva para o início, e não fecha o app.
+      if (telaAtual && telaAtual !== 'inicio') {
+         setTelaAtiva('inicio');
+         setMenuAberto(false);
+         // Empurra um novo estado no histórico para "enganar" o celular e não deixar ele sair do app
+         window.history.pushState(null, null, window.location.pathname);
+      }
+    };
+    
+    // Adiciona uma entrada no histórico para poder interceptar
+    window.history.pushState(null, null, window.location.pathname);
+    window.addEventListener('popstate', lidarComVoltar);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', escutarInstalacao);
+      window.removeEventListener('popstate', lidarComVoltar);
+    };
   }, []);
 
-  // 💡 SALVA A TELA SEMPRE QUE ELA MUDAR (Apenas se o usuário estiver logado)
+  // 💡 SALVA A TELA NA SESSÃO SEMPRE QUE ELA MUDAR
   useEffect(() => {
     if (usuarioLogado && telaAtiva) {
-      localStorage.setItem('telaAtivaVIRTUS', telaAtiva);
+      sessionStorage.setItem('telaAtivaVIRTUS', telaAtiva);
+      window.scrollTo(0,0);
     }
   }, [telaAtiva, usuarioLogado]);
 
@@ -105,13 +131,15 @@ function App() {
     
     localStorage.setItem('usuarioVIRTUS', JSON.stringify(data));
     setUsuarioLogado(data);
-    setTelaAtiva(data.perfil === 'admin' ? 'inicio' : 'cliente');
+    const telaIr = data.perfil === 'admin' ? 'inicio' : 'cliente';
+    setTelaAtiva(telaIr);
+    sessionStorage.setItem('telaAtivaVIRTUS', telaIr);
   }
 
   const fazerLogout = () => {
     if(window.confirm("Sair do sistema?")) {
       localStorage.removeItem('usuarioVIRTUS');
-      localStorage.removeItem('telaAtivaVIRTUS'); // 💡 Limpa a memória da tela ao sair
+      sessionStorage.removeItem('telaAtivaVIRTUS'); 
       setUsuarioLogado(null);
       setTelaAtiva('inicio');
       setMenuAberto(false);
@@ -129,7 +157,7 @@ function App() {
 
   const renderBadgePerfil = (perfil) => {
     if (perfil === 'admin') return <span style={{ backgroundColor: '#111', color: '#fff', padding: '5px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '900', letterSpacing: '1px' }}>🛡️ ADMINISTRADOR</span>;
-    return <span style={{ backgroundColor: '#f1f5f9', color: '#64748b', padding: '5px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '900', letterSpacing: '1px' }}>👤 OPERADOR</span>;
+    return <span style={{ backgroundColor: isEscuro ? '#333' : '#f1f5f9', color: isEscuro ? '#ccc' : '#64748b', padding: '5px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '900', letterSpacing: '1px' }}>👤 OPERADOR</span>;
   };
 
   const navegarPara = (telaDestino) => {
@@ -201,26 +229,34 @@ function App() {
         
         {telaAtiva === 'inicio' && (
           <div style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center', backgroundColor: config.identidade.corCard, padding: '50px', borderRadius: '30px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', transition: 'all 0.3s' }}>
+            
+            {/* 💡 BOTÕES EXTRAS (TEMA E SINO) NA TELA INICIAL */}
+            <div style={{ display: 'flex', gap: '10px', width: '100%', justifyContent: 'flex-end', marginBottom: '-20px' }}>
+              <button onClick={() => setTema(isEscuro ? 'claro' : 'escuro')} style={{ background: isEscuro ? '#333' : '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', fontSize: '18px' }} title="Mudar Tema">
+                 {isEscuro ? '☀️' : '🌙'}
+              </button>
+              {permissaoPush === 'default' && (
+                <button onClick={solicitarPermissaoPush} style={{ background: isEscuro ? '#333' : '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', fontSize: '18px' }} title="Ativar Notificações">
+                   🔔
+                </button>
+              )}
+            </div>
+
             <p style={{ color: config.identidade.corTextoSecundario, fontSize: '12px', fontWeight: 'bold', margin: 0 }}>{saudacaoPorHorario()}</p>
             <h1 style={{ fontWeight: '900', color: config.identidade.corTexto, margin: 0, fontSize: '32px' }}><span style={{ color: config.identidade.corDestaque }}>{usuarioLogado.nome.toUpperCase()}</span></h1>
             <div style={{ marginTop: '5px' }}>{renderBadgePerfil(usuarioLogado.perfil)}</div>
             <hr style={{ width: '50px', border: `2px solid ${config.identidade.corDestaque}`, borderRadius: '10px', margin: '15px 0' }} />
             <p style={{ color: config.identidade.corTextoSecundario, fontWeight: 'bold', margin: 0, marginBottom: '20px' }}>Frazão Frutas & CIA</p>
             
-            <button onClick={() => setTelaAtiva('cliente')} style={{ backgroundColor: '#111', color: 'white', border: 'none', padding: '15px 30px', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '12px' }}>
+            <button onClick={() => navegarPara('cliente')} style={{ backgroundColor: isEscuro ? '#f97316' : '#111', color: 'white', border: 'none', padding: '15px 30px', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '12px', width: '100%', maxWidth: '300px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)' }}>
               📱 ABRIR APP DE PEDIDOS
             </button>
 
-            {/* 💡 BOTÕES PWA E PUSH NA HOME ADMIN (OCULTAM SE ATIVADOS) */}
+            {/* BOTÃO DE PWA */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
               {!isStandalone && (
-                <button onClick={instalarApp} style={{ background: config.identidade.corDestaque, color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '10px', fontSize: '11px', fontWeight: '900', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                  📥 INSTALAR APP NA TELA
-                </button>
-              )}
-              {permissaoPush === 'default' && (
-                <button onClick={solicitarPermissaoPush} style={{ background: isEscuro ? '#333' : '#fef3c7', color: isEscuro ? '#fbbf24' : '#d97706', border: 'none', padding: '10px 15px', borderRadius: '10px', fontSize: '11px', fontWeight: '900', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                  🔔 ATIVAR NOTIFICAÇÕES
+                <button onClick={instalarApp} style={{ background: isEscuro ? '#333' : '#f1f5f9', color: config.identidade.corTexto, border: 'none', padding: '12px 20px', borderRadius: '12px', fontSize: '11px', fontWeight: '900', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  📥 INSTALAR APP NO CELULAR
                 </button>
               )}
             </div>
