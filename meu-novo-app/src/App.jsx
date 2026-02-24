@@ -13,11 +13,22 @@ import PlanilhaCompras from './PlanilhaCompras';
 import FechamentoLojas from './FechamentoLojas';
 
 function App() {
+  // 💡 TEMA CLARO E ESCURO SALVO NA MEMÓRIA
+  const [tema, setTema] = useState(() => localStorage.getItem('temaVIRTUS') || 'claro');
+  const isEscuro = tema === 'escuro';
+
+  useEffect(() => {
+    localStorage.setItem('temaVIRTUS', tema);
+  }, [tema]);
+
   const config = {
     identidade: {
       corDestaque: '#f97316',
-      corFundoApp: '#f5f5f4',
-      corMenuLateral: '#111111',
+      corFundoApp: isEscuro ? '#121212' : '#f5f5f4',
+      corMenuLateral: isEscuro ? '#0a0a0a' : '#111111',
+      corCard: isEscuro ? '#1e1e1e' : '#ffffff',
+      corTexto: isEscuro ? '#f1f5f9' : '#111111',
+      corTextoSecundario: isEscuro ? '#94a3b8' : '#666666',
       fontePrincipal: 'sans-serif',
       raioBordaPadrao: '15px'
     },
@@ -28,7 +39,11 @@ function App() {
   const [telaAtiva, setTelaAtiva] = useState('inicio');
   const [menuAberto, setMenuAberto] = useState(false);
 
-  // 💡 V.I.R.T.U.S: Leitura silenciosa da memória ao abrir o App
+  // 💡 ESTADOS PWA E NOTIFICAÇÃO (APP)
+  const [permissaoPush, setPermissaoPush] = useState('default');
+  const [eventoInstalacao, setEventoInstalacao] = useState(null);
+  const [isStandalone, setIsStandalone] = useState(false);
+
   useEffect(() => {
     const usuarioSalvo = localStorage.getItem('usuarioVIRTUS');
     if (usuarioSalvo) {
@@ -36,26 +51,48 @@ function App() {
       setUsuarioLogado(dadosUsuario);
       setTelaAtiva(dadosUsuario.perfil === 'admin' ? 'inicio' : 'cliente');
     }
+
+    // Verifica se já está instalado (Modo Standalone)
+    setIsStandalone(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone);
+
+    if ("Notification" in window) setPermissaoPush(Notification.permission);
+
+    const escutarInstalacao = (e) => {
+      e.preventDefault();
+      setEventoInstalacao(e);
+    };
+    window.addEventListener('beforeinstallprompt', escutarInstalacao);
+    return () => window.removeEventListener('beforeinstallprompt', escutarInstalacao);
   }, []);
+
+  const instalarApp = async () => {
+    if (eventoInstalacao) {
+      eventoInstalacao.prompt();
+      const { outcome } = await eventoInstalacao.userChoice;
+      if (outcome === 'accepted') setEventoInstalacao(null);
+    } else {
+      alert("📲 Para instalar no iPhone: Toque no botão de Compartilhar (quadradinho com seta) e escolha 'Adicionar à Tela de Início'.\n\nNo Android, acesse pelo Google Chrome e procure 'Adicionar à tela inicial'.");
+    }
+  };
+
+  const solicitarPermissaoPush = async () => {
+    if ("Notification" in window) {
+      const permissao = await Notification.requestPermission();
+      setPermissaoPush(permissao);
+      if (permissao === "granted") alert("🔔 Notificações ativadas com sucesso!");
+    }
+  };
 
   async function realizarLogin(codigo, senha) {
     const { data, error } = await supabase.from('usuarios').select('*').eq('codigo', codigo).eq('senha', senha).single();
-    
     if (error || !data) return alert('Código ou Senha inválidos!');
     if (data.status === false) return alert('⛔ ACESSO NEGADO: Usuário desativado pelo administrador.');
     
-    // 💡 V.I.R.T.U.S: Salva o "crachá" na memória do celular
     localStorage.setItem('usuarioVIRTUS', JSON.stringify(data));
     setUsuarioLogado(data);
-
-    if (data.perfil === 'admin') {
-      setTelaAtiva('inicio'); 
-    } else {
-      setTelaAtiva('cliente'); // 🚀 Operador cai direto nas compras
-    }
+    setTelaAtiva(data.perfil === 'admin' ? 'inicio' : 'cliente');
   }
 
-  // 💡 V.I.R.T.U.S: Função para deslogar e limpar a memória
   const fazerLogout = () => {
     if(window.confirm("Sair do sistema?")) {
       localStorage.removeItem('usuarioVIRTUS');
@@ -93,7 +130,7 @@ function App() {
   };
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: config.identidade.corFundoApp, overflow: 'hidden', fontFamily: config.identidade.fontePrincipal }}>
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: config.identidade.corFundoApp, overflow: 'hidden', fontFamily: config.identidade.fontePrincipal, transition: 'background-color 0.3s' }}>
       
       {/* BOTÃO DE MENU */}
       <button onClick={() => setMenuAberto(!menuAberto)} style={{ position: 'fixed', top: '20px', left: '20px', zIndex: 10000, backgroundColor: config.identidade.corDestaque, color: 'white', border: 'none', width: '50px', height: '50px', borderRadius: '12px', fontSize: '28px', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.2)' }}>
@@ -102,7 +139,7 @@ function App() {
 
       {/* MENU LATERAL */}
       {menuAberto && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '280px', height: '100%', backgroundColor: config.identidade.corMenuLateral, color: 'white', padding: '80px 20px 30px 20px', zIndex: 9999, display: 'flex', flexDirection: 'column', boxSizing: 'border-box', boxShadow: '10px 0 40px rgba(0,0,0,0.6)' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '280px', height: '100%', backgroundColor: config.identidade.corMenuLateral, color: 'white', padding: '80px 20px 30px 20px', zIndex: 9999, display: 'flex', flexDirection: 'column', boxSizing: 'border-box', boxShadow: '10px 0 40px rgba(0,0,0,0.6)', transition: 'background-color 0.3s' }}>
           
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', overflowY: 'auto', paddingRight: '10px', paddingBottom: '80px' }}>
             <p style={{ fontSize: '10px', color: '#666', fontWeight: '900', letterSpacing: '1px' }}>NAVEGAÇÃO</p>
@@ -126,8 +163,16 @@ function App() {
             )}
           </div>
 
-          <div style={{ paddingTop: '20px', borderTop: '1px solid #333' }}>
-            {/* 💡 V.I.R.T.U.S: Botão Sair conectado à função nova */}
+          <div style={{ paddingTop: '20px', borderTop: '1px solid #333', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            
+            {/* 💡 CHAVE DE TEMA DIA E NOITE */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: isEscuro ? '#1e1e1e' : '#333', padding: '10px 15px', borderRadius: '12px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>TEMA</span>
+              <button onClick={() => setTema(isEscuro ? 'claro' : 'escuro')} style={{ background: isEscuro ? '#333' : '#f8fafc', color: isEscuro ? '#fff' : '#111', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                {isEscuro ? '☀️ DIA' : '🌙 NOITE'}
+              </button>
+            </div>
+
             <button onClick={fazerLogout} style={{ width: '100%', backgroundColor: '#ef4444', color: 'white', padding: '15px', borderRadius: '12px', border: 'none', fontWeight: '900', cursor: 'pointer' }}>
               🚪 SAIR DO APP
             </button>
@@ -139,20 +184,34 @@ function App() {
       <div style={{ width: '100%', height: '100%', paddingTop: '100px', paddingBottom: '150px', paddingLeft: '15px', paddingRight: '15px', overflowY: 'auto', boxSizing: 'border-box', zIndex: 1 }}>
         
         {telaAtiva === 'inicio' && (
-          <div style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center', backgroundColor: 'white', padding: '50px', borderRadius: '30px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' }}>
-            <p style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 'bold', margin: 0 }}>{saudacaoPorHorario()}</p>
-            <h1 style={{ fontWeight: '900', color: '#111', margin: 0, fontSize: '32px' }}><span style={{ color: config.identidade.corDestaque }}>{usuarioLogado.nome.toUpperCase()}</span></h1>
+          <div style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center', backgroundColor: config.identidade.corCard, padding: '50px', borderRadius: '30px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', transition: 'all 0.3s' }}>
+            <p style={{ color: config.identidade.corTextoSecundario, fontSize: '12px', fontWeight: 'bold', margin: 0 }}>{saudacaoPorHorario()}</p>
+            <h1 style={{ fontWeight: '900', color: config.identidade.corTexto, margin: 0, fontSize: '32px' }}><span style={{ color: config.identidade.corDestaque }}>{usuarioLogado.nome.toUpperCase()}</span></h1>
             <div style={{ marginTop: '5px' }}>{renderBadgePerfil(usuarioLogado.perfil)}</div>
             <hr style={{ width: '50px', border: `2px solid ${config.identidade.corDestaque}`, borderRadius: '10px', margin: '15px 0' }} />
-            <p style={{ color: '#666', fontWeight: 'bold', margin: 0, marginBottom: '20px' }}>Frazão Frutas & CIA</p>
+            <p style={{ color: config.identidade.corTextoSecundario, fontWeight: 'bold', margin: 0, marginBottom: '20px' }}>Frazão Frutas & CIA</p>
             
             <button onClick={() => setTelaAtiva('cliente')} style={{ backgroundColor: '#111', color: 'white', border: 'none', padding: '15px 30px', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '12px' }}>
-              📱 VER APP DO CLIENTE
+              📱 ABRIR APP DE PEDIDOS
             </button>
+
+            {/* 💡 BOTÕES PWA E PUSH NA HOME ADMIN (OCULTAM SE ATIVADOS) */}
+            <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+              {!isStandalone && (
+                <button onClick={instalarApp} style={{ background: config.identidade.corDestaque, color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '10px', fontSize: '11px', fontWeight: '900', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                  📥 INSTALAR APP NA TELA
+                </button>
+              )}
+              {permissaoPush === 'default' && (
+                <button onClick={solicitarPermissaoPush} style={{ background: isEscuro ? '#333' : '#fef3c7', color: isEscuro ? '#fbbf24' : '#d97706', border: 'none', padding: '10px 15px', borderRadius: '10px', fontSize: '11px', fontWeight: '900', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                  🔔 ATIVAR NOTIFICAÇÕES
+                </button>
+              )}
+            </div>
           </div>
         )}
 
-        {/* COMPONENTES CARREGADOS */}
+        {/* COMPONENTES CARREGADOS (Passando o Tema para o App Cliente) */}
         {telaAtiva === 'lojas' && <Lojas setTelaAtiva={setTelaAtiva} />}
         {telaAtiva === 'usuarios' && <Usuarios />}
         {telaAtiva === 'fornecedores' && <Fornecedores />}
@@ -160,7 +219,7 @@ function App() {
         {telaAtiva === 'precificacao' && <Precificacao setTelaAtiva={setTelaAtiva} />}
         {telaAtiva === 'marketing' && <Marketing />}
         {telaAtiva === 'listas' && <Listas/>} 
-        {telaAtiva === 'cliente' && usuarioLogado && <MenuCliente usuario={usuarioLogado} />}
+        {telaAtiva === 'cliente' && usuarioLogado && <MenuCliente usuario={usuarioLogado} tema={tema} />}
         {telaAtiva === 'compras' && <PlanilhaCompras />}
         {telaAtiva === 'fechamento' && <FechamentoLojas />}
       </div>
