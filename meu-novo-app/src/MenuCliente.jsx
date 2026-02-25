@@ -255,7 +255,8 @@ export default function MenuCliente({ usuario, tema }) {
         
         // Mantém as padrões fixas na frente e lista as dinâmicas em ordem alfabética depois
         const catOrganizadas = Array.from(categoriasUnicas).sort();
-        setCategoriasDinamicas(['DESTAQUES', 'TODOS', ...categoriaAtivalues.filter(c => !['DESTAQUES', 'TODOS'].includes(c)), ...catOrganizadas.filter(c => !['DESTAQUES', 'TODOS'].includes(c))]);
+        setCategoriasDinamicas(['DESTAQUES', 'TODOS', ...catOrganizadas]);
+
         if (silencioso && produtosAntigosRef.current.length > 0) {
           pData.forEach(novo => {
             const antigo = produtosAntigosRef.current.find(a => a.id === novo.id);
