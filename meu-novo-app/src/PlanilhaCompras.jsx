@@ -8,7 +8,9 @@ export default function PlanilhaCompras() {
   const [buscaPendentes, setBuscaPendentes] = useState('');
   const [buscaFeitos, setBuscaFeitos] = useState('');
   const [buscaFornecedores, setBuscaFornecedores] = useState('');
-  const [buscaResumo, setBuscaResumo] = useState(''); 
+  
+  // 💡 CORRIGIDO: O nome da variável de busca do Resumo agora está correto!
+  const [buscaFornList, setBuscaFornList] = useState(''); 
 
   const [demandas, setDemandas] = useState([]); 
   const [pedidosFeitos, setPedidosFeitos] = useState([]); 
@@ -16,11 +18,8 @@ export default function PlanilhaCompras() {
   const [fornecedoresBd, setFornecedoresBd] = useState([]);
   const [lojasBd, setLojasBd] = useState([]);
   
-  // ESTADO DA ABA "RESUMO ITENS"
   const [listaGeralItens, setListaGeralItens] = useState([]);
   const [itemResumoExpandido, setItemResumoExpandido] = useState(null);
-
-  // 💡 ESTADO PARA IMPRESSÃO DO RESUMO
   const [modoImpressaoResumo, setModoImpressaoResumo] = useState(false);
 
   const [itemModal, setItemModal] = useState(null);
@@ -43,7 +42,6 @@ export default function PlanilhaCompras() {
   const hoje = new Date().toLocaleDateString('en-CA');
   const dataBr = new Date().toLocaleDateString('pt-BR');
 
-  // Garante que o html2pdf esteja carregado
   useEffect(() => {
     if (!window.html2pdf) {
       const script = document.createElement('script');
@@ -61,7 +59,6 @@ export default function PlanilhaCompras() {
   const tratarPrecoNum = (p) => parseFloat(String(p || '0').replace('R$', '').trim().replaceAll('.', '').replace(',', '.')) || 0;
   const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // 💡 TRAVA ANTI-TELA BRANCA NO FORMATADOR DE NOME
   const formatarNomeItem = (str) => {
     if (!str || typeof str !== 'string') return 'Sem Nome';
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
@@ -102,7 +99,6 @@ export default function PlanilhaCompras() {
              nomeFornOriginal = nomeFornOriginal.replace('ALERTA|', '');
           }
 
-          // 1. PENDENTES E FEITOS
           if (p.status_compra === 'pendente') {
             if (!mapaPendentes[nomeProdutoUpper]) mapaPendentes[nomeProdutoUpper] = { nome: nomeProdutoUpper, demanda: 0, unidade: String(p.unidade_medida || "UN"), lojas: [] };
             mapaPendentes[nomeProdutoUpper].demanda += Number(p.quantidade || 0);
@@ -122,7 +118,6 @@ export default function PlanilhaCompras() {
             mapaFeitos[nomeProdutoUpper].itens.push(p);
           }
 
-          // 2. ABA RESUMO DE ITENS
           if (!mapaGeralItens[nomeProdutoUpper]) {
              mapaGeralItens[nomeProdutoUpper] = {
                 nome: nomeProdutoUpper, unidade: String(p.unidade_medida || "UN"), total_solicitado: 0, total_comprado: 0, isFaltaTotal: false, temBoleto: false, fornecedores_comprados: {}
@@ -145,7 +140,6 @@ export default function PlanilhaCompras() {
              mapaGeralItens[nomeProdutoUpper].total_solicitado -= Number(p.quantidade || 0); 
           }
 
-          // 3. ABA ORIGINAL FORNECEDORES
           if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
              let fNomeRaw = String(p.fornecedor_compra || '').toUpperCase();
              let fNome = fNomeRaw.replace('ALERTA|', '').trim();
@@ -433,7 +427,13 @@ export default function PlanilhaCompras() {
      carregarDados();
   };
 
-  // 💡 GERA PDF DO RESUMO DOS ITENS COMPRADOS/PENDENTES
+  const desfazerCompra = async (idPedido) => {
+    setCarregando(true);
+    await supabase.from('pedidos').update({ fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, status_compra: 'pendente' }).eq('id', idPedido);
+    carregarDados();
+  };
+
+  // 💡 GERA PDF DO RESUMO DOS ITENS
   const exportarResumoItens = async () => {
      const elemento = document.getElementById('area-impressao-resumo');
      if (!elemento) return;
@@ -743,7 +743,7 @@ export default function PlanilhaCompras() {
               const expandido = fornExpandido === f.nome;
               const temAlerta = f.precisaRefazer;
               
-              // 💡 FAZ O CARD PISCAR VERDE SE FOI O ÚLTIMO EDITADO (Para o cara achar rápido)
+              // 💡 FAZ O CARD PISCAR VERDE SE FOI O ÚLTIMO EDITADO
               const recemEditado = f.nome === fornecedorDestaque;
               
               let estiloBorda = '6px solid #111';
@@ -825,8 +825,8 @@ export default function PlanilhaCompras() {
                               <strong style={{ fontSize: '14px', color: '#111', display: 'block', marginBottom: '10px' }}>{nomeFormatado}</strong>
                               
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '10px' }}>
-                                {loja.itens.map(item => (
-                                  <div key={item.id_pedido} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                {loja.itens.map((item, idxx) => (
+                                  <div key={idxx} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ flex: 1 }}>
                                       <span>{item.qtd} {item.unidade} : <b>{formatarNomeItem(item.nome)}</b></span>
                                     </div>
