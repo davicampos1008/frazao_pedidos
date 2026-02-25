@@ -3,7 +3,6 @@ import { supabase } from './supabaseClient';
 
 export default function MenuCliente({ usuario, tema }) {
 
-  // 💡 Lógica de cor injetada baseada na varável `tema` passada pelo App.js
   const isEscuro = tema === 'escuro';
 
   const configDesign = {
@@ -11,7 +10,6 @@ export default function MenuCliente({ usuario, tema }) {
       fontePadrao: "'Inter', sans-serif"
     },
     cores: {
-      // 💡 FUNDOS ESCUROS PROFUNDOS SE O TEMA FOR 'escuro'
       fundoGeral: isEscuro ? '#0f172a' : '#f8fafc',
       fundoCards: isEscuro ? '#1e293b' : '#ffffff',  
       primaria: '#f97316',      
@@ -37,6 +35,10 @@ export default function MenuCliente({ usuario, tema }) {
 
   const [produtos, setProdutos] = useState([]);
   const [categoriaAtiva, setCategoriaAtiva] = useState('DESTAQUES');
+  
+  // 💡 NOVO ESTADO: Categorias Dinâmicas do Banco de Dados
+  const [categoriasDinamicas, setCategoriasDinamicas] = useState(['DESTAQUES', 'TODOS']);
+  
   const [precosLiberados, setPrecosLiberados] = useState(false);
   const [buscaMenu, setBuscaMenu] = useState('');
   
@@ -87,7 +89,6 @@ export default function MenuCliente({ usuario, tema }) {
   const listaHojeRef = useRef(listaEnviadaHoje);
   const produtosAntigosRef = useRef([]);
 
-  const categorias = ['DESTAQUES', 'TODOS', 'FRUTAS', 'VERDURAS', 'LEGUMES', 'HORTALISSAS', 'CAIXARIAS', 'EMBANDEJADOS', 'SACARIAS', 'VARIADOS'];
   const hoje = new Date().toLocaleDateString('en-CA'); 
 
   const horaAtual = new Date().getHours();
@@ -95,7 +96,6 @@ export default function MenuCliente({ usuario, tema }) {
   const primeiroNome = (usuario?.nome || 'Cliente').split(' ')[0];
   const nomeLojaLimpo = (usuario?.loja || 'Matriz').replace(/^\d+\s*-\s*/, '').trim();
 
-  // Força atualização da cor de fundo se o tema mudar
   useEffect(() => {
     document.body.style.backgroundColor = configDesign.cores.fundoGeral;
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -244,6 +244,19 @@ export default function MenuCliente({ usuario, tema }) {
       
       const { data: pData } = await supabase.from('produtos').select('*').neq('status_cotacao', 'falta').order('nome', { ascending: true });
       if (pData) {
+        
+        // 💡 EXTRAÇÃO DINÂMICA SEGURA DAS CATEGORIAS
+        const categoriasUnicas = new Set();
+        pData.forEach(prod => {
+           if (prod.categoria && typeof prod.categoria === 'string') {
+              categoriasUnicas.add(prod.categoria.toUpperCase());
+           }
+        });
+        
+        // Mantém as padrões fixas na frente e lista as dinâmicas em ordem alfabética depois
+        const catOrganizadas = Array.from(categoriasUnicas).sort();
+        setCategoriasDinamicas(['DESTAQUES', 'TODOS', ...catOrganizadas]);
+
         if (silencioso && produtosAntigosRef.current.length > 0) {
           pData.forEach(novo => {
             const antigo = produtosAntigosRef.current.find(a => a.id === novo.id);
@@ -501,7 +514,6 @@ export default function MenuCliente({ usuario, tema }) {
   return (
     <div style={{ width: '100%', minHeight: '100vh', backgroundColor: configDesign.cores.fundoGeral, fontFamily: configDesign.geral.fontePadrao, paddingBottom: '100px' }}>
       
-      {/* TOASTS DE NOTIFICAÇÃO (ALERTA RÁPIDO) */}
       <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 99999, display: 'flex', flexDirection: 'column', gap: '10px', width: '90%', maxWidth: '400px' }}>
         {notificacoes.map(notif => (
           <div key={notif.id} onClick={() => lidarComCliqueNotificacao(notif.mensagem)} style={{ background: notif.tipo === 'alerta' ? configDesign.cores.alerta : (notif.tipo === 'sucesso' ? configDesign.cores.sucesso : configDesign.cores.primaria), color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
@@ -510,7 +522,6 @@ export default function MenuCliente({ usuario, tema }) {
         ))}
       </div>
 
-      {/* HEADER DE BOAS VINDAS */}
       <div style={{ padding: '25px 20px 15px 20px', backgroundColor: configDesign.cores.fundoCards, borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '22px', color: configDesign.cores.textoForte, fontWeight: '900' }}>
@@ -569,7 +580,7 @@ export default function MenuCliente({ usuario, tema }) {
           </div>
         </div>
         <div style={{ display: 'flex', overflowX: 'auto', gap: '20px', padding: '0 20px', scrollbarWidth: 'none' }}>
-          {categorias.map(cat => (
+          {categoriasDinamicas.map(cat => (
             <button key={cat} onClick={() => { setCategoriaAtiva(cat); window.scrollTo({top:0, behavior:'smooth'}); }} style={{ paddingBottom: '10px', whiteSpace: 'nowrap', fontWeight: '900', background: 'none', border: 'none', color: categoriaAtiva === cat ? configDesign.cores.primaria : configDesign.cores.textoSuave, borderBottom: categoriaAtiva === cat ? `3px solid ${configDesign.cores.primaria}` : 'none', cursor: 'pointer', fontSize: (categoriaAtiva !== 'DESTAQUES' && navState.shrink) ? '11px' : '13px', transition: configDesign.animacoes.transicaoSuave }}>{cat}</button>
           ))}
         </div>
@@ -582,7 +593,7 @@ export default function MenuCliente({ usuario, tema }) {
           if (!(p.nome || '').toLowerCase().includes(buscaMenu.toLowerCase())) return false;
           if (categoriaAtiva === 'TODOS') return true;
           if (categoriaAtiva === 'DESTAQUES') return p.promocao || p.novidade;
-          return p.categoria === categoriaAtiva;
+          return p.categoria && p.categoria.toUpperCase() === categoriaAtiva;
         }).map(p => {
           const itemNoCarrinho = carrinho.find(i => i.id === p.id);
           let corBorda = configDesign.cores.fundoCards;
@@ -629,7 +640,6 @@ export default function MenuCliente({ usuario, tema }) {
         </button>
       )}
 
-      {/* 🛎️ MODAL DE HISTÓRICO DE NOTIFICAÇÕES */}
       {modalNotificacoesAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 5000, display: 'flex', justifyContent: 'flex-end', backdropFilter: 'blur(4px)' }}>
           <div style={{ width: '85%', maxWidth: '380px', height: '100%', background: configDesign.cores.fundoCards, display: 'flex', flexDirection: 'column', animation: 'slideIn 0.3s ease-out' }}>
@@ -657,7 +667,6 @@ export default function MenuCliente({ usuario, tema }) {
         </div>
       )}
 
-      {/* ⚙️ MODAL DE CONFIGURAÇÃO DE NOTIFICAÇÕES */}
       {modalConfigNotifAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 6000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
           <div style={{ background: configDesign.cores.fundoCards, width: '100%', maxWidth: '320px', borderRadius: '25px', padding: '25px' }}>
@@ -684,58 +693,46 @@ export default function MenuCliente({ usuario, tema }) {
         </div>
       )}
 
-      {/* ⚙️ NOVO MENU DE CONFIGURAÇÕES GERAIS */}
       {modalConfiguracoesAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 6500, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
           <div style={{ background: configDesign.cores.fundoCards, width: '100%', maxWidth: '320px', borderRadius: '25px', padding: '25px' }}>
-            
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ margin: 0, color: configDesign.cores.textoForte }}>Configurações</h3>
               <button onClick={() => setModalConfiguracoesAberto(false)} style={{ background: configDesign.cores.inputFundo, border: 'none', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer', color: configDesign.cores.textoForte, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>✕</button>
             </div>
-            
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <button onClick={() => { setModalConfiguracoesAberto(false); setModalSenhaAberto(true); }} style={{ width: '100%', padding: '18px', background: configDesign.cores.fundoGeral, border: `1px solid ${configDesign.cores.borda}`, borderRadius: '15px', fontWeight: 'bold', color: configDesign.cores.textoForte, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '15px' }}>
                 🔒 Alterar Minha Senha
               </button>
-              
               <div style={{ padding: '20px', marginTop: '10px', background: configDesign.cores.inputFundo, borderRadius: '15px', border: `1px dashed ${configDesign.cores.borda}`, color: configDesign.cores.textoSuave, fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}>
                  Mais opções em breve...
               </div>
             </div>
-
           </div>
         </div>
       )}
 
-      {/* 🔐 MODAL DE TROCA DE SENHA */}
       {modalSenhaAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 7000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(5px)' }}>
           <div style={{ background: configDesign.cores.fundoCards, width: '100%', maxWidth: '350px', borderRadius: '25px', padding: '30px' }}>
             <h3 style={{ marginTop: 0, textAlign: 'center', color: configDesign.cores.textoForte, marginBottom: '20px' }}>Alterar Senha</h3>
-            
             <div style={{ marginBottom: '15px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Senha Antiga</label>
-              <input type={mostrarSenha ? "text" : "password"} placeholder="Digite a senha atual" value={dadosSenha.antiga} onChange={e => setDadosSenha({...dadosSenha, antiga: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
+              <input type={mostrarSenha ? "text" : "password"} value={dadosSenha.antiga} onChange={e => setDadosSenha({...dadosSenha, antiga: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
             </div>
-
             <div style={{ marginBottom: '15px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Nova Senha</label>
-              <input type={mostrarSenha ? "text" : "password"} placeholder="No mínimo 6 caracteres" value={dadosSenha.nova} onChange={e => setDadosSenha({...dadosSenha, nova: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
+              <input type={mostrarSenha ? "text" : "password"} value={dadosSenha.nova} onChange={e => setDadosSenha({...dadosSenha, nova: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
             </div>
-
             <div style={{ marginBottom: '15px' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Repetir Nova Senha</label>
-              <input type={mostrarSenha ? "text" : "password"} placeholder="Digite a nova senha novamente" value={dadosSenha.confirma} onChange={e => setDadosSenha({...dadosSenha, confirma: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
+              <input type={mostrarSenha ? "text" : "password"} value={dadosSenha.confirma} onChange={e => setDadosSenha({...dadosSenha, confirma: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
             </div>
-
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
               <input type="checkbox" id="showPass" checked={mostrarSenha} onChange={() => setMostrarSenha(!mostrarSenha)} style={{ width: '18px', height: '18px', accentColor: configDesign.cores.primaria }} />
               <label htmlFor="showPass" style={{ fontSize: '13px', color: configDesign.cores.textoForte, cursor: 'pointer' }}>Mostrar senhas</label>
             </div>
-
             {erroSenha && <div style={{ color: configDesign.cores.alerta, fontSize: '12px', fontWeight: 'bold', textAlign: 'center', marginBottom: '15px', background: isEscuro ? '#450a0a' : '#fef2f2', padding: '10px', borderRadius: '8px' }}>{erroSenha}</div>}
-
             <button onClick={salvarNovaSenha} disabled={carregandoSenha} style={{ width: '100%', padding: '18px', background: configDesign.cores.primaria, color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '15px' }}>
               {carregandoSenha ? 'SALVANDO...' : 'CONFIRMAR ALTERAÇÃO'}
             </button>
@@ -850,7 +847,6 @@ export default function MenuCliente({ usuario, tema }) {
           </div>
         </div>
       )}
-
       <style>{`
         @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
       `}</style>
