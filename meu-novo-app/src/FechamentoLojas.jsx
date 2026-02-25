@@ -49,7 +49,7 @@ export default function FechamentoLojas({ isEscuro }) {
 
   const tratarPrecoNum = (p) => {
     if (!p || typeof p !== 'string') return 0;
-    const strClean = String(p).replace('R$ ', '').replace(/\./g, '').replace(',', '.');
+    const strClean = String(p).replace('R$', '').trim().replace(/\./g, '').replace(',', '.');
     return parseFloat(strClean) || 0;
   };
 
@@ -80,7 +80,6 @@ export default function FechamentoLojas({ isEscuro }) {
               const lInfo = lojasData.find(l => extrairNum(l.codigo_loja) === idLoja);
               mapaLojas[idLoja] = { loja_id: idLoja, nome_fantasia: lInfo ? lInfo.nome_fantasia : `Loja ${idLoja}`, itens: [], totalFatura: 0, liberadoCliente: false, temPendencia: true };
             }
-            
             mapaLojas[idLoja].itens.push({
                 id_pedido: p.id,
                 nome: String(p.nome_produto || "").toUpperCase(),
@@ -95,7 +94,7 @@ export default function FechamentoLojas({ isEscuro }) {
                 precoOriginal: '0,00',
                 isBonif: false,
                 isPendente: true, 
-                fornecedor_original: String(p.fornecedor_compra || '').replace('ALERTA|', '') // Guarda o forn pra o alerta
+                fornecedor_original: String(p.fornecedor_compra || '').replace('ALERTA|', '') 
             });
             mapaLojas[idLoja].temPendencia = true;
             return;
@@ -119,6 +118,8 @@ export default function FechamentoLojas({ isEscuro }) {
           }
 
           const valNum = tratarPrecoNum(baseVal);
+          const baseValFormatado = valNum > 0 ? formatarMoeda(valNum) : baseVal; // Padroniza a string pro fornecedor
+          
           const qtdCobradaForn = Math.max(0, p.qtd_atendida - qtdBonifFornecedor);
           const totalItemFornCobrado = qtdCobradaForn * valNum;
           const valorEconomizadoBonif = qtdBonifFornecedor * valNum;
@@ -134,11 +135,23 @@ export default function FechamentoLojas({ isEscuro }) {
                totalDescontoBonif: 0,
                qtdBonificadaGeral: 0,
                itens: [], 
+               lojasEnvolvidas: {},
                statusPagamento: 'pendente' 
             };
           }
 
-          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => i.nomeItem === p.nome_produto && i.valUnit === baseVal && i.isBoleto === isBoleto);
+          const idLojaForn = extrairNum(p.loja_id);
+          const lInfoForn = (lojasData || []).find(l => extrairNum(l.codigo_loja) === idLojaForn);
+          const nomeLojaForn = lInfoForn ? lInfoForn.nome_fantasia : `Loja ${idLojaForn}`;
+          
+          mapaForn[fNome].lojasEnvolvidas[nomeLojaForn] = lInfoForn || { nome_fantasia: nomeLojaForn, placa_caminhao: 'SEM PLACA' };
+
+          // 💡 AGRUPAMENTO INTELIGENTE: Compara o NÚMERO (valNum) em vez do texto, evita criar 2 linhas pro mesmo preço.
+          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => 
+             i.nomeItem === p.nome_produto && 
+             i.isBoleto === isBoleto && 
+             tratarPrecoNum(i.valUnit) === valNum
+          );
 
           if (itemExistenteIndex >= 0) {
               const itEx = mapaForn[fNome].itens[itemExistenteIndex];
@@ -152,7 +165,7 @@ export default function FechamentoLojas({ isEscuro }) {
                 unidade: p.unidade_medida || 'UN',
                 qtd: p.qtd_atendida,
                 qtdBonificada: qtdBonifFornecedor,
-                valUnit: baseVal, 
+                valUnit: baseValFormatado, // Salva formatado limpo
                 totalCobrado: totalItemFornCobrado,
                 totalBonificado: valorEconomizadoBonif,
                 isBoleto 
@@ -314,14 +327,18 @@ export default function FechamentoLojas({ isEscuro }) {
     }));
   };
 
+  // 💡 ARRUMADO: Formatador Inteligente de "R$"
   const handleBlurPreco = (idPedido, campo, valorAtual) => {
     if (!valorAtual || valorAtual === 'FALTA' || valorAtual === 'BOLETO' || valorAtual.includes('BONIFIC') || valorAtual === 'AGUARDANDO COMPRA') return;
+    
     let v = String(valorAtual).replace(/[^\d,.]/g, '');
     if (!v.includes(',') && !v.includes('.')) { v = v + ',00'; }
     if(v.includes('.') && !v.includes(',')) v = v.replace('.', ',');
     v = v.replace(/[^\d,]/g, '');
     let num = parseFloat(v.replace(',', '.')) || 0;
-    let finalStr = num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+    // Força a escrita perfeita do R$ 
+    let finalStr = num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     
     handleChangeEdicao(idPedido, campo, finalStr);
   };
@@ -330,11 +347,13 @@ export default function FechamentoLojas({ isEscuro }) {
     setItensEditados(prev => prev.map(item => {
       if (item.id_pedido === idPedido) {
         if (tipo === 'boleto') return { ...item, isBoleto: true, isFalta: false, isBonif: false, desfazerVoltar: false, unitDisplay: 'BOLETO', totalDisplay: 'BOLETO', valorNumerico: 0 };
+        
         if (tipo === 'falta') return { ...item, isFalta: true, isBoleto: false, isBonif: false, desfazerVoltar: true, unitDisplay: 'FALTA', totalDisplay: 'FALTA', valorNumerico: 0 };
+        
         if (tipo === 'normal') {
            const pb = item.precoOriginal && !item.precoOriginal.includes('BONIF') ? item.precoOriginal : '0,00';
-           if (pb === '0,00') {
-               return { ...item, isFalta: false, isBoleto: false, isBonif: false, desfazerVoltar: true, unitDisplay: '0,00', totalDisplay: 'R$ 0,00', valorNumerico: 0 };
+           if (pb === '0,00' || pb === 'R$ 0,00') {
+               return { ...item, isFalta: false, isBoleto: false, isBonif: false, desfazerVoltar: true, unitDisplay: 'R$ 0,00', totalDisplay: 'R$ 0,00', valorNumerico: 0 };
            }
            const t = parseInt(item.qtdEntregue) * tratarPrecoNum(pb);
            return { ...item, isFalta: false, isBoleto: false, isBonif: false, desfazerVoltar: false, unitDisplay: pb, totalDisplay: formatarMoeda(t), valorNumerico: t };
@@ -344,7 +363,7 @@ export default function FechamentoLojas({ isEscuro }) {
     }));
   };
 
-  // 💡 BOTÃO DE DESFAZER DIRETO NA LINHA! (Joga pra aba de Pendentes automaticamente)
+  // BOTÃO DE DESFAZER DIRETO NA LINHA! (Joga pra aba de Pendentes automaticamente)
   const devolverParaPendenteDireto = async (item) => {
      if (item.isPendente) return alert("Este item já está aguardando compra.");
      if (!window.confirm(`Isso apagará o preço e devolverá "${item.nome}" para a aba de PENDENTES na Planilha de Compras. O fornecedor original será alertado. Deseja continuar?`)) return;
@@ -352,7 +371,7 @@ export default function FechamentoLojas({ isEscuro }) {
      setCarregando(true);
      await supabase.from('pedidos').update({
         status_compra: 'pendente',
-        fornecedor_compra: `ALERTA|${item.fornecedor_original || ''}`, // 💡 Salva o prefixo pro Fornecedor ficar vermelho
+        fornecedor_compra: `ALERTA|${item.fornecedor_original || ''}`, 
         custo_unit: '',
         qtd_atendida: 0
      }).eq('id', item.id_pedido);
@@ -394,7 +413,7 @@ export default function FechamentoLojas({ isEscuro }) {
   };
 
   const totalAoVivoEdicao = itensEditados.reduce((acc, item) => {
-     if(item.isFalta || item.isBoleto || item.isPendente || (item.isBonif && item.unitDisplay.includes('BONIFIC'))) return acc;
+     if(item.isFalta || item.isBoleto || item.isPendente || (item.isBonif && item.unitDisplay.includes('BONIFIC')) || item.desfazerVoltar) return acc;
      const val = tratarPrecoNum(item.totalDisplay);
      return acc + (isNaN(val) ? 0 : val);
   }, 0);
@@ -523,9 +542,7 @@ export default function FechamentoLojas({ isEscuro }) {
             <th style={{...thStyle, width: '22%'}}>DESCRIÇÃO</th>
             <th style={{...thStyle, width: '14%'}}>VAL. UNIT.</th>
             <th style={{...thStyle, width: '10%'}}>VAL. TOTAL.</th>
-            
             <th style={{ border: 'none', width: '2%', backgroundColor: 'transparent' }}></th>
-
             <th style={{...thStyle, width: '7%'}}>QUANT.</th>
             <th style={{...thStyle, width: '22%'}}>DESCRIÇÃO</th>
             <th style={{...thStyle, width: '14%'}}>VAL. UNIT.</th>
@@ -616,7 +633,6 @@ export default function FechamentoLojas({ isEscuro }) {
                      <div style={{ border: '2px solid black', boxSizing: 'border-box', padding: '10px', height: '100%' }}>
                          
                          <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '2px solid black', paddingBottom: '10px', marginBottom: '10px' }}>
-                            
                             {isMotGlobal ? (
                               <>
                                 <div style={{ flex: '1', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
@@ -745,7 +761,6 @@ export default function FechamentoLojas({ isEscuro }) {
                                 </span>
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '15px', whiteSpace: 'nowrap' }}>
-                                {/* 💡 NOVO BOTÃO DE REFAZER DIRETO NA LINHA! JOGA O ITEM INTEIRO PRO PENDENTE */}
                                 {!isPendente && (
                                    <button onClick={() => devolverParaPendenteDireto(item)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer' }} title="Desfazer e jogar para pendentes">🔙</button>
                                 )}
@@ -789,7 +804,12 @@ export default function FechamentoLojas({ isEscuro }) {
                 let corTexto = isEscuro ? '#fcd34d' : '#b45309';
                 let tagStatus = 'PENDENTE';
 
-                if (isPago) {
+                if (forn.precisaRefazer) {
+                    corBorda = '#ef4444';
+                    corFundo = isEscuro ? '#450a0a' : '#fef2f2';
+                    corTexto = '#ef4444';
+                    tagStatus = '⚠️ PEDIDO ALTERADO';
+                } else if (isPago) {
                   corBorda = '#22c55e'; 
                   corFundo = isEscuro ? '#14532d' : '#dcfce7';
                   corTexto = isEscuro ? '#86efac' : '#166534';
@@ -813,14 +833,14 @@ export default function FechamentoLojas({ isEscuro }) {
                       </div>
                       
                       <div style={{ fontSize: '20px', fontWeight: '900', color: corTexto }}>
-                         {isBoletoOnly && !expandido ? 'BOLETO' : formatarMoeda(forn.totalPix + forn.totalBoleto)}
+                         {forn.precisaRefazer ? 'ALERTA!' : (isBoletoOnly && !expandido ? 'BOLETO' : formatarMoeda(forn.totalPix + forn.totalBoleto))}
                       </div>
                     </div>
 
                     {expandido && (
                       <div style={{ padding: '15px' }}>
                         
-                        {!isBoletoOnly && (
+                        {!isBoletoOnly && !forn.precisaRefazer && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', border: `1px dashed ${themeBorder}`, padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
                             <div>
                                <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>Chave PIX:</span>
@@ -868,7 +888,7 @@ export default function FechamentoLojas({ isEscuro }) {
                            Total a pagar = {formatarMoeda(forn.totalPix + forn.totalBoleto)}
                         </div>
 
-                        {!isBoletoOnly && (
+                        {!isBoletoOnly && !forn.precisaRefazer && (
                           <button onClick={() => alternarStatusPagamento(forn.nome)} style={{ width: '100%', marginTop: '15px', padding: '12px', backgroundColor: isPago ? (isEscuro ? '#1e293b' : '#f1f5f9') : '#22c55e', color: isPago ? '#64748b' : '#fff', border: 'none', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
                             {isPago ? 'DESFAZER PAGAMENTO' : 'PIX FEITO / CONCLUIR'}
                           </button>
