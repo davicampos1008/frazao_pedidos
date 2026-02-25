@@ -8,8 +8,6 @@ export default function PlanilhaCompras() {
   const [buscaPendentes, setBuscaPendentes] = useState('');
   const [buscaFeitos, setBuscaFeitos] = useState('');
   const [buscaFornecedores, setBuscaFornecedores] = useState('');
-  
-  // 💡 CORRIGIDO: O nome da variável de busca do Resumo agora está correto!
   const [buscaFornList, setBuscaFornList] = useState(''); 
 
   const [demandas, setDemandas] = useState([]); 
@@ -20,7 +18,9 @@ export default function PlanilhaCompras() {
   
   const [listaGeralItens, setListaGeralItens] = useState([]);
   const [itemResumoExpandido, setItemResumoExpandido] = useState(null);
-  const [modoImpressaoResumo, setModoImpressaoResumo] = useState(false);
+
+  // 💡 NOVO: Estado para abrir a tela de Impressão/Preview do Resumo
+  const [modoVisualizacaoResumoImp, setModoVisualizacaoResumoImp] = useState(false);
 
   const [itemModal, setItemModal] = useState(null);
   const [abaModal, setAbaModal] = useState('completo'); 
@@ -427,20 +427,15 @@ export default function PlanilhaCompras() {
      carregarDados();
   };
 
-  const desfazerCompra = async (idPedido) => {
-    setCarregando(true);
-    await supabase.from('pedidos').update({ fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, status_compra: 'pendente' }).eq('id', idPedido);
-    carregarDados();
-  };
-
-  // 💡 GERA PDF DO RESUMO DOS ITENS
-  const exportarResumoItens = async () => {
+  // 💡 LÓGICA DO PDF DO RESUMO (Com preview visual como Fechamento)
+  const processarPDFResumo = async (modo = 'baixar') => {
      const elemento = document.getElementById('area-impressao-resumo');
      if (!elemento) return;
 
+     const nomeArquivo = `Resumo_Compras_${dataBr.replace(/\//g, '-')}.pdf`;
      const opt = {
        margin:       [10, 10, 15, 10], 
-       filename:     `Resumo_Compras_${dataBr.replace(/\//g, '-')}.pdf`,
+       filename:     nomeArquivo,
        image:        { type: 'jpeg', quality: 0.98 },
        html2canvas:  { scale: 2, useCORS: true, logging: false },
        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
@@ -451,19 +446,25 @@ export default function PlanilhaCompras() {
        return;
      }
 
-     setCarregando(true);
-     setModoImpressaoResumo(true);
-     
-     setTimeout(async () => {
-         try {
-            await window.html2pdf().set(opt).from(document.getElementById('area-impressao-resumo')).save();
-         } catch (e) {
-            console.error("Erro ao gerar PDF", e);
-         } finally {
-            setModoImpressaoResumo(false);
-            setCarregando(false);
-         }
-     }, 1000);
+     if (modo === 'whatsapp') {
+        try {
+          const pdfBlob = await window.html2pdf().set(opt).from(elemento).output('blob');
+          const file = new File([pdfBlob], nomeArquivo, { type: 'application/pdf' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: nomeArquivo, text: 'Resumo de Compras' });
+          } else {
+            alert("Seu dispositivo não suporta compartilhamento direto. O arquivo será baixado para você enviar manualmente.");
+            window.html2pdf().set(opt).from(elemento).save();
+          }
+        } catch (e) {
+          console.error("Erro no Share API", e);
+        }
+     } else if (modo === 'preview') {
+        const pdfBlobUrl = await window.html2pdf().set(opt).from(elemento).output('bloburl');
+        window.open(pdfBlobUrl, '_blank');
+     } else {
+        window.html2pdf().set(opt).from(elemento).save();
+     }
   };
 
   const gerarPedidoGeral = (f, btnId) => {
@@ -574,58 +575,79 @@ export default function PlanilhaCompras() {
     </div>
   );
 
-  // 💡 MODO IMPRESSÃO PDF: RESUMO DOS ITENS
+  // 💡 IMPRESSÃO DA TELA RESUMO INTELIGENTE
   if (modoImpressaoResumo) {
       return (
-          <div style={{ backgroundColor: '#fff', minHeight: '100vh', padding: '0', fontFamily: 'Arial, sans-serif' }}>
-              <div id="area-impressao-resumo" style={{ width: '100%', maxWidth: '800px', margin: '0 auto', padding: '15px' }}>
-                  
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid black', paddingBottom: '10px', marginBottom: '20px' }}>
-                      <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '900', textTransform: 'uppercase' }}>RESUMO DE ITENS</h2>
-                      <div style={{ textAlign: 'right' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 'bold', display: 'block' }}>DATA: {dataBr}</span>
-                      </div>
-                  </div>
-
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                          <tr style={{ backgroundColor: '#e5e7eb', borderBottom: '2px solid black' }}>
-                              <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px', border: '1px solid black', width: '35%' }}>PRODUTO</th>
-                              <th style={{ padding: '8px', textAlign: 'center', fontSize: '12px', border: '1px solid black', width: '15%' }}>PEDIDO LOJAS</th>
-                              <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px', border: '1px solid black', width: '50%' }}>FORNECEDORES (Qtd entregue)</th>
-                          </tr>
-                      </thead>
-                      <tbody>
-                          {listaGeralItens.map((item, idx) => {
-                              let corLinha = 'black';
-                              if (item.isFaltaTotal) corLinha = '#64748b'; // Cinza 
-                              else if (item.total_comprado === 0) corLinha = '#ef4444'; // Vermelho
-                              else if (item.total_comprado < item.total_solicitado) corLinha = '#d97706'; // Laranja
-                              else corLinha = '#166534'; // Verde
-
-                              return (
-                                  <tr key={idx}>
-                                      <td style={{ padding: '8px', border: '1px solid black', fontSize: '12px', fontWeight: 'bold', color: corLinha, textDecoration: item.isFaltaTotal ? 'line-through' : 'none' }}>
-                                          {formatarNomeItem(item.nome)}
-                                      </td>
-                                      <td style={{ padding: '8px', border: '1px solid black', fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}>
-                                          {item.total_solicitado} {item.unidade}
-                                      </td>
-                                      <td style={{ padding: '8px', border: '1px solid black', fontSize: '11px', color: '#333' }}>
-                                          {Object.keys(item.fornecedores_comprados).length === 0 ? (
-                                              <span style={{ color: '#ef4444', fontWeight: 'bold' }}>PENDENTE / FALTA</span>
-                                          ) : (
-                                              Object.entries(item.fornecedores_comprados).map(([forn, q]) => (
-                                                  <div key={forn}><b>{q}x</b> - {forn}</div>
-                                              ))
-                                          )}
-                                      </td>
-                                  </tr>
-                              );
-                          })}
-                      </tbody>
-                  </table>
+          <div style={{ backgroundColor: '#525659', minHeight: '100vh', padding: '10px', fontFamily: 'Arial, sans-serif' }}>
+              
+              <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', backgroundColor: '#333', padding: '15px', borderRadius: '8px', marginBottom: '20px', position: 'sticky', top: '10px', zIndex: 1000, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
+                 <button onClick={() => setModoImpressaoResumo(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬅ VOLTAR</button>
+                 <div style={{ display: 'flex', gap: '10px', flex: '1 1 auto', flexWrap: 'wrap' }}>
+                   <button onClick={() => processarPDFResumo('preview')} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>👁️ VISUALIZAR PDF</button>
+                   <button onClick={() => processarPDFResumo('whatsapp')} style={{ background: '#25d366', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🟢 COMPARTILHAR WHATSAPP</button>
+                   <button onClick={() => processarPDFResumo('baixar')} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
+                 </div>
               </div>
+
+              <div style={{ overflowX: 'auto', paddingBottom: '20px' }}>
+                  <div id="area-impressao-resumo" className="print-section" style={{ backgroundColor: 'white', color: 'black', width: '100%', maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
+                      
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid black', paddingBottom: '10px', marginBottom: '20px' }}>
+                          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '900', textTransform: 'uppercase' }}>RESUMO DE ITENS</h2>
+                          <div style={{ textAlign: 'right' }}>
+                              <span style={{ fontSize: '12px', fontWeight: 'bold', display: 'block' }}>DATA: {dataBr}</span>
+                          </div>
+                      </div>
+
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                              <tr style={{ backgroundColor: '#e5e7eb', borderBottom: '2px solid black' }}>
+                                  <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px', border: '1px solid black', width: '35%' }}>PRODUTO</th>
+                                  <th style={{ padding: '8px', textAlign: 'center', fontSize: '12px', border: '1px solid black', width: '15%' }}>PEDIDO LOJAS</th>
+                                  <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px', border: '1px solid black', width: '50%' }}>FORNECEDORES (Qtd entregue)</th>
+                              </tr>
+                          </thead>
+                          <tbody>
+                              {listaGeralItens.map((item, idx) => {
+                                  let corLinha = 'black';
+                                  if (item.isFaltaTotal) corLinha = '#64748b'; 
+                                  else if (item.total_comprado === 0) corLinha = '#ef4444'; 
+                                  else if (item.total_comprado < item.total_solicitado) corLinha = '#d97706'; 
+                                  else corLinha = '#166534'; 
+
+                                  return (
+                                      <tr key={idx}>
+                                          <td style={{ padding: '8px', border: '1px solid black', fontSize: '12px', fontWeight: 'bold', color: corLinha, textDecoration: item.isFaltaTotal ? 'line-through' : 'none' }}>
+                                              {formatarNomeItem(item.nome)}
+                                          </td>
+                                          <td style={{ padding: '8px', border: '1px solid black', fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}>
+                                              {item.total_solicitado} {item.unidade}
+                                          </td>
+                                          <td style={{ padding: '8px', border: '1px solid black', fontSize: '11px', color: '#333' }}>
+                                              {Object.keys(item.fornecedores_comprados).length === 0 ? (
+                                                  <span style={{ color: '#ef4444', fontWeight: 'bold' }}>PENDENTE / FALTA</span>
+                                              ) : (
+                                                  Object.entries(item.fornecedores_comprados).map(([forn, q]) => (
+                                                      <div key={forn}><b>{q}x</b> - {forn}</div>
+                                                  ))
+                                              )}
+                                          </td>
+                                      </tr>
+                                  );
+                              })}
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+              <style>{`
+                @media print {
+                  .no-print { display: none !important; }
+                  html, body { height: auto !important; overflow: visible !important; background: white; margin: 0; padding: 0; }
+                  #root, div { overflow: visible !important; height: auto !important; }
+                  .print-section { box-shadow: none !important; min-width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; }
+                  @page { margin: 10mm; size: portrait; } 
+                }
+              `}</style>
           </div>
       );
   }
@@ -825,8 +847,8 @@ export default function PlanilhaCompras() {
                               <strong style={{ fontSize: '14px', color: '#111', display: 'block', marginBottom: '10px' }}>{nomeFormatado}</strong>
                               
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '10px' }}>
-                                {loja.itens.map((item, idxx) => (
-                                  <div key={idxx} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                {loja.itens.map((item, iDxL) => (
+                                  <div key={iDxL} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ flex: 1 }}>
                                       <span>{item.qtd} {item.unidade} : <b>{formatarNomeItem(item.nome)}</b></span>
                                     </div>
@@ -870,7 +892,7 @@ export default function PlanilhaCompras() {
               <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '10px 15px', display: 'flex', gap: '10px', border: '1px solid #e2e8f0', flex: 1 }}>
                 <span>🔍</span><input placeholder="Buscar produto..." value={buscaFornList} onChange={e => setBuscaFornList(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
               </div>
-              <button onClick={exportarResumoItens} style={{ background: '#111', color: '#fff', border: 'none', padding: '0 20px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
+              <button onClick={() => setModoImpressaoResumo(true)} style={{ background: '#111', color: '#fff', border: 'none', padding: '0 20px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
                   📥 GERAR PDF
               </button>
           </div>
