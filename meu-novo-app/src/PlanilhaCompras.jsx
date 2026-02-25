@@ -5,7 +5,6 @@ export default function PlanilhaCompras() {
   const [abaAtiva, setAbaAtiva] = useState('pendentes'); 
   const [carregando, setCarregando] = useState(true);
   
-  // Variáveis de busca
   const [buscaPendentes, setBuscaPendentes] = useState('');
   const [buscaFeitos, setBuscaFeitos] = useState('');
   const [buscaFornecedores, setBuscaFornecedores] = useState('');
@@ -57,9 +56,9 @@ export default function PlanilhaCompras() {
   const tratarPrecoNum = (p) => parseFloat(String(p || '0').replace('R$', '').trim().replaceAll('.', '').replace(',', '.')) || 0;
   const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // 💡 Trava contra tela branca em nomes nulos
+  // 💡 TRAVA BLINDADA: Nunca vai dar tela branca ao formatar nomes.
   const formatarNomeItem = (str) => {
-    if (!str || typeof str !== 'string') return 'Sem Nome';
+    if (!str || typeof str !== 'string' || str.trim() === '') return 'Sem Nome';
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
   };
 
@@ -98,6 +97,7 @@ export default function PlanilhaCompras() {
              nomeFornOriginal = nomeFornOriginal.replace('ALERTA|', '');
           }
 
+          // 1. PENDENTES E FEITOS
           if (p.status_compra === 'pendente') {
             if (!mapaPendentes[nomeProdutoUpper]) mapaPendentes[nomeProdutoUpper] = { nome: nomeProdutoUpper, demanda: 0, unidade: String(p.unidade_medida || "UN"), lojas: [] };
             mapaPendentes[nomeProdutoUpper].demanda += Number(p.quantidade || 0);
@@ -117,6 +117,7 @@ export default function PlanilhaCompras() {
             mapaFeitos[nomeProdutoUpper].itens.push(p);
           }
 
+          // 2. ABA RESUMO DE ITENS
           if (!mapaGeralItens[nomeProdutoUpper]) {
              mapaGeralItens[nomeProdutoUpper] = {
                 nome: nomeProdutoUpper, unidade: String(p.unidade_medida || "UN"), total_solicitado: 0, total_comprado: 0, isFaltaTotal: false, temBoleto: false, fornecedores_comprados: {}
@@ -129,16 +130,29 @@ export default function PlanilhaCompras() {
              let fNameRaw = p.fornecedor_compra ? String(p.fornecedor_compra).toUpperCase() : 'DESCONHECIDO';
              let fName = fNameRaw.replace('ALERTA|', '').trim();
              
-             if (!mapaGeralItens[nomeProdutoUpper].fornecedores_comprados[fName]) {
-                 mapaGeralItens[nomeProdutoUpper].fornecedores_comprados[fName] = 0;
+             // 💡 Lógica PJ do Resumo
+             const fornInfoParaPJ = (fornData || []).find(f => (f.nome_fantasia || '').toUpperCase() === fName);
+             let displayFornName = fName;
+             if (fornInfoParaPJ && String(fornInfoParaPJ.tipo_chave_pix || '').toUpperCase() === 'CNPJ') {
+                 displayFornName = `${fName} (PJ)`;
              }
-             mapaGeralItens[nomeProdutoUpper].fornecedores_comprados[fName] += Number(p.qtd_atendida || 0);
+
+             if (p.status_compra === 'boleto') {
+                displayFornName += ' (B)';
+             }
+             
+             if (!mapaGeralItens[nomeProdutoUpper].fornecedores_comprados[displayFornName]) {
+                 mapaGeralItens[nomeProdutoUpper].fornecedores_comprados[displayFornName] = { qtd: 0, isBoleto: p.status_compra === 'boleto' };
+             }
+             mapaGeralItens[nomeProdutoUpper].fornecedores_comprados[displayFornName].qtd += Number(p.qtd_atendida || 0);
              if (p.status_compra === 'boleto') mapaGeralItens[nomeProdutoUpper].temBoleto = true;
           }
+          
           if (p.status_compra === 'falta') {
              mapaGeralItens[nomeProdutoUpper].total_solicitado -= Number(p.quantidade || 0); 
           }
 
+          // 3. ABA ORIGINAL FORNECEDORES
           if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
              let fNomeRaw = String(p.fornecedor_compra || '').toUpperCase();
              let fNome = fNomeRaw.replace('ALERTA|', '').trim();
@@ -176,7 +190,7 @@ export default function PlanilhaCompras() {
                      mapaForn[fNome].lojas[nomeLoja] = { nome: nomeLoja, placa: placaFinal, totalLoja: 0, itens: [] };
                  }
 
-                 // 💡 AGRUPAMENTO INTELIGENTE MATEMÁTICO: Evita criar 2 linhas se o preço for o mesmo.
+                 // Agrupamento matemático de preços iguais
                  const idxItemForn = mapaForn[fNome].lojas[nomeLoja].itens.findIndex(i => 
                     i.nome === nomeProdutoUpper && i.isBoleto === isBoleto && tratarPrecoNum(i.valor_unit) === valNum
                  );
@@ -359,7 +373,6 @@ export default function PlanilhaCompras() {
     await Promise.all(promessas);
     if (pedidosParaClonar.length > 0) await supabase.from('pedidos').insert(pedidosParaClonar);
     
-    // 💡 SUCESSO: Alerta qual fornecedor deve receber a mensagem piscando em verde!
     const nomeFornLimpo = dadosCompra.fornecedor.toUpperCase();
     setFornecedorDestaque(nomeFornLimpo);
     setAbaAtiva('fornecedores');
@@ -427,8 +440,8 @@ export default function PlanilhaCompras() {
      carregarDados();
   };
 
-  // 💡 GERA PDF DO RESUMO DOS ITENS
-  const exportarResumoItens = async (modo = 'baixar') => {
+  // 💡 GERA PDF DO RESUMO DOS ITENS COMPLETO (Com os botões de Compartilhar, Visualizar e Baixar)
+  const processarPDFResumo = async (modo = 'baixar') => {
      const elemento = document.getElementById('area-impressao-resumo');
      if (!elemento) return;
 
@@ -465,7 +478,6 @@ export default function PlanilhaCompras() {
      }
   };
 
-  // 💡 MENSAGEM WHATSAPP DO FORNECEDOR (Total lá embaixo!)
   const gerarPedidoGeral = (f, btnId) => {
     const nomeLoja = lojaGeralSelecionada[f.nome];
     if (!nomeLoja) return alert("⚠️ Selecione a loja titular da banca para o cabeçalho.");
@@ -479,7 +491,7 @@ export default function PlanilhaCompras() {
     const mapaItensGerais = {};
     Object.values(f.lojas).forEach(loja => {
       loja.itens.forEach(item => {
-        // 💡 AGRUPA POR NOME, PREÇO E STATUS BOLETO PARA SEPARAR ITENS DE PREÇOS DIFERENTES
+        // Agrupa baseado em NOME, PREÇO e STATUS BOLETO para separar coisas de preços diferentes na mensagem
         const key = `${item.nome}_${tratarPrecoNum(item.valor_unit)}_${item.isBoleto}`;
         if (!mapaItensGerais[key]) {
           mapaItensGerais[key] = { ...item, qtd: 0, totalNum: 0, qtd_bonificada: 0 };
@@ -515,7 +527,6 @@ export default function PlanilhaCompras() {
        msg += `\nValor bruto = ${formatarMoeda(f.totalBruto)}\n`;
     }
 
-    // 💡 AQUI: Placa e Complemento primeiro, Total a Pagar depois!
     msg += `\n${placaBase} - ${complemento}`;
     msg += `\n- TOTAL = ${formatarMoeda(f.totalGeral)}`;
 
@@ -577,7 +588,7 @@ export default function PlanilhaCompras() {
     </div>
   );
 
-  // 💡 IMPRESSÃO DA TELA RESUMO INTELIGENTE
+  // 💡 MODO IMPRESSÃO PDF DA TELA RESUMO INTELIGENTE
   if (modoImpressaoResumo) {
       return (
           <div style={{ backgroundColor: '#525659', minHeight: '100vh', padding: '10px', fontFamily: 'Arial, sans-serif' }}>
@@ -585,9 +596,9 @@ export default function PlanilhaCompras() {
               <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', backgroundColor: '#333', padding: '15px', borderRadius: '8px', marginBottom: '20px', position: 'sticky', top: '10px', zIndex: 1000, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
                  <button onClick={() => setModoImpressaoResumo(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬅ VOLTAR</button>
                  <div style={{ display: 'flex', gap: '10px', flex: '1 1 auto', flexWrap: 'wrap' }}>
-                   <button onClick={() => exportarResumoItens('preview')} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>👁️ VISUALIZAR PDF</button>
-                   <button onClick={() => exportarResumoItens('whatsapp')} style={{ background: '#25d366', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🟢 COMPARTILHAR WHATSAPP</button>
-                   <button onClick={() => exportarResumoItens('baixar')} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
+                   <button onClick={() => processarPDFResumo('preview')} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>👁️ VISUALIZAR PDF</button>
+                   <button onClick={() => processarPDFResumo('whatsapp')} style={{ background: '#25d366', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🟢 COMPARTILHAR WHATSAPP</button>
+                   <button onClick={() => processarPDFResumo('baixar')} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
                  </div>
               </div>
 
@@ -629,8 +640,8 @@ export default function PlanilhaCompras() {
                                               {Object.keys(item.fornecedores_comprados).length === 0 ? (
                                                   <span style={{ color: '#ef4444', fontWeight: 'bold' }}>PENDENTE / FALTA</span>
                                               ) : (
-                                                  Object.entries(item.fornecedores_comprados).map(([forn, q]) => (
-                                                      <div key={forn}><b>{q}x</b> - {forn}</div>
+                                                  Object.entries(item.fornecedores_comprados).map(([forn, data]) => (
+                                                      <div key={forn}><b>{data.qtd}x</b> - {forn}</div>
                                                   ))
                                               )}
                                           </td>
@@ -707,7 +718,7 @@ export default function PlanilhaCompras() {
             {demandas.length === 0 ? (
               <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '40px', color: '#22c55e', backgroundColor: '#fff', borderRadius: '16px', fontWeight: 'bold' }}>🎉 Zero pendências!</div>
             ) : (
-              demandas.filter(d => d.nome.toLowerCase().includes(buscaPendentes.toLowerCase())).map(item => (
+              demandas.filter(d => (d.nome || '').toLowerCase().includes(buscaPendentes.toLowerCase())).map(item => (
                 <div key={item.nome} onClick={() => abrirModalCompra(item)} style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '15px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', cursor: 'pointer', borderTop: item.isResto ? '4px solid #ef4444' : '4px solid #f97316', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', position: 'relative' }}>
                   <div style={{ position: 'absolute', top: '5px', right: '5px' }}>
                     <button onClick={(e) => marcarFaltaDireto(item, e)} style={{ background: '#fef2f2', color: '#ef4444', border: 'none', padding: '4px', borderRadius: '6px', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer' }}>🚫</button>
@@ -737,7 +748,7 @@ export default function PlanilhaCompras() {
             {pedidosFeitos.length === 0 ? (
               <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '16px' }}>Nada concluído ainda.</div>
             ) : (
-              pedidosFeitos.filter(d => d.nome.toLowerCase().includes(buscaFeitos.toLowerCase())).map(item => (
+              pedidosFeitos.filter(d => (d.nome || '').toLowerCase().includes(buscaFeitos.toLowerCase())).map(item => (
                 <div key={item.nome} onClick={() => desfazerFeito(item)} style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '15px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', borderTop: '4px solid #3b82f6', opacity: 0.8, cursor: 'pointer' }}>
                   <div style={{ backgroundColor: '#eff6ff', color: '#1d4ed8', padding: '10px', borderRadius: '50%', fontWeight: '900', fontSize: '18px', width: '45px', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '10px' }}>
                     {item.total_resolvido}
@@ -895,7 +906,6 @@ export default function PlanilhaCompras() {
               </button>
           </div>
 
-          {/* 💡 LEGENDA DE CORES */}
           <div style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'center', fontSize: '11px', fontWeight: 'bold' }}>
              <span style={{ color: '#16a34a' }}>🟢 Comprado 100%</span>
              <span style={{ color: '#ef4444' }}>🔴 Falta Comprar (Pendente)</span>
@@ -955,14 +965,13 @@ export default function PlanilhaCompras() {
                       </div>
                     </div>
 
-                    {/* EXPANSÃO COM DETALHES DOS FORNECEDORES */}
                     {cardExpandido && Object.keys(item.fornecedores_comprados || {}).length > 0 && (
                       <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: `1px dashed ${corBorda}` }}>
                          <span style={{ fontSize: '10px', fontWeight: 'bold', color: corTexto, opacity: 0.8, display: 'block', marginBottom: '8px' }}>COMPRADO COM:</span>
-                         {Object.entries(item.fornecedores_comprados).map(([fornNome, qtd]) => (
+                         {Object.entries(item.fornecedores_comprados).map(([fornNome, data]) => (
                              <div key={fornNome} style={{ fontSize: '12px', color: corTexto, fontWeight: 'bold', marginBottom: '4px', display: 'flex', justifyContent: 'space-between' }}>
-                                 <span>🏢 {fornNome}</span>
-                                 <span>{qtd}x</span>
+                                 <span>🏢 {fornNome} {data.isBoleto && '(B)'}</span>
+                                 <span>{data.qtd}x</span>
                              </div>
                          ))}
                       </div>

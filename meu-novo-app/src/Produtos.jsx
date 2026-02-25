@@ -187,7 +187,7 @@ export default function Produtos() {
                       <option value="Avulsos">🛒 Avulsos</option>
                       <option value="Folhagens">🌿 Folhagens</option>
                       <option value="Caixaria">📦 Caixaria</option>
-                      <option value="BRADISBA">🍟 BRADISBA</option>
+                      <option value="BRADISBA">🧄 BRADISBA</option>
                       <option value="POTY COCOS">🥥 POTY COCOS</option>
                       <option value="MEGA">🧅 MEGA</option>
                     </select>
