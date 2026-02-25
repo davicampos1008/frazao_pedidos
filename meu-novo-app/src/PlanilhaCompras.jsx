@@ -16,8 +16,12 @@ export default function PlanilhaCompras() {
   const [fornecedoresBd, setFornecedoresBd] = useState([]);
   const [lojasBd, setLojasBd] = useState([]);
   
+  // ESTADO DA ABA "RESUMO ITENS"
   const [listaGeralItens, setListaGeralItens] = useState([]);
   const [itemResumoExpandido, setItemResumoExpandido] = useState(null);
+
+  // 💡 ESTADO PARA IMPRESSÃO DO RESUMO
+  const [modoImpressaoResumo, setModoImpressaoResumo] = useState(false);
 
   const [itemModal, setItemModal] = useState(null);
   const [abaModal, setAbaModal] = useState('completo'); 
@@ -34,11 +38,20 @@ export default function PlanilhaCompras() {
   const [copiadoGeral, setCopiadoGeral] = useState(null);
   const [copiadoLoja, setCopiadoLoja] = useState(null);
   
-  // Destaque visual
   const [fornecedorDestaque, setFornecedorDestaque] = useState(null);
 
   const hoje = new Date().toLocaleDateString('en-CA');
   const dataBr = new Date().toLocaleDateString('pt-BR');
+
+  // Garante que o html2pdf esteja carregado
+  useEffect(() => {
+    if (!window.html2pdf) {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      script.async = true;
+      document.head.appendChild(script);
+    }
+  }, []);
 
   const extrairNum = (valor) => {
     const num = String(valor || "").match(/\d+/);
@@ -48,8 +61,9 @@ export default function PlanilhaCompras() {
   const tratarPrecoNum = (p) => parseFloat(String(p || '0').replace('R$', '').trim().replaceAll('.', '').replace(',', '.')) || 0;
   const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+  // 💡 TRAVA ANTI-TELA BRANCA NO FORMATADOR DE NOME
   const formatarNomeItem = (str) => {
-    if (!str) return '';
+    if (!str || typeof str !== 'string') return 'Sem Nome';
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
   };
 
@@ -155,7 +169,7 @@ export default function PlanilhaCompras() {
                  }
 
                  const valNum = tratarPrecoNum(baseVal);
-                 const baseValFormatado = valNum > 0 ? formatarMoeda(valNum) : baseVal; // Garante padrão visual
+                 const baseValFormatado = valNum > 0 ? formatarMoeda(valNum) : baseVal; 
                  
                  const qtdCobradaForn = Math.max(0, p.qtd_atendida - qtdBonifFornecedor);
                  const totalItemFornCobrado = qtdCobradaForn * valNum;
@@ -169,7 +183,6 @@ export default function PlanilhaCompras() {
                      mapaForn[fNome].lojas[nomeLoja] = { nome: nomeLoja, placa: placaFinal, totalLoja: 0, itens: [] };
                  }
 
-                 // Compara o número, evita bug de formato de R$ do banco
                  const idxItemForn = mapaForn[fNome].lojas[nomeLoja].itens.findIndex(i => 
                     i.nome === nomeProdutoUpper && i.isBoleto === isBoleto && tratarPrecoNum(i.valor_unit) === valNum
                  );
@@ -353,7 +366,6 @@ export default function PlanilhaCompras() {
     await Promise.all(promessas);
     if (pedidosParaClonar.length > 0) await supabase.from('pedidos').insert(pedidosParaClonar);
     
-    // 💡 SUCESSO: Alerta qual fornecedor deve receber a mensagem
     const nomeFornLimpo = dadosCompra.fornecedor.toUpperCase();
     setFornecedorDestaque(nomeFornLimpo);
     setAbaAtiva('fornecedores');
@@ -421,10 +433,37 @@ export default function PlanilhaCompras() {
      carregarDados();
   };
 
-  const desfazerCompra = async (idPedido) => {
-    setCarregando(true);
-    await supabase.from('pedidos').update({ fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, status_compra: 'pendente' }).eq('id', idPedido);
-    carregarDados();
+  // 💡 GERA PDF DO RESUMO DOS ITENS COMPRADOS/PENDENTES
+  const exportarResumoItens = async () => {
+     const elemento = document.getElementById('area-impressao-resumo');
+     if (!elemento) return;
+
+     const opt = {
+       margin:       [10, 10, 15, 10], 
+       filename:     `Resumo_Compras_${dataBr.replace(/\//g, '-')}.pdf`,
+       image:        { type: 'jpeg', quality: 0.98 },
+       html2canvas:  { scale: 2, useCORS: true, logging: false },
+       jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+     };
+
+     if (!window.html2pdf) {
+       alert("Aguarde, carregando biblioteca PDF...");
+       return;
+     }
+
+     setCarregando(true);
+     setModoImpressaoResumo(true);
+     
+     setTimeout(async () => {
+         try {
+            await window.html2pdf().set(opt).from(document.getElementById('area-impressao-resumo')).save();
+         } catch (e) {
+            console.error("Erro ao gerar PDF", e);
+         } finally {
+            setModoImpressaoResumo(false);
+            setCarregando(false);
+         }
+     }, 1000);
   };
 
   const gerarPedidoGeral = (f, btnId) => {
@@ -474,8 +513,8 @@ export default function PlanilhaCompras() {
        msg += `\nValor bruto = ${formatarMoeda(f.totalBruto)}\n`;
     }
 
-    // 💡 NOVO FORMATO TOTAL
     msg += `\n- TOTAL = ${formatarMoeda(f.totalGeral)}`;
+    msg += `\n\n${placaBase} - ${complemento}`;
 
     navigator.clipboard.writeText(msg);
     setCopiadoGeral(btnId);
@@ -535,6 +574,62 @@ export default function PlanilhaCompras() {
     </div>
   );
 
+  // 💡 MODO IMPRESSÃO PDF: RESUMO DOS ITENS
+  if (modoImpressaoResumo) {
+      return (
+          <div style={{ backgroundColor: '#fff', minHeight: '100vh', padding: '0', fontFamily: 'Arial, sans-serif' }}>
+              <div id="area-impressao-resumo" style={{ width: '100%', maxWidth: '800px', margin: '0 auto', padding: '15px' }}>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid black', paddingBottom: '10px', marginBottom: '20px' }}>
+                      <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '900', textTransform: 'uppercase' }}>RESUMO DE ITENS</h2>
+                      <div style={{ textAlign: 'right' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 'bold', display: 'block' }}>DATA: {dataBr}</span>
+                      </div>
+                  </div>
+
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                          <tr style={{ backgroundColor: '#e5e7eb', borderBottom: '2px solid black' }}>
+                              <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px', border: '1px solid black', width: '35%' }}>PRODUTO</th>
+                              <th style={{ padding: '8px', textAlign: 'center', fontSize: '12px', border: '1px solid black', width: '15%' }}>PEDIDO LOJAS</th>
+                              <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px', border: '1px solid black', width: '50%' }}>FORNECEDORES (Qtd entregue)</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {listaGeralItens.map((item, idx) => {
+                              let corLinha = 'black';
+                              if (item.isFaltaTotal) corLinha = '#64748b'; // Cinza 
+                              else if (item.total_comprado === 0) corLinha = '#ef4444'; // Vermelho
+                              else if (item.total_comprado < item.total_solicitado) corLinha = '#d97706'; // Laranja
+                              else corLinha = '#166534'; // Verde
+
+                              return (
+                                  <tr key={idx}>
+                                      <td style={{ padding: '8px', border: '1px solid black', fontSize: '12px', fontWeight: 'bold', color: corLinha, textDecoration: item.isFaltaTotal ? 'line-through' : 'none' }}>
+                                          {formatarNomeItem(item.nome)}
+                                      </td>
+                                      <td style={{ padding: '8px', border: '1px solid black', fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}>
+                                          {item.total_solicitado} {item.unidade}
+                                      </td>
+                                      <td style={{ padding: '8px', border: '1px solid black', fontSize: '11px', color: '#333' }}>
+                                          {Object.keys(item.fornecedores_comprados).length === 0 ? (
+                                              <span style={{ color: '#ef4444', fontWeight: 'bold' }}>PENDENTE / FALTA</span>
+                                          ) : (
+                                              Object.entries(item.fornecedores_comprados).map(([forn, q]) => (
+                                                  <div key={forn}><b>{q}x</b> - {forn}</div>
+                                              ))
+                                          )}
+                                      </td>
+                                  </tr>
+                              );
+                          })}
+                      </tbody>
+                  </table>
+              </div>
+          </div>
+      );
+  }
+
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Processando...</div>;
 
   return (
@@ -558,6 +653,7 @@ export default function PlanilhaCompras() {
         </div>
       </div>
 
+      {/* ABAS DE NAVEGAÇÃO COMPLETA */}
       <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', overflowX: 'auto', paddingBottom: '5px' }}>
         <button onClick={() => setAbaAtiva('pendentes')} style={{ flexShrink: 0, padding: '15px 20px', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '12px', cursor: 'pointer', backgroundColor: abaAtiva === 'pendentes' ? '#f97316' : '#fff', color: abaAtiva === 'pendentes' ? '#fff' : '#64748b' }}>
           📋 PENDENTES ({demandas.length})
@@ -647,12 +743,30 @@ export default function PlanilhaCompras() {
               const expandido = fornExpandido === f.nome;
               const temAlerta = f.precisaRefazer;
               
+              // 💡 FAZ O CARD PISCAR VERDE SE FOI O ÚLTIMO EDITADO (Para o cara achar rápido)
+              const recemEditado = f.nome === fornecedorDestaque;
+              
+              let estiloBorda = '6px solid #111';
+              let iconeTopo = '';
+              let corH3 = '#111';
+
+              if (temAlerta) {
+                  estiloBorda = '6px solid #ef4444';
+                  iconeTopo = '⚠️ ALERTA';
+                  corH3 = '#ef4444';
+              } else if (recemEditado) {
+                  estiloBorda = '6px solid #22c55e';
+                  iconeTopo = '🟢 NOVO PEDIDO';
+                  corH3 = '#16a34a';
+              }
+
               return (
-                <div key={idx} style={{ backgroundColor: '#fff', borderRadius: '20px', padding: '20px', boxShadow: '0 5px 15px rgba(0,0,0,0.05)', borderTop: temAlerta ? '6px solid #ef4444' : (f.nome === fornecedorDestaque ? '6px solid #22c55e' : '6px solid #111') }}>
+                <div key={idx} style={{ backgroundColor: '#fff', borderRadius: '20px', padding: '20px', boxShadow: '0 5px 15px rgba(0,0,0,0.05)', borderTop: estiloBorda, transition: '0.3s' }}>
                   
                   <div onClick={() => setFornExpandido(expandido ? null : f.nome)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-                    <h3 style={{ margin: 0, fontSize: '16px', color: temAlerta ? '#ef4444' : '#111', textTransform: 'uppercase' }}>
-                       🏢 {f.nome} {temAlerta && '⚠️'} {f.nome === fornecedorDestaque && '🟢 NOVO'}
+                    <h3 style={{ margin: 0, fontSize: '16px', color: corH3, textTransform: 'uppercase', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                       🏢 {f.nome} 
+                       {iconeTopo && <span style={{fontSize: '10px', background: temAlerta ? '#fef2f2' : '#dcfce7', padding: '4px 8px', borderRadius: '6px', color: temAlerta ? '#ef4444' : '#166534'}}>{iconeTopo}</span>}
                     </h3>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                       <strong style={{ color: '#22c55e', fontSize: '18px' }}>{formatarMoeda(f.totalGeral)}</strong>
@@ -663,12 +777,13 @@ export default function PlanilhaCompras() {
                   {expandido && (
                     <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9' }}>
                       
+                      {/* 💡 ALERTA DE MODIFICAÇÃO VINDO DO FECHAMENTO */}
                       {temAlerta && (
                          <div style={{ backgroundColor: '#fef2f2', border: '1px dashed #ef4444', padding: '15px', borderRadius: '12px', marginBottom: '20px' }}>
                             <strong style={{ color: '#ef4444', fontSize: '12px', display: 'block', marginBottom: '5px' }}>🚨 ATENÇÃO: PEDIDO MODIFICADO NO FECHAMENTO!</strong>
                             <p style={{ fontSize: '11px', color: '#991b1b', margin: '0 0 10px 0' }}>
-                               Os itens a seguir foram desfeitos, marcados como falta ou tiveram preço alterado nas lojas. Eles <b>voltaram para a aba de PENDENTES</b>:
-                               <br/><b>{f.alertas.join(', ')}</b>
+                               Os itens a seguir foram desfeitos, marcados como falta ou tiveram preço alterado nas lojas. Eles <b>voltaram para a aba de PENDENTES</b> e o total deste fornecedor já foi reduzido:
+                               <br/><br/><b>{f.alertas.join(', ')}</b>
                             </p>
                             <button onClick={() => limparAlertaFornecedor(f.nome)} style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', width: '100%' }}>
                                ✅ CIENTE (Omitir Alerta)
@@ -747,14 +862,20 @@ export default function PlanilhaCompras() {
         </div>
       )}
 
-      {/* ABA 4 NOVA: LISTA RESUMO DE ITENS CONSOLIDADA */}
+      {/* 💡 ABA 4 NOVA: LISTA RESUMO DE ITENS CONSOLIDADA */}
       {abaAtiva === 'lista_fornecedores' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
           
-          <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '10px 15px', display: 'flex', gap: '10px', border: '1px solid #e2e8f0' }}>
-            <span>🔍</span><input placeholder="Buscar produto..." value={buscaFornList} onChange={e => setBuscaFornList(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
+          <div style={{ display: 'flex', gap: '10px' }}>
+              <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '10px 15px', display: 'flex', gap: '10px', border: '1px solid #e2e8f0', flex: 1 }}>
+                <span>🔍</span><input placeholder="Buscar produto..." value={buscaFornList} onChange={e => setBuscaFornList(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
+              </div>
+              <button onClick={exportarResumoItens} style={{ background: '#111', color: '#fff', border: 'none', padding: '0 20px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
+                  📥 GERAR PDF
+              </button>
           </div>
 
+          {/* 💡 LEGENDA DE CORES */}
           <div style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'center', fontSize: '11px', fontWeight: 'bold' }}>
              <span style={{ color: '#16a34a' }}>🟢 Comprado 100%</span>
              <span style={{ color: '#ef4444' }}>🔴 Falta Comprar (Pendente)</span>
@@ -814,6 +935,7 @@ export default function PlanilhaCompras() {
                       </div>
                     </div>
 
+                    {/* EXPANSÃO COM DETALHES DOS FORNECEDORES */}
                     {cardExpandido && Object.keys(item.fornecedores_comprados || {}).length > 0 && (
                       <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: `1px dashed ${corBorda}` }}>
                          <span style={{ fontSize: '10px', fontWeight: 'bold', color: corTexto, opacity: 0.8, display: 'block', marginBottom: '8px' }}>COMPRADO COM:</span>
