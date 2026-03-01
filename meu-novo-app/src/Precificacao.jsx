@@ -180,7 +180,39 @@ export default function Precificacao() {
       const { data: prodData } = await supabase.from('produtos').select('*').limit(5000).order('nome', { ascending: true });
       const { data: fornData } = await supabase.from('fornecedores').select('*').limit(5000).order('nome_fantasia', { ascending: true });
       
-      if (prodData) setProdutos(prodData);
+      if (prodData) {
+        // 💡 AUTO-CORREÇÃO DE NOVOS PRODUTOS (Garante que caiam em Pendentes)
+        const produtosProntos = prodData.map(p => {
+          const isZer = !p.preco || p.preco === '0' || p.preco === '0,00' || String(p.preco).trim() === 'R$ 0,00' || String(p.preco).trim() === 'R$0,00';
+          const semForn = !p.fornecedor || String(p.fornecedor).trim() === '';
+          
+          let novoStatus = p.status_cotacao;
+          let novoPreco = p.preco;
+          let atualizou = false;
+
+          // Se for produto novo sem status, ou ativo mas faltando dados, joga pra pendente
+          if (!novoStatus || (novoStatus === 'ativo' && (isZer || semForn))) {
+             novoStatus = 'pendente';
+             atualizou = true;
+          }
+
+          // Padroniza o preço nulo/zerado
+          if (!novoPreco || novoPreco === '0' || String(novoPreco).trim() === '') {
+            novoPreco = 'R$ 0,00';
+            atualizou = true;
+          }
+
+          if (atualizou) {
+            // Conserta o erro de fábrica direto no banco silenciosamente
+            supabase.from('produtos').update({ status_cotacao: novoStatus, preco: novoPreco }).eq('id', p.id).then();
+            return { ...p, status_cotacao: novoStatus, preco: novoPreco };
+          }
+          return p;
+        });
+
+        setProdutos(produtosProntos);
+      }
+      
       if (fornData) setFornecedoresBd(fornData);
     } catch (error) { console.error("Erro VIRTUS:", error); } 
     finally { setCarregando(false); }
@@ -218,8 +250,8 @@ export default function Precificacao() {
         preco: 'R$ 0,00',
         fornecedor: '',
         promocao: false,
-        novidade: false,
-        // foto_url: '' <-- REMOVIDO PARA MANTER AS FOTOS
+        novidade: false
+        // Foto intocada
       };
     });
 
@@ -237,7 +269,7 @@ export default function Precificacao() {
     }
 
     if (!deuErro) {
-      alert("✅ Cotação Zerada! Preços e etiquetas limpos, fotos preservadas."); 
+      alert("✅ Cotação Zerada! Preços limpos, fotos preservadas."); 
       carregarDados(); 
       setAbaAtiva('pendentes');
     } else {
