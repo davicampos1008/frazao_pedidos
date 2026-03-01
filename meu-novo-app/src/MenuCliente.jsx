@@ -50,7 +50,6 @@ export default function MenuCliente({ usuario, tema }) {
   const [precosLiberados, setPrecosLiberados] = useState(false);
   const [buscaMenu, setBuscaMenu] = useState('');
   
-  // 💡 ANTIVÍRUS DO CARRINHO (Impede dados corrompidos)
   const [carrinho, setCarrinho] = useState(() => {
     try {
       const salvo = localStorage.getItem('carrinho_virtus');
@@ -103,9 +102,15 @@ export default function MenuCliente({ usuario, tema }) {
 
   const produtosCarregadosRef = useRef(false);
   const dataUltimoCarregamento = useRef(0);
+  
+  // 💡 TRAVA DO RADAR (Evita o erro do LockManager)
+  const enviandoRef = useRef(false);
 
+  // 💡 FORÇA A APLICAÇÃO DO TEMA NO FUNDO GLOBAL
   useEffect(() => {
     document.body.style.backgroundColor = configDesign.cores.fundoGeral;
+    document.documentElement.style.backgroundColor = configDesign.cores.fundoGeral;
+    
     const handleInstall = (e) => { e.preventDefault(); setDeferredPrompt(e); };
     window.addEventListener('beforeinstallprompt', handleInstall);
     return () => window.removeEventListener('beforeinstallprompt', handleInstall);
@@ -138,11 +143,21 @@ export default function MenuCliente({ usuario, tema }) {
     if ("Notification" in window) setPermissaoPush(Notification.permission);
   }, []);
 
+  // 💡 LÓGICA DE CLIQUE INTELIGENTE NA NOTIFICAÇÃO
   const lidarComCliqueNotificacao = useCallback((msg) => {
     if (!produtos.length) return;
-    const nomeProduto = msg.match(/"([^"]+)"/) || msg.match(/PROMOÇÃO: (.*?) por/);
-    if (nomeProduto && nomeProduto[1]) {
-      const prod = produtos.find(p => p.nome.toLowerCase().includes(nomeProduto[1].toLowerCase()));
+    
+    // Tenta encontrar o nome entre aspas, ou após palavras-chave
+    let termoBusca = null;
+    const matchAspas = msg.match(/"([^"]+)"/);
+    if (matchAspas) termoBusca = matchAspas[1];
+    else {
+      const matchPalavra = msg.match(/PROMOÇÃO:\s*(.*?)\s*por/i) || msg.match(/Chegou\s*(.*?)!/i) || msg.match(/item\s*(.*?)\s*subiu/i);
+      if (matchPalavra) termoBusca = matchPalavra[1];
+    }
+
+    if (termoBusca) {
+      const prod = produtos.find(p => p.nome.toLowerCase().includes(termoBusca.toLowerCase().trim()));
       if (prod) {
         setModalNotificacoesAberto(false);
         setProdutoExpandido(prod);
@@ -194,6 +209,9 @@ export default function MenuCliente({ usuario, tema }) {
   };
 
   const carregarDados = useCallback(async (silencioso = false) => {
+    // 💡 Se estiver enviando pedido, aborta o carregamento para evitar colisão do LockManager
+    if (enviandoRef.current) return;
+
     const agora = Date.now();
     if (silencioso && agora - dataUltimoCarregamento.current < 8000) return;
     dataUltimoCarregamento.current = agora;
@@ -231,7 +249,6 @@ export default function MenuCliente({ usuario, tema }) {
     return () => clearInterval(radar);
   }, [carregarDados]);
 
-  // Filtra carrinho seguro em tempo real para não renderizar lixo
   const carrinhoSeguro = carrinho.filter(i => i && typeof i === 'object' && i.id && i.nome);
   const valorTotalCarrinho = carrinhoSeguro.reduce((acc, item) => acc + (Number(item.total) || 0), 0);
   const edicaoLiberadaBD = listaEnviadaHoje?.some(item => item.liberado_edicao === true);
@@ -285,17 +302,22 @@ export default function MenuCliente({ usuario, tema }) {
     }
   };
 
+  // 💡 FUNÇÃO DE ENVIO BLINDADA CONTRA O ERRO DE LOCKMANAGER
   const confirmarEnvio = async () => {
     const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
     if (!codLoja) return alert("🚨 ERRO: Seu usuário não tem uma Loja vinculada.");
 
     setEnviandoPedido(true);
+    enviandoRef.current = true; // Trava o radar para não colidir no Supabase
+    
     try {
       await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
+      
       const dadosParaEnviar = carrinhoSeguro.map(item => ({
         loja_id: codLoja, nome_usuario: usuario?.nome || "Operador", nome_produto: item.nome, quantidade: item.quantidade || 1,
         unidade_medida: item.unidade_medida || 'UN', data_pedido: hoje, solicitou_refazer: false, liberado_edicao: false, status_compra: 'pendente' 
       }));
+      
       const { error } = await supabase.from('pedidos').insert(dadosParaEnviar);
       if (error) throw error;
 
@@ -304,11 +326,23 @@ export default function MenuCliente({ usuario, tema }) {
       setModalRevisaoAberto(false); 
       setModalCarrinhoAberto(false); 
       setModoVisualizacao(false);
+      
+      enviandoRef.current = false;
       await carregarDados(false); 
       window.scrollTo(0,0);
       mostrarNotificacao("🚀 LISTA ENVIADA COM SUCESSO!", 'sucesso');
-    } catch (err) { alert("Erro ao gravar: " + err.message); } 
-    finally { setEnviandoPedido(false); }
+      
+    } catch (err) { 
+      // Se for o erro do LockManager, dá um aviso amigável e pede para tentar de novo
+      if (err.message?.includes('LockManager')) {
+        alert("O sistema estava atualizando os produtos. Por favor, clique em CONFIRMAR novamente agora.");
+      } else {
+        alert("Erro ao gravar: " + err.message); 
+      }
+    } finally { 
+      setEnviandoPedido(false); 
+      enviandoRef.current = false;
+    }
   };
 
   const pedirParaEditar = async () => {
@@ -560,25 +594,22 @@ export default function MenuCliente({ usuario, tema }) {
         </div>
       )}
 
-      {/* 🛑 AQUI ESTAVA O ERRO DE TELA BRANCA NO CELULAR - AGORA BLINDADO 🛑 */}
+      {/* MODAL CARRINHO (BLINDADO CONTRA TELA BRANCA) */}
       {modalCarrinhoAberto && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', minHeight: '100dvh', backgroundColor: configDesign.cores.fundoCards, zIndex: 99999, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: configDesign.cores.fundoCards, zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ margin: 0, fontWeight: '900', color: configDesign.cores.textoForte }}>Meu Carrinho</h2>
             <button onClick={() => { setModalCarrinhoAberto(false); setItemEditandoId(null); }} style={{ border: 'none', background: configDesign.cores.inputFundo, borderRadius: '50%', width: '40px', height: '40px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>✕</button>
           </div>
           
-          <div style={{ flex: 1, overflowY: 'auto', padding: '20px', paddingBottom: '100px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
             {carrinhoSeguro.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '50px 20px', color: configDesign.cores.textoSuave, fontWeight: 'bold' }}>
                 Seu carrinho está vazio.
               </div>
             ) : (
-              carrinhoSeguro.map((item, index) => {
-                if (!item || !item.id) return null;
-                // Chave corrigida: removi o Math.random que quebrava a tela do celular
-                return (
-                <div key={`cart-${item.id}-${index}`} style={{ padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              carrinhoSeguro.map((item) => (
+                <div key={item.id} style={{ padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   {itemEditandoId === item.id ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
                        <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>-</button>
@@ -597,12 +628,12 @@ export default function MenuCliente({ usuario, tema }) {
                   )}
                   {itemEditandoId !== item.id && ( <button onClick={() => setCarrinho(carrinhoSeguro.filter(i => i.id !== item.id))} style={{ color: configDesign.cores.alerta, border: 'none', background: 'none', fontWeight: 'bold', padding: '10px' }}>Remover</button> )}
                 </div>
-              )})
+              ))
             )}
           </div>
 
           <div style={{ padding: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral }}>
-            <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: isEscuro ? '#450a0a' : '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900', marginBottom: '15px' }}>🗑️ ESVAZIAR CARRINHO</button>
+            {carrinhoSeguro.length > 0 && <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: isEscuro ? '#450a0a' : '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900', marginBottom: '15px' }}>🗑️ ESVAZIAR CARRINHO</button>}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontWeight: '900', fontSize: '18px', color: configDesign.cores.textoForte }}><span>Total Estimado:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
             <button onClick={() => { if(carrinhoSeguro.length > 0) setModalRevisaoAberto(true); }} style={{ width: '100%', padding: '22px', background: carrinhoSeguro.length > 0 ? configDesign.cores.textoForte : configDesign.cores.borda, color: configDesign.cores.fundoGeral, borderRadius: '18px', fontWeight: '900', fontSize: '15px', border: 'none' }}>REVISAR E ENVIAR</button>
           </div>
@@ -611,25 +642,23 @@ export default function MenuCliente({ usuario, tema }) {
 
       {/* MODAL REVISÃO */}
       {modalRevisaoAberto && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', minHeight: '100dvh', backgroundColor: configDesign.cores.fundoGeral, zIndex: 99999, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <h3 style={{marginTop: 0, marginBottom: 0, textAlign: 'center', fontWeight: '900', color: configDesign.cores.textoForte}}>Confirmação do Pedido</h3>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
-              {carrinhoSeguro.map((item, i) => (
-                  <div key={`rev-${item.id}-${i}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 0', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
-                      <div>
-                        <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item?.quantidade, item?.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
-                        <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item?.valorUnit)} / {item?.unidade_medida || 'UN'}</div>
-                      </div>
-                      <span style={{fontWeight: 'bold', color: configDesign.cores.textoSuave}}>{formatarMoeda(item?.total)}</span>
-                  </div>
-              ))}
-          </div>
-          <div style={{ padding: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoCards }}>
-             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '25px', fontWeight: '900', fontSize: '20px', color: configDesign.cores.textoForte }}><span>TOTAL FINAL:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
-             <button onClick={confirmarEnvio} disabled={enviandoPedido} style={{ width: '100%', padding: '20px', background: configDesign.cores.sucesso, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '16px' }}>{enviandoPedido ? 'ENVIANDO...' : 'CONFIRMAR ENVIO'}</button>
-             <button onClick={() => setModalRevisaoAberto(false)} style={{ width: '100%', background: 'none', border: 'none', marginTop: '15px', color: configDesign.cores.textoSuave, fontWeight: 'bold' }}>Voltar e editar carrinho</button>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+          <div style={{ backgroundColor: configDesign.cores.fundoCards, width: '100%', maxWidth: '400px', borderRadius: '28px', padding: '30px', display: 'flex', flexDirection: 'column', maxHeight: '80vh' }}>
+            <h3 style={{marginTop: 0, textAlign: 'center', fontWeight: '900', color: configDesign.cores.textoForte}}>Confirmação do Pedido</h3>
+            <div style={{ flex: 1, overflowY: 'auto', marginBottom: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, borderBottom: `1px solid ${configDesign.cores.borda}`, padding: '10px 0' }}>
+                {carrinhoSeguro.map((item, i) => (
+                    <div key={`rev-${item.id}-${i}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
+                        <div>
+                          <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item?.quantidade, item?.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
+                          <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item?.valorUnit)} / {item?.unidade_medida || 'UN'}</div>
+                        </div>
+                        <span style={{fontWeight: 'bold', color: configDesign.cores.textoSuave}}>{formatarMoeda(item?.total)}</span>
+                    </div>
+                ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '25px', fontWeight: '900', fontSize: '20px', color: configDesign.cores.textoForte }}><span>TOTAL FINAL:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
+            <button onClick={confirmarEnvio} disabled={enviandoPedido} style={{ width: '100%', padding: '20px', background: configDesign.cores.sucesso, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '16px' }}>{enviandoPedido ? 'ENVIANDO...' : 'CONFIRMAR ENVIO'}</button>
+            <button onClick={() => setModalRevisaoAberto(false)} style={{ background: 'none', border: 'none', marginTop: '15px', color: configDesign.cores.textoSuave, fontWeight: 'bold' }}>Voltar e editar carrinho</button>
           </div>
         </div>
       )}
