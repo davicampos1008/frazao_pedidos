@@ -171,10 +171,17 @@ export default function Precificacao() {
   const [formModal, setFormModal] = useState({ preco: '', fornecedor: '', status: 'pendente', promocao: false, novidade: false, fotos_novas: [], unidade: 'UN' });
   const [fazendoUpload, setFazendoUpload] = useState(false);
 
-  useEffect(() => { carregarDados(); }, []);
+  // 💡 RADAR DE ATUALIZAÇÃO CONTÍNUA (Atualiza a tela sozinho a cada 10 segundos para buscar novos produtos)
+  useEffect(() => { 
+    carregarDados(); 
+    const radar = setInterval(() => {
+      carregarDados(true);
+    }, 10000);
+    return () => clearInterval(radar);
+  }, []);
 
-  async function carregarDados() {
-    setCarregando(true);
+  async function carregarDados(silencioso = false) {
+    if (!silencioso) setCarregando(true);
     try {
       const { data: configData } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
       const { data: prodData } = await supabase.from('produtos').select('*').limit(5000).order('nome', { ascending: true });
@@ -190,20 +197,20 @@ export default function Precificacao() {
           let novoPreco = p.preco;
           let atualizou = false;
 
-          // Se for produto novo sem status, ou ativo mas faltando dados, joga pra pendente
-          if (!novoStatus || (novoStatus === 'ativo' && (isZer || semForn))) {
+          // Se for produto novo (vazio/nulo) ou se for "ativo" mas estiver faltando preço ou fornecedor, força para pendente!
+          if (!novoStatus || String(novoStatus).trim() === '' || (novoStatus === 'ativo' && (isZer || semForn))) {
              novoStatus = 'pendente';
              atualizou = true;
           }
 
-          // Padroniza o preço nulo/zerado
+          // Padroniza qualquer "vazio" para a string do preço zerado
           if (!novoPreco || novoPreco === '0' || String(novoPreco).trim() === '') {
             novoPreco = 'R$ 0,00';
             atualizou = true;
           }
 
           if (atualizou) {
-            // Conserta o erro de fábrica direto no banco silenciosamente
+            // Conserta o erro de fábrica direto no banco silenciosamente sem o usuário ver
             supabase.from('produtos').update({ status_cotacao: novoStatus, preco: novoPreco }).eq('id', p.id).then();
             return { ...p, status_cotacao: novoStatus, preco: novoPreco };
           }
@@ -215,7 +222,7 @@ export default function Precificacao() {
       
       if (fornData) setFornecedoresBd(fornData);
     } catch (error) { console.error("Erro VIRTUS:", error); } 
-    finally { setCarregando(false); }
+    finally { if (!silencioso) setCarregando(false); }
   }
 
   const isZerado = (preco) => !preco || preco === '0' || preco === '0,00' || String(preco).trim() === 'R$ 0,00' || String(preco).trim() === 'R$0,00';
@@ -251,7 +258,6 @@ export default function Precificacao() {
         fornecedor: '',
         promocao: false,
         novidade: false
-        // Foto intocada
       };
     });
 
