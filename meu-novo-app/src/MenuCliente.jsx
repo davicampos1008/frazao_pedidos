@@ -39,7 +39,6 @@ export default function MenuCliente({ usuario, tema }) {
   const primeiroNome = (usuario?.nome || 'Cliente').split(' ')[0];
   const nomeLojaLimpo = (usuario?.loja || 'Matriz').replace(/^\d+\s*-\s*/, '').trim();
   
-  // 💡 CÓDIGO DA LOJA FIXADO (Evita o loop infinito do React)
   const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
 
   const categoriasDinamicas = [
@@ -116,7 +115,6 @@ export default function MenuCliente({ usuario, tema }) {
     return () => window.removeEventListener('beforeinstallprompt', handleInstall);
   }, [configDesign.cores.fundoGeral]);
 
-  // Alerta de senha corrigido para rodar só quando o usuário loga
   useEffect(() => {
     if (usuario?.senha === '123456' || usuario?.senha === codLoja?.toString()) {
       const timer = setTimeout(() => {
@@ -199,12 +197,10 @@ export default function MenuCliente({ usuario, tema }) {
     return `${qFinal} ${u}S`;
   };
 
-  // 💡 CARREGAMENTO INTELIGENTE (Trava o loop infinito)
   const carregarDados = useCallback(async (silencioso = false) => {
     if (enviandoRef.current) return;
 
     const agora = Date.now();
-    // Bloqueio de segurança: impede recarregamentos múltiplos dentro de 2 segundos.
     if (agora - dataUltimoCarregamento.current < 2000) return;
     if (silencioso && agora - dataUltimoCarregamento.current < 8000) return;
     
@@ -231,13 +227,12 @@ export default function MenuCliente({ usuario, tema }) {
 
       if (codLoja) {
         const { data: pedidoExistente, error: errPed } = await supabase.from('pedidos').select('*').eq('data_pedido', hoje).eq('loja_id', codLoja);
-        // Só atualiza se não der erro de rede, para não zerar a tela sem querer
         if (!errPed) {
           setListaEnviadaHoje(pedidoExistente?.length > 0 ? pedidoExistente : null);
         }
       }
     } catch (e) { console.error("Erro VIRTUS:", e); }
-  }, [codLoja, hoje]); // <-- Dependências corrigidas para não ficar regerando a função
+  }, [codLoja, hoje]); 
 
   useEffect(() => { carregarDados(); }, [carregarDados]);
   useEffect(() => {
@@ -298,12 +293,11 @@ export default function MenuCliente({ usuario, tema }) {
     }
   };
 
-  // 💡 ENVIO OTIMIZADO (Sem o bug de tela branca)
   const confirmarEnvio = async () => {
     if (!codLoja) return alert("🚨 ERRO: Seu usuário não tem uma Loja vinculada.");
 
     setEnviandoPedido(true);
-    enviandoRef.current = true; // Trava o radar!
+    enviandoRef.current = true; 
     
     try {
       const dadosParaEnviar = carrinhoSeguro.map(item => ({
@@ -315,7 +309,6 @@ export default function MenuCliente({ usuario, tema }) {
       const { error } = await supabase.from('pedidos').insert(dadosParaEnviar);
       if (error) throw error;
 
-      // 1. MUDA A TELA INSTANTANEAMENTE PARA O CLIENTE
       setListaEnviadaHoje(dadosParaEnviar); 
       setCarrinho([]); 
       localStorage.removeItem('carrinho_virtus');
@@ -325,7 +318,6 @@ export default function MenuCliente({ usuario, tema }) {
       window.scrollTo(0,0);
       mostrarNotificacao("🚀 LISTA ENVIADA COM SUCESSO!", 'sucesso');
       
-      // 2. Tira a trava para o banco de dados respirar
       enviandoRef.current = false;
     } catch (err) { 
       if (err.message?.includes('LockManager')) {
@@ -343,7 +335,6 @@ export default function MenuCliente({ usuario, tema }) {
     if(!window.confirm("Pedir ao administrador para liberar a edição da lista?")) return;
     try {
         await supabase.from('pedidos').update({ solicitou_refazer: true }).eq('data_pedido', hoje).eq('loja_id', codLoja);
-        // Atualiza a tela instantaneamente
         setListaEnviadaHoje(prev => prev.map(item => ({...item, solicitou_refazer: true})));
         mostrarNotificacao("✅ Solicitação enviada! Aguardando aprovação.", 'sucesso');
     } catch (err) { alert("Erro ao solicitar: " + err.message); }
@@ -498,8 +489,15 @@ export default function MenuCliente({ usuario, tema }) {
       </div>
 
       {carrinhoSeguro.length > 0 && !isAppTravado && (
-        <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer' }}>
+        <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer', transition: configDesign.animacoes.transicaoSuave, transform: navState.show ? 'translateY(0)' : 'translateY(20px)' }}>
           🛒 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.primaria, color: '#fff', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: `2px solid ${configDesign.cores.textoForte}`, fontWeight: 'bold' }}>{carrinhoSeguro.reduce((a,c)=>a+(Number(c?.quantidade)||0),0)}</span>
+        </button>
+      )}
+
+      {/* NOVO: BOTÃO DE VOLTAR PARA O PEDIDO ENVIADO (MODO VISUALIZAÇÃO) */}
+      {modoVisualizacao && listaEnviadaHoje && (
+        <button onClick={() => setModoVisualizacao(false)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.sucesso, color: '#fff', border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer', transition: configDesign.animacoes.transicaoSuave, transform: navState.show ? 'translateY(0)' : 'translateY(20px)' }}>
+          📝 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.textoForte, color: '#fff', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: `2px solid ${configDesign.cores.sucesso}`, fontWeight: 'bold' }}>✓</span>
         </button>
       )}
 
