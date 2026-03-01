@@ -200,7 +200,7 @@ export default function Precificacao() {
   const qtdPendentes = listas.pendentes.length;
 
   const zerarCotacao = async () => {
-    if (!window.confirm("🚨 TEM CERTEZA?\nIsso vai apagar os preços atuais e jogar todos os itens para Pendentes (exceto os protegidos como Mantidos).")) return;
+    if (!window.confirm("🚨 TEM CERTEZA?\nIsso vai apagar os preços atuais, promoções e novidades, mas manterá as FOTOS. Todos os itens irão para Pendentes.")) return;
     
     setCarregando(true);
     await supabase.from('configuracoes').update({ precos_liberados: false }).eq('id', 1);
@@ -219,7 +219,7 @@ export default function Precificacao() {
         fornecedor: '',
         promocao: false,
         novidade: false,
-        foto_url: ''
+        // foto_url: '' <-- REMOVIDO PARA MANTER AS FOTOS
       };
     });
 
@@ -237,7 +237,7 @@ export default function Precificacao() {
     }
 
     if (!deuErro) {
-      alert("✅ Cotação Zerada! A memória dos preços passados foi guardada."); 
+      alert("✅ Cotação Zerada! Preços e etiquetas limpos, fotos preservadas."); 
       carregarDados(); 
       setAbaAtiva('pendentes');
     } else {
