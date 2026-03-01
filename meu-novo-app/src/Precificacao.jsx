@@ -171,7 +171,7 @@ export default function Precificacao() {
   const [formModal, setFormModal] = useState({ preco: '', fornecedor: '', status: 'pendente', promocao: false, novidade: false, fotos_novas: [], unidade: 'UN' });
   const [fazendoUpload, setFazendoUpload] = useState(false);
 
-  // 💡 RADAR DE ATUALIZAÇÃO CONTÍNUA (Atualiza a tela sozinho a cada 10 segundos para buscar novos produtos)
+  // Auto Refresh a cada 10 segundos
   useEffect(() => { 
     carregarDados(); 
     const radar = setInterval(() => {
@@ -183,43 +183,10 @@ export default function Precificacao() {
   async function carregarDados(silencioso = false) {
     if (!silencioso) setCarregando(true);
     try {
-      const { data: configData } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
       const { data: prodData } = await supabase.from('produtos').select('*').limit(5000).order('nome', { ascending: true });
       const { data: fornData } = await supabase.from('fornecedores').select('*').limit(5000).order('nome_fantasia', { ascending: true });
       
-      if (prodData) {
-        // 💡 AUTO-CORREÇÃO DE NOVOS PRODUTOS (Garante que caiam em Pendentes)
-        const produtosProntos = prodData.map(p => {
-          const isZer = !p.preco || p.preco === '0' || p.preco === '0,00' || String(p.preco).trim() === 'R$ 0,00' || String(p.preco).trim() === 'R$0,00';
-          const semForn = !p.fornecedor || String(p.fornecedor).trim() === '';
-          
-          let novoStatus = p.status_cotacao;
-          let novoPreco = p.preco;
-          let atualizou = false;
-
-          // Se for produto novo (vazio/nulo) ou se for "ativo" mas estiver faltando preço ou fornecedor, força para pendente!
-          if (!novoStatus || String(novoStatus).trim() === '' || (novoStatus === 'ativo' && (isZer || semForn))) {
-             novoStatus = 'pendente';
-             atualizou = true;
-          }
-
-          // Padroniza qualquer "vazio" para a string do preço zerado
-          if (!novoPreco || novoPreco === '0' || String(novoPreco).trim() === '') {
-            novoPreco = 'R$ 0,00';
-            atualizou = true;
-          }
-
-          if (atualizou) {
-            // Conserta o erro de fábrica direto no banco silenciosamente sem o usuário ver
-            supabase.from('produtos').update({ status_cotacao: novoStatus, preco: novoPreco }).eq('id', p.id).then();
-            return { ...p, status_cotacao: novoStatus, preco: novoPreco };
-          }
-          return p;
-        });
-
-        setProdutos(produtosProntos);
-      }
-      
+      if (prodData) setProdutos(prodData);
       if (fornData) setFornecedoresBd(fornData);
     } catch (error) { console.error("Erro VIRTUS:", error); } 
     finally { if (!silencioso) setCarregando(false); }
@@ -238,6 +205,52 @@ export default function Precificacao() {
 
   const qtdPendentes = listas.pendentes.length;
 
+  // 💡 NOVO: REVISAR ITENS (Busca itens esquecidos e recém cadastrados)
+  const revisarItensOcultos = async () => {
+    setCarregando(true);
+    try {
+      const { data: todos } = await supabase.from('produtos').select('*');
+      if (!todos) return;
+
+      let loteUpdates = [];
+      const novaLista = todos.map(p => {
+        const zerado = isZerado(p.preco);
+        let mudar = false;
+
+        // Regra 1: Preço zerado (e NÃO é intencional "sem_preco")
+        if (zerado && p.status_cotacao !== 'sem_preco') mudar = true;
+        // Regra 2: Status "falta" (vermelho) - Volta pra pendente pra ser precificado
+        if (p.status_cotacao === 'falta') mudar = true;
+        // Regra 3: Produto novo sem status
+        if (!p.status_cotacao || String(p.status_cotacao).trim() === '') mudar = true;
+
+        if (mudar) {
+          const objAtualizado = { ...p, status_cotacao: 'pendente', preco: 'R$ 0,00' };
+          loteUpdates.push(objAtualizado);
+          return objAtualizado;
+        }
+        return p;
+      });
+
+      if (loteUpdates.length > 0) {
+        // Envia para o banco em lotes para não travar
+        for (let i = 0; i < loteUpdates.length; i += 50) {
+          const lote = loteUpdates.slice(i, i + 50);
+          await supabase.from('produtos').upsert(lote);
+        }
+        alert(`✅ REVISÃO CONCLUÍDA!\nForam encontrados ${loteUpdates.length} produtos escondidos ou recém cadastrados. Eles foram movidos para a aba PENDENTES.`);
+        setProdutos(novaLista);
+      } else {
+        alert("✔️ Tudo certo! Não há nenhum item escondido ou recém cadastrado que precise de revisão.");
+      }
+      setAbaAtiva('pendentes');
+    } catch (err) {
+      alert("Erro na revisão: " + err.message);
+    } finally {
+      setCarregando(false);
+    }
+  };
+
   const zerarCotacao = async () => {
     if (!window.confirm("🚨 TEM CERTEZA?\nIsso vai apagar os preços atuais, promoções e novidades, mas manterá as FOTOS. Todos os itens irão para Pendentes.")) return;
     
@@ -246,10 +259,7 @@ export default function Precificacao() {
 
     const payloadGeral = produtos.map(p => {
       if (p.status_cotacao === 'mantido') {
-        return { 
-          id: p.id, 
-          status_cotacao: 'pendente'
-        };
+        return { id: p.id, status_cotacao: 'pendente' };
       }
       return {
         id: p.id,
@@ -300,7 +310,6 @@ export default function Precificacao() {
     setProdutos(prev => prev.map(p => p.id === id ? { ...p, ...payload } : p));
   };
 
-  // --- LÓGICA DO MODAL DE EDIÇÃO ---
   const abrirEdicaoCompleta = (produto) => {
     setProdModal(produto);
     setFormModal({
@@ -346,7 +355,6 @@ export default function Precificacao() {
   };
 
   const salvarModal = async () => {
-    // 💡 FORMATADOR DE MOEDA DO MODAL COMPLETO
     let v = String(formModal.preco || '').replace(/\./g, ',').replace(/[^\d,]/g, '').trim();
     let precoFinal = 'R$ 0,00';
     if (v) {
@@ -418,14 +426,19 @@ export default function Precificacao() {
       {/* 🎛️ HEADER DE COMANDO */}
       <div style={{ backgroundColor: '#111', padding: '25px', borderRadius: '24px', color: 'white', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
         
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '24px', fontWeight: '900' }}>💲 PRECIFICAÇÃO</h2>
             <p style={{ margin: '5px 0 0 0', color: '#94a3b8', fontSize: '13px' }}>Faltam <strong style={{color: '#ef4444', fontSize: '16px'}}>{qtdPendentes}</strong> itens.</p>
           </div>
-          <button onClick={zerarCotacao} style={{ background: '#333', color: '#ef4444', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
-            🗑️ ZERAR COTAÇÃO
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <button onClick={revisarItensOcultos} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', boxShadow: '0 4px 10px rgba(59,130,246,0.3)' }}>
+              🔄 REVISAR ITENS
+            </button>
+            <button onClick={zerarCotacao} style={{ background: '#333', color: '#ef4444', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
+              🗑️ ZERAR COTAÇÃO
+            </button>
+          </div>
         </div>
 
         <button onClick={finalizarCotacao} style={{ width: '100%', backgroundColor: '#22c55e', color: 'white', border: 'none', padding: '18px', borderRadius: '16px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 4px 15px rgba(34,197,94,0.3)' }}>
