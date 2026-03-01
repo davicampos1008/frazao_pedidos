@@ -50,13 +50,21 @@ export default function MenuCliente({ usuario, tema }) {
   const [precosLiberados, setPrecosLiberados] = useState(false);
   const [buscaMenu, setBuscaMenu] = useState('');
   
-  // 💡 GARANTIA DE INTEGRIDADE DO CARRINHO
+  // 💡 ANTIVÍRUS DE MEMÓRIA: Limpa itens corrompidos salvos em celulares
   const [carrinho, setCarrinho] = useState(() => {
     try {
       const salvo = localStorage.getItem('carrinho_virtus');
-      const parseado = salvo ? JSON.parse(salvo) : [];
-      return Array.isArray(parseado) ? parseado : [];
-    } catch (e) { return []; }
+      if (!salvo) return [];
+      const parseado = JSON.parse(salvo);
+      if (!Array.isArray(parseado)) return [];
+      
+      // Filtra apenas itens válidos (Evita tela branca)
+      const carrinhoLimpo = parseado.filter(item => item && typeof item === 'object' && item.id && item.nome);
+      return carrinhoLimpo;
+    } catch (e) { 
+      localStorage.removeItem('carrinho_virtus');
+      return []; 
+    }
   });
 
   const [produtoExpandido, setProdutoExpandido] = useState(null);
@@ -171,7 +179,6 @@ export default function MenuCliente({ usuario, tema }) {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // 💡 BLINDAGEM MATEMÁTICA (Impede travamento do carrinho por valores nulos)
   const tratarPreco = (p) => parseFloat(String(p || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
   
   const formatarMoeda = (v) => {
@@ -250,7 +257,7 @@ export default function MenuCliente({ usuario, tema }) {
     const itemEx = carrinho.find(i => i.id === produtoExpandido.id);
     
     if (itemEx) {
-      setCarrinho(carrinho.map(i => i.id === produtoExpandido.id ? { ...i, quantidade: qtdFinal, total: valorTotalItem } : i));
+      setCarrinho(carrinho.map(i => i.id === produtoExpandido.id ? { ...i, quantidade: qtdFinal, total: valorTotalItem, valorUnit: vUnit } : i));
     } else {
       setCarrinho([...carrinho, { ...produtoExpandido, quantidade: qtdFinal, valorUnit: vUnit, total: valorTotalItem }]);
     }
@@ -463,9 +470,9 @@ export default function MenuCliente({ usuario, tema }) {
         </button>
       )}
 
-      {/* MODAL DE CONFIGURAÇÕES GERAIS */}
+      {/* MODAL CONFIG GERAIS */}
       {modalConfiguracoesAberto && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 6500, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 6500, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
           <div style={{ background: configDesign.cores.fundoCards, width: '100%', maxWidth: '320px', borderRadius: '25px', padding: '25px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ margin: 0, color: configDesign.cores.textoForte }}>Configurações</h3>
@@ -479,7 +486,7 @@ export default function MenuCliente({ usuario, tema }) {
 
       {/* MODAL TROCA DE SENHA */}
       {modalSenhaAberto && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 7000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 7000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
           <div style={{ background: configDesign.cores.fundoCards, width: '100%', maxWidth: '350px', borderRadius: '25px', padding: '30px' }}>
             <h3 style={{ marginTop: 0, textAlign: 'center', color: configDesign.cores.textoForte, marginBottom: '20px' }}>Alterar Senha</h3>
             <div style={{ marginBottom: '15px' }}>
@@ -507,7 +514,7 @@ export default function MenuCliente({ usuario, tema }) {
 
       {/* MODAL PRODUTO */}
       {produtoExpandido && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
            <button onClick={() => setProdutoExpandido(null)} style={{ alignSelf: 'flex-end', margin: '20px', color: '#fff', fontSize: '28px', background: 'none', border: 'none' }}>✕</button>
            <div style={{ flex: 1, backgroundImage: `url(${(produtoExpandido.foto_url || '').split(',')[0]})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', margin: '20px' }} />
            <div style={{ backgroundColor: configDesign.cores.fundoCards, padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px' }}>
@@ -549,59 +556,65 @@ export default function MenuCliente({ usuario, tema }) {
 
       {/* MODAL CARRINHO */}
       {modalCarrinhoAberto && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: configDesign.cores.fundoCards, zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: configDesign.cores.fundoCards, zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ margin: 0, fontWeight: '900', color: configDesign.cores.textoForte }}>Meu Carrinho</h2>
             <button onClick={() => { setModalCarrinhoAberto(false); setItemEditandoId(null); }} style={{ border: 'none', background: configDesign.cores.inputFundo, borderRadius: '50%', width: '40px', height: '40px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>✕</button>
           </div>
-          <div style={{ padding: '10px 20px' }}>
-            <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: isEscuro ? '#450a0a' : '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900' }}>🗑️ ESVAZIAR CARRINHO</button>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px' }}>
-            {carrinho.map(item => {
-              if (!item) return null;
-              return (
-              <div key={item.id || Math.random()} style={{ padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                {itemEditandoId === item.id ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-                     <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>-</button>
-                     <input type="number" value={item.quantidade || 1} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
-                     <button onClick={() => alterarQtdCart(item.id, 1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>+</button>
-                     <button onClick={() => setItemEditandoId(null)} style={{marginLeft: 'auto', background: configDesign.cores.sucesso, color: 'white', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold'}}>OK</button>
-                  </div>
-                ) : (
-                  <div onClick={() => setItemEditandoId(item.id)} style={{ cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: '10px' }}>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria, fontSize: '15px'}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
-                      <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'} • Toque para editar</div>
-                    </div>
-                    <div style={{ fontWeight: '900', color: configDesign.cores.textoForte, fontSize: '14px' }}>{formatarMoeda(item.total)}</div>
-                  </div>
-                )}
-                {itemEditandoId !== item.id && ( <button onClick={() => setCarrinho(carrinho.filter(i => i.id !== item.id))} style={{ color: configDesign.cores.alerta, border: 'none', background: 'none', fontWeight: 'bold', padding: '10px' }}>Remover</button> )}
+          
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+            {carrinho.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '50px 20px', color: configDesign.cores.textoSuave, fontWeight: 'bold' }}>
+                Seu carrinho está vazio.
               </div>
-            )})}
+            ) : (
+              carrinho.map(item => {
+                if (!item) return null;
+                return (
+                <div key={item.id || Math.random()} style={{ padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  {itemEditandoId === item.id ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                       <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>-</button>
+                       <input type="number" value={item.quantidade || 1} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
+                       <button onClick={() => alterarQtdCart(item.id, 1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>+</button>
+                       <button onClick={() => setItemEditandoId(null)} style={{marginLeft: 'auto', background: configDesign.cores.sucesso, color: 'white', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold'}}>OK</button>
+                    </div>
+                  ) : (
+                    <div onClick={() => setItemEditandoId(item.id)} style={{ cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: '10px' }}>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria, fontSize: '15px'}}>{formatarQtdUnidade(item?.quantidade, item?.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
+                        <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item?.valorUnit)} / {item?.unidade_medida || 'UN'} • Toque para editar</div>
+                      </div>
+                      <div style={{ fontWeight: '900', color: configDesign.cores.textoForte, fontSize: '14px' }}>{formatarMoeda(item?.total)}</div>
+                    </div>
+                  )}
+                  {itemEditandoId !== item.id && ( <button onClick={() => setCarrinho(carrinho.filter(i => i.id !== item.id))} style={{ color: configDesign.cores.alerta, border: 'none', background: 'none', fontWeight: 'bold', padding: '10px' }}>Remover</button> )}
+                </div>
+              )})
+            )}
           </div>
+
           <div style={{ padding: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral }}>
+            <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: isEscuro ? '#450a0a' : '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900', marginBottom: '15px' }}>🗑️ ESVAZIAR CARRINHO</button>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontWeight: '900', fontSize: '18px', color: configDesign.cores.textoForte }}><span>Total Estimado:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
-            <button onClick={() => setModalRevisaoAberto(true)} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, borderRadius: '18px', fontWeight: '900', fontSize: '15px', border: 'none' }}>REVISAR E ENVIAR</button>
+            <button onClick={() => { if(carrinho.length > 0) setModalRevisaoAberto(true); }} style={{ width: '100%', padding: '22px', background: carrinho.length > 0 ? configDesign.cores.textoForte : configDesign.cores.borda, color: configDesign.cores.fundoGeral, borderRadius: '18px', fontWeight: '900', fontSize: '15px', border: 'none' }}>REVISAR E ENVIAR</button>
           </div>
         </div>
       )}
 
       {/* MODAL REVISÃO */}
       {modalRevisaoAberto && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
           <div style={{ backgroundColor: configDesign.cores.fundoCards, width: '100%', maxWidth: '400px', borderRadius: '28px', padding: '30px', display: 'flex', flexDirection: 'column', maxHeight: '80vh' }}>
             <h3 style={{marginTop: 0, textAlign: 'center', fontWeight: '900', color: configDesign.cores.textoForte}}>Confirmação do Pedido</h3>
             <div style={{ flex: 1, overflowY: 'auto', marginBottom: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, borderBottom: `1px solid ${configDesign.cores.borda}`, padding: '10px 0' }}>
                 {carrinho.map((item, i) => (
                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
                         <div>
-                          <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
-                          <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'}</div>
+                          <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item?.quantidade, item?.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
+                          <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item?.valorUnit)} / {item?.unidade_medida || 'UN'}</div>
                         </div>
-                        <span style={{fontWeight: 'bold', color: configDesign.cores.textoSuave}}>{formatarMoeda(item.total)}</span>
+                        <span style={{fontWeight: 'bold', color: configDesign.cores.textoSuave}}>{formatarMoeda(item?.total)}</span>
                     </div>
                 ))}
             </div>
