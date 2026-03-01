@@ -50,10 +50,12 @@ export default function MenuCliente({ usuario, tema }) {
   const [precosLiberados, setPrecosLiberados] = useState(false);
   const [buscaMenu, setBuscaMenu] = useState('');
   
+  // 💡 GARANTIA DE INTEGRIDADE DO CARRINHO
   const [carrinho, setCarrinho] = useState(() => {
     try {
       const salvo = localStorage.getItem('carrinho_virtus');
-      return salvo ? JSON.parse(salvo) : [];
+      const parseado = salvo ? JSON.parse(salvo) : [];
+      return Array.isArray(parseado) ? parseado : [];
     } catch (e) { return []; }
   });
 
@@ -76,14 +78,16 @@ export default function MenuCliente({ usuario, tema }) {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   
   const [historicoNotificacoes, setHistoricoNotificacoes] = useState(() => {
-    const salvo = localStorage.getItem('historico_notif_virtus');
-    return salvo ? JSON.parse(salvo) : [];
+    try {
+      const salvo = localStorage.getItem('historico_notif_virtus');
+      const parseado = salvo ? JSON.parse(salvo) : [];
+      return Array.isArray(parseado) ? parseado : [];
+    } catch (e) { return []; }
   });
+
   const [modalNotificacoesAberto, setModalNotificacoesAberto] = useState(false);
   const [modalConfigNotifAberto, setModalConfigNotifAberto] = useState(false);
-  const [configNotif, setConfigNotif] = useState({
-    precos: true, edicao: true, promocoes: true, novidades: true
-  });
+  const [configNotif, setConfigNotif] = useState({ precos: true, edicao: true, promocoes: true, novidades: true });
   
   const [modalConfiguracoesAberto, setModalConfiguracoesAberto] = useState(false);
   const [modalSenhaAberto, setModalSenhaAberto] = useState(false);
@@ -92,7 +96,6 @@ export default function MenuCliente({ usuario, tema }) {
   const [erroSenha, setErroSenha] = useState('');
   const [carregandoSenha, setCarregandoSenha] = useState(false);
 
-  // useRefs de controle para evitar re-render desnecessário
   const produtosCarregadosRef = useRef(false);
   const dataUltimoCarregamento = useRef(0);
 
@@ -105,7 +108,9 @@ export default function MenuCliente({ usuario, tema }) {
 
   useEffect(() => {
     if (usuario?.senha === '123456' || usuario?.senha === usuario?.codigo_loja?.toString()) {
-      alert("⚠️ Aviso de Segurança: Detectamos que você está usando uma senha padrão. Por favor, clique na engrenagem no topo da tela e altere sua senha para proteger sua conta.");
+      setTimeout(() => {
+        alert("⚠️ Aviso de Segurança: Detectamos que você está usando uma senha padrão. Por favor, clique na engrenagem no topo da tela e altere sua senha para proteger sua conta.");
+      }, 1500);
     }
   }, [usuario]);
 
@@ -166,20 +171,25 @@ export default function MenuCliente({ usuario, tema }) {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // 💡 BLINDAGEM MATEMÁTICA (Impede travamento do carrinho por valores nulos)
   const tratarPreco = (p) => parseFloat(String(p || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
-  const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
-  const formatarQtdUnidade = (qtd, und) => {
-    const u = (und || 'UN').toUpperCase();
-    if (qtd <= 1 || ['UN', 'KG'].includes(u)) return `${qtd} ${u}`;
-    if (u === 'MAÇO') return `${qtd} MAÇOS`;
-    if (u === 'SACO') return `${qtd} SACOS`;
-    return `${qtd} ${u}S`;
+  
+  const formatarMoeda = (v) => {
+    const num = Number(v);
+    return (isNaN(num) ? 0 : num).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
 
-  // 💡 FUNÇÃO DE CARREGAMENTO OTIMIZADA
+  const formatarQtdUnidade = (qtd, und) => {
+    const u = String(und || 'UN').toUpperCase();
+    const q = Number(qtd);
+    const qFinal = isNaN(q) ? 1 : q;
+    if (qFinal <= 1 || ['UN', 'KG'].includes(u)) return `${qFinal} ${u}`;
+    if (u === 'MAÇO') return `${qFinal} MAÇOS`;
+    if (u === 'SACO') return `${qFinal} SACOS`;
+    return `${qFinal} ${u}S`;
+  };
+
   const carregarDados = useCallback(async (silencioso = false) => {
-    // Impede chamadas simultâneas excessivas
     const agora = Date.now();
     if (silencioso && agora - dataUltimoCarregamento.current < 8000) return;
     dataUltimoCarregamento.current = agora;
@@ -188,7 +198,6 @@ export default function MenuCliente({ usuario, tema }) {
       const { data: configData } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
       if (configData) setPrecosLiberados(configData.precos_liberados);
 
-      // Só carrega produtos e banners se for a primeira vez
       if (!produtosCarregadosRef.current) {
         const { data: dbBanners } = await supabase.from('banners').select('*');
         if (dbBanners) {
@@ -204,7 +213,6 @@ export default function MenuCliente({ usuario, tema }) {
         }
       }
 
-      // Sempre verifica pedidos do dia
       const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
       if (codLoja) {
         const { data: pedidoExistente } = await supabase.from('pedidos').select('*').eq('data_pedido', hoje).eq('loja_id', codLoja);
@@ -214,14 +222,12 @@ export default function MenuCliente({ usuario, tema }) {
   }, [usuario, hoje]);
 
   useEffect(() => { carregarDados(); }, [carregarDados]);
-  
-  // 💡 O radar agora é mais calmo (20 segundos) e não trava a tela
   useEffect(() => {
     const radar = setInterval(() => carregarDados(true), 20000);
     return () => clearInterval(radar);
   }, [carregarDados]);
 
-  const valorTotalCarrinho = carrinho.reduce((acc, item) => acc + (item.total || 0), 0);
+  const valorTotalCarrinho = carrinho.reduce((acc, item) => acc + (Number(item?.total) || 0), 0);
   const edicaoLiberadaBD = listaEnviadaHoje?.some(item => item.liberado_edicao === true);
   const isAppTravado = !precosLiberados || (listaEnviadaHoje && !edicaoLiberadaBD);
 
@@ -254,8 +260,8 @@ export default function MenuCliente({ usuario, tema }) {
   const alterarQtdCart = (id, delta) => {
     setCarrinho(prev => prev.map(item => {
       if (item.id === id) {
-        const novaQtd = Math.max(1, item.quantidade + delta);
-        return { ...item, quantidade: novaQtd, total: novaQtd * item.valorUnit };
+        const novaQtd = Math.max(1, (Number(item.quantidade) || 0) + delta);
+        return { ...item, quantidade: novaQtd, total: novaQtd * (Number(item.valorUnit) || 0) };
       }
       return item;
     }));
@@ -263,7 +269,7 @@ export default function MenuCliente({ usuario, tema }) {
 
   const alterarQtdCartInput = (id, valor) => {
     const novaQtd = parseInt(valor, 10) || 1;
-    setCarrinho(prev => prev.map(item => item.id === id ? { ...item, quantidade: novaQtd, total: novaQtd * item.valorUnit } : item));
+    setCarrinho(prev => prev.map(item => item.id === id ? { ...item, quantidade: novaQtd, total: novaQtd * (Number(item.valorUnit) || 0) } : item));
   };
 
   const confirmarEnvio = async () => {
@@ -272,33 +278,24 @@ export default function MenuCliente({ usuario, tema }) {
 
     setEnviandoPedido(true);
     try {
-      // Deleta primeiro
       await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
-      
-      // Prepara e insere
       const dadosParaEnviar = carrinho.map(item => ({
-        loja_id: codLoja, nome_usuario: usuario?.nome || "Operador", nome_produto: item.nome, quantidade: item.quantidade,
+        loja_id: codLoja, nome_usuario: usuario?.nome || "Operador", nome_produto: item.nome, quantidade: item.quantidade || 1,
         unidade_medida: item.unidade_medida || 'UN', data_pedido: hoje, solicitou_refazer: false, liberado_edicao: false, status_compra: 'pendente' 
       }));
       const { error } = await supabase.from('pedidos').insert(dadosParaEnviar);
       if (error) throw error;
 
-      // Limpa tudo
       setCarrinho([]); 
       localStorage.removeItem('carrinho_virtus');
       setModalRevisaoAberto(false); 
       setModalCarrinhoAberto(false); 
       setModoVisualizacao(false);
-      
-      // Força a atualização da tela na marra para mostrar sucesso
       await carregarDados(false); 
       window.scrollTo(0,0);
       mostrarNotificacao("🚀 LISTA ENVIADA COM SUCESSO!", 'sucesso');
-    } catch (err) { 
-        alert("Erro ao gravar: " + err.message); 
-    } finally { 
-        setEnviandoPedido(false); 
-    }
+    } catch (err) { alert("Erro ao gravar: " + err.message); } 
+    finally { setEnviandoPedido(false); }
   };
 
   const pedirParaEditar = async () => {
@@ -351,7 +348,6 @@ export default function MenuCliente({ usuario, tema }) {
     } catch (err) { setErroSenha(err.message); } finally { setCarregandoSenha(false); }
   };
 
-  // --- TELA DE SUCESSO ---
   if (listaEnviadaHoje && !modoVisualizacao) {
     const aguardandoLiberacao = listaEnviadaHoje.some(item => item.solicitou_refazer === true);
     const edicaoLiberada = listaEnviadaHoje.some(item => item.liberado_edicao === true);
@@ -385,7 +381,6 @@ export default function MenuCliente({ usuario, tema }) {
     );
   }
 
-  // --- RENDERIZAÇÃO NORMAL ---
   return (
     <div style={{ width: '100%', minHeight: '100vh', backgroundColor: configDesign.cores.fundoGeral, fontFamily: configDesign.geral.fontePadrao, paddingBottom: '100px' }}>
       
@@ -464,11 +459,11 @@ export default function MenuCliente({ usuario, tema }) {
 
       {carrinho.length > 0 && !isAppTravado && (
         <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer' }}>
-          🛒 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.primaria, color: '#fff', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: `2px solid ${configDesign.cores.textoForte}`, fontWeight: 'bold' }}>{carrinho.reduce((a,c)=>a+c.quantidade,0)}</span>
+          🛒 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.primaria, color: '#fff', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: `2px solid ${configDesign.cores.textoForte}`, fontWeight: 'bold' }}>{carrinho.reduce((a,c)=>a+(Number(c?.quantidade)||0),0)}</span>
         </button>
       )}
 
-      {/* MODAL CONFIG GERAIS */}
+      {/* MODAL DE CONFIGURAÇÕES GERAIS */}
       {modalConfiguracoesAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 6500, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
           <div style={{ background: configDesign.cores.fundoCards, width: '100%', maxWidth: '320px', borderRadius: '25px', padding: '25px' }}>
@@ -552,7 +547,7 @@ export default function MenuCliente({ usuario, tema }) {
         </div>
       )}
 
-      {/* MODAL CARRINHO E REVISÃO */}
+      {/* MODAL CARRINHO */}
       {modalCarrinhoAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: configDesign.cores.fundoCards, zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -563,19 +558,21 @@ export default function MenuCliente({ usuario, tema }) {
             <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: isEscuro ? '#450a0a' : '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900' }}>🗑️ ESVAZIAR CARRINHO</button>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px' }}>
-            {carrinho.map(item => (
-              <div key={item.id} style={{ padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {carrinho.map(item => {
+              if (!item) return null;
+              return (
+              <div key={item.id || Math.random()} style={{ padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 {itemEditandoId === item.id ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
                      <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>-</button>
-                     <input type="number" value={item.quantidade} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
+                     <input type="number" value={item.quantidade || 1} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
                      <button onClick={() => alterarQtdCart(item.id, 1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>+</button>
                      <button onClick={() => setItemEditandoId(null)} style={{marginLeft: 'auto', background: configDesign.cores.sucesso, color: 'white', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold'}}>OK</button>
                   </div>
                 ) : (
                   <div onClick={() => setItemEditandoId(item.id)} style={{ cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: '10px' }}>
                     <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria, fontSize: '15px'}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item.nome}</span>
+                      <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria, fontSize: '15px'}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
                       <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'} • Toque para editar</div>
                     </div>
                     <div style={{ fontWeight: '900', color: configDesign.cores.textoForte, fontSize: '14px' }}>{formatarMoeda(item.total)}</div>
@@ -583,15 +580,16 @@ export default function MenuCliente({ usuario, tema }) {
                 )}
                 {itemEditandoId !== item.id && ( <button onClick={() => setCarrinho(carrinho.filter(i => i.id !== item.id))} style={{ color: configDesign.cores.alerta, border: 'none', background: 'none', fontWeight: 'bold', padding: '10px' }}>Remover</button> )}
               </div>
-            ))}
+            )})}
           </div>
           <div style={{ padding: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontWeight: '900', fontSize: '18px', color: configDesign.cores.textoForte }}><span>Total Estimado:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
-            <button onClick={() => setModalRevisaoAberto(true)} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, borderRadius: '18px', fontWeight: '900', fontSize: '15px' }}>REVISAR E ENVIAR</button>
+            <button onClick={() => setModalRevisaoAberto(true)} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, borderRadius: '18px', fontWeight: '900', fontSize: '15px', border: 'none' }}>REVISAR E ENVIAR</button>
           </div>
         </div>
       )}
 
+      {/* MODAL REVISÃO */}
       {modalRevisaoAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
           <div style={{ backgroundColor: configDesign.cores.fundoCards, width: '100%', maxWidth: '400px', borderRadius: '28px', padding: '30px', display: 'flex', flexDirection: 'column', maxHeight: '80vh' }}>
@@ -600,7 +598,7 @@ export default function MenuCliente({ usuario, tema }) {
                 {carrinho.map((item, i) => (
                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
                         <div>
-                          <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item.nome}</span>
+                          <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item.quantidade, item.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
                           <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item.valorUnit)} / {item.unidade_medida || 'UN'}</div>
                         </div>
                         <span style={{fontWeight: 'bold', color: configDesign.cores.textoSuave}}>{formatarMoeda(item.total)}</span>
