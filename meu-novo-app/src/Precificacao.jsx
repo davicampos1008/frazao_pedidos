@@ -2,25 +2,25 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
 // ============================================================================
-// COMPONENTE: LINHA DO PRODUTO (Auto-Save e Memória Automática)
+// COMPONENTE: LINHA DO PRODUTO (Otimizado e Sem Fornecedor)
 // ============================================================================
-const LinhaProduto = ({ produto, abrirModal, aoSalvar, corBorda }) => {
+const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) => {
   const [preco, setPreco] = useState(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
-  const [fornecedor, setFornecedor] = useState(produto.fornecedor || '');
+  const [pesoCaixa, setPesoCaixa] = useState(produto.peso_caixa || '');
   const [statusAviso, setStatusAviso] = useState('');
 
   useEffect(() => {
     setPreco(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
-    setFornecedor(produto.fornecedor || '');
-  }, [produto.preco, produto.fornecedor]);
+    setPesoCaixa(produto.peso_caixa || '');
+  }, [produto.preco, produto.peso_caixa]);
 
-  const dispararAutoSave = async (pValor, fValor, acaoForcada = null) => {
+  const dispararAutoSave = async (pValor, pPesoCaixa, acaoForcada = null) => {
     setStatusAviso('⏳');
     
     // 💡 FORMATADOR INTELIGENTE DE MOEDA (Sempre X,XX)
     let v = String(pValor || '').replace(/[^\d,.]/g, '').trim();
-    if (v.includes('.') && !v.includes(',')) v = v.replace('.', ','); // Aceita se digitar com ponto
-    v = v.replace(/[^\d,]/g, ''); // Limpa tudo que não for número e vírgula
+    if (v.includes('.') && !v.includes(',')) v = v.replace('.', ','); 
+    v = v.replace(/[^\d,]/g, ''); 
     
     let precoFinal = 'R$ 0,00';
     if (v) {
@@ -35,33 +35,30 @@ const LinhaProduto = ({ produto, abrirModal, aoSalvar, corBorda }) => {
       precoFinal = `R$ ${inteiro},${decimal}`;
     }
 
-    const fornFinal = String(fValor || '').trim().toUpperCase();
     let statusCalculado = produto.status_cotacao;
 
-    // Lógica inteligente de status
+    // Lógica inteligente de status (Não depende mais do fornecedor)
     if (acaoForcada) {
       statusCalculado = acaoForcada;
     } else {
-      if (precoFinal === 'R$ 0,00' || !fornFinal) {
+      if (precoFinal === 'R$ 0,00') {
         statusCalculado = 'pendente';
       } else {
-        statusCalculado = 'ativo'; // Tem preço e fornecedor = Pronto!
+        statusCalculado = 'ativo'; 
       }
     }
 
     const payload = {
       preco: acaoForcada === 'sem_preco' || acaoForcada === 'falta' ? 'R$ 0,00' : precoFinal,
-      fornecedor: acaoForcada === 'sem_preco' || acaoForcada === 'falta' ? '' : fornFinal,
+      peso_caixa: pPesoCaixa,
       status_cotacao: statusCalculado
     };
 
-    // 💡 MEMÓRIA AUTOMÁTICA: Salva no "Anterior" se for Ativo ou Mantido
     if (statusCalculado === 'ativo' || statusCalculado === 'mantido') {
       payload.preco_anterior = payload.preco;
-      payload.fornecedor_anterior = payload.fornecedor;
     }
 
-    // 1º Atualiza a UI mãe na hora (isso fará o input ser atualizado com o valor formatado bonitinho)
+    // 1º Atualiza a UI na hora
     aoSalvar(produto.id, payload);
 
     // 2º Bate no banco de dados
@@ -76,25 +73,20 @@ const LinhaProduto = ({ produto, abrirModal, aoSalvar, corBorda }) => {
   };
 
   const handleBlur = () => {
-    dispararAutoSave(preco, fornecedor);
+    dispararAutoSave(preco, pesoCaixa);
   };
 
   const acaoRapida = (acao) => {
     if (acao === 'mantido') {
       const pAntigo = produto.preco_anterior && produto.preco_anterior !== 'R$ 0,00' ? produto.preco_anterior.replace('R$ ', '') : '';
-      const fAntigo = produto.fornecedor_anterior || '';
-      if (!fAntigo) return alert("⚠️ Sem fornecedor antigo na memória. Insira manualmente.");
       setPreco(pAntigo);
-      setFornecedor(fAntigo);
-      dispararAutoSave(pAntigo, fAntigo, 'mantido');
+      dispararAutoSave(pAntigo, pesoCaixa, 'mantido');
     } else if (acao === 'sem_preco') {
       setPreco('');
-      setFornecedor('');
-      dispararAutoSave('', '', 'sem_preco');
+      dispararAutoSave('', pesoCaixa, 'sem_preco');
     } else if (acao === 'falta') {
       setPreco('');
-      setFornecedor('');
-      dispararAutoSave('', '', 'falta');
+      dispararAutoSave('', pesoCaixa, 'falta');
     }
   };
 
@@ -117,9 +109,9 @@ const LinhaProduto = ({ produto, abrirModal, aoSalvar, corBorda }) => {
         <div style={{ fontSize: '12px' }}>{statusAviso}</div>
       </div>
 
-      {/* INPUTS DIRETOS */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '10px' }}>
-        <div style={{ position: 'relative' }}>
+      {/* INPUTS DIRETOS OTIMIZADOS */}
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ position: 'relative', flex: 1 }}>
           <span style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8', fontWeight: 'bold', fontSize: '11px' }}>R$</span>
           <input 
             type="text" 
@@ -131,16 +123,22 @@ const LinhaProduto = ({ produto, abrirModal, aoSalvar, corBorda }) => {
             style={{ width: '100%', padding: '10px 10px 10px 30px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', fontWeight: '900', fontSize: '14px', backgroundColor: '#f8fafc', boxSizing: 'border-box' }}
           />
         </div>
-        <input 
-          list="lista-fornecedores"
-          type="text" 
-          value={fornecedor} 
-          onChange={e => setFornecedor(e.target.value)} 
-          onBlur={handleBlur}
-          onKeyDown={e => e.key === 'Enter' && e.target.blur()}
-          placeholder={produto.fornecedor_anterior || "Fornecedor..."}
-          style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', fontWeight: 'bold', fontSize: '13px', backgroundColor: '#f8fafc', boxSizing: 'border-box', textTransform: 'uppercase' }}
-        />
+
+        {/* 💡 SÓ APARECE O PESO DA CAIXA SE O ITEM FOR VENDIDO EM KG */}
+        {produto.unidade_medida === 'KG' && (
+          <div style={{ position: 'relative', width: '100px' }}>
+            <input 
+              type="text" 
+              value={pesoCaixa} 
+              onChange={e => setPesoCaixa(e.target.value)} 
+              onBlur={handleBlur}
+              onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+              placeholder="Ex: 20"
+              style={{ width: '100%', padding: '10px 30px 10px 10px', borderRadius: '8px', border: '1px solid #eab308', outline: 'none', fontWeight: 'bold', fontSize: '14px', backgroundColor: '#fefce8', boxSizing: 'border-box' }}
+            />
+            <span style={{ position: 'absolute', right: '10px', top: '10px', color: '#ca8a04', fontWeight: 'bold', fontSize: '11px' }}>Kg</span>
+          </div>
+        )}
       </div>
 
       {/* BOTÕES RÁPIDOS */}
@@ -152,7 +150,7 @@ const LinhaProduto = ({ produto, abrirModal, aoSalvar, corBorda }) => {
 
     </div>
   );
-};
+});
 
 
 // ============================================================================
@@ -160,18 +158,15 @@ const LinhaProduto = ({ produto, abrirModal, aoSalvar, corBorda }) => {
 // ============================================================================
 export default function Precificacao() {
   const [produtos, setProdutos] = useState([]);
-  const [fornecedoresBd, setFornecedoresBd] = useState([]);
   const [abaAtiva, setAbaAtiva] = useState('pendentes');
   const [busca, setBusca] = useState('');
   const [carregando, setCarregando] = useState(true);
   
-  // Controle do Modal de Edição Completa
   const [modalAberto, setModalAberto] = useState(false);
   const [prodModal, setProdModal] = useState(null);
-  const [formModal, setFormModal] = useState({ preco: '', fornecedor: '', status: 'pendente', promocao: false, novidade: false, fotos_novas: [], unidade: 'UN' });
+  const [formModal, setFormModal] = useState({ preco: '', fornecedor: '', status: 'pendente', promocao: false, novidade: false, fotos_novas: [], unidade: 'UN', peso_caixa: '' });
   const [fazendoUpload, setFazendoUpload] = useState(false);
 
-  // Auto Refresh a cada 10 segundos
   useEffect(() => { 
     carregarDados(); 
     const radar = setInterval(() => {
@@ -183,21 +178,45 @@ export default function Precificacao() {
   async function carregarDados(silencioso = false) {
     if (!silencioso) setCarregando(true);
     try {
-      const { data: prodData } = await supabase.from('produtos').select('*').limit(5000).order('nome', { ascending: true });
-      const { data: fornData } = await supabase.from('fornecedores').select('*').limit(5000).order('nome_fantasia', { ascending: true });
+      const { data: prodData } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
       
-      if (prodData) setProdutos(prodData);
-      if (fornData) setFornecedoresBd(fornData);
+      if (prodData) {
+        const produtosProntos = prodData.map(p => {
+          const isZer = !p.preco || p.preco === '0' || p.preco === '0,00' || String(p.preco).trim() === 'R$ 0,00';
+          let novoStatus = p.status_cotacao;
+          let novoPreco = p.preco;
+          let atualizou = false;
+
+          // Se não é intencional, corrige se estiver vazio ou zerado (ignorando fornecedor agora)
+          if (novoStatus !== 'falta' && novoStatus !== 'sem_preco') {
+            if (!novoStatus || String(novoStatus).trim() === '' || (novoStatus === 'ativo' && isZer)) {
+               novoStatus = 'pendente';
+               atualizou = true;
+            }
+          }
+
+          if (!novoPreco || novoPreco === '0' || String(novoPreco).trim() === '') {
+            novoPreco = 'R$ 0,00';
+            atualizou = true;
+          }
+
+          if (atualizou) {
+            supabase.from('produtos').update({ status_cotacao: novoStatus, preco: novoPreco }).eq('id', p.id).then();
+            return { ...p, status_cotacao: novoStatus, preco: novoPreco };
+          }
+          return p;
+        });
+        setProdutos(produtosProntos);
+      }
     } catch (error) { console.error("Erro VIRTUS:", error); } 
     finally { if (!silencioso) setCarregando(false); }
   }
 
   const isZerado = (preco) => !preco || preco === '0' || preco === '0,00' || String(preco).trim() === 'R$ 0,00' || String(preco).trim() === 'R$0,00';
 
-  // Categorização das Abas
   const listas = {
-    pendentes: produtos.filter(p => p.status_cotacao === 'pendente' || !p.status_cotacao || (p.status_cotacao === 'ativo' && (isZerado(p.preco) || !p.fornecedor))),
-    prontos: produtos.filter(p => p.status_cotacao === 'ativo' && !isZerado(p.preco) && p.fornecedor),
+    pendentes: produtos.filter(p => p.status_cotacao === 'pendente' || !p.status_cotacao || (p.status_cotacao === 'ativo' && isZerado(p.preco))),
+    prontos: produtos.filter(p => p.status_cotacao === 'ativo' && !isZerado(p.preco)),
     mantidos: produtos.filter(p => p.status_cotacao === 'mantido'),
     sem_preco: produtos.filter(p => p.status_cotacao === 'sem_preco'),
     falta: produtos.filter(p => p.status_cotacao === 'falta')
@@ -205,7 +224,7 @@ export default function Precificacao() {
 
   const qtdPendentes = listas.pendentes.length;
 
-  // 💡 NOVO: REVISAR ITENS (Busca itens esquecidos e recém cadastrados)
+  // 💡 BOTÃO REVISAR: Puxa só os que estão como FALTA ou sem preço do banco
   const revisarItensOcultos = async () => {
     setCarregando(true);
     try {
@@ -217,12 +236,12 @@ export default function Precificacao() {
         const zerado = isZerado(p.preco);
         let mudar = false;
 
-        // Regra 1: Preço zerado (e NÃO é intencional "sem_preco")
-        if (zerado && p.status_cotacao !== 'sem_preco') mudar = true;
-        // Regra 2: Status "falta" (vermelho) - Volta pra pendente pra ser precificado
+        // Regra do usuário: Se for novo e caiu como FALTA (vermelho), resgata para pendente!
         if (p.status_cotacao === 'falta') mudar = true;
-        // Regra 3: Produto novo sem status
-        if (!p.status_cotacao || String(p.status_cotacao).trim() === '') mudar = true;
+        // Produto novo sem nenhum status
+        else if (!p.status_cotacao || String(p.status_cotacao).trim() === '') mudar = true;
+        // Preço zerado (exceto se o usuário intencionalmente marcou como "sem_preco")
+        else if (zerado && p.status_cotacao !== 'sem_preco') mudar = true;
 
         if (mudar) {
           const objAtualizado = { ...p, status_cotacao: 'pendente', preco: 'R$ 0,00' };
@@ -233,15 +252,14 @@ export default function Precificacao() {
       });
 
       if (loteUpdates.length > 0) {
-        // Envia para o banco em lotes para não travar
         for (let i = 0; i < loteUpdates.length; i += 50) {
           const lote = loteUpdates.slice(i, i + 50);
           await supabase.from('produtos').upsert(lote);
         }
-        alert(`✅ REVISÃO CONCLUÍDA!\nForam encontrados ${loteUpdates.length} produtos escondidos ou recém cadastrados. Eles foram movidos para a aba PENDENTES.`);
+        alert(`✅ REVISÃO CONCLUÍDA!\nResgatamos ${loteUpdates.length} produtos novos (que estavam vermelhos ou sem status) e os enviamos para a aba PENDENTES.`);
         setProdutos(novaLista);
       } else {
-        alert("✔️ Tudo certo! Não há nenhum item escondido ou recém cadastrado que precise de revisão.");
+        alert("✔️ Tudo certo! Não há produtos perdidos na base de dados.");
       }
       setAbaAtiva('pendentes');
     } catch (err) {
@@ -265,7 +283,6 @@ export default function Precificacao() {
         id: p.id,
         status_cotacao: 'pendente',
         preco: 'R$ 0,00',
-        fornecedor: '',
         promocao: false,
         novidade: false
       };
@@ -295,7 +312,7 @@ export default function Precificacao() {
 
   const finalizarCotacao = async () => {
     if (qtdPendentes > 0) {
-      if (!window.confirm(`⚠️ ATENÇÃO: Você ainda tem ${qtdPendentes} itens PENDENTES sem preço ou fornecedor.\n\nTem certeza que deseja enviar os preços e ABRIR A LOJA para os clientes mesmo assim?`)) return;
+      if (!window.confirm(`⚠️ ATENÇÃO: Você ainda tem ${qtdPendentes} itens PENDENTES sem preço.\n\nTem certeza que deseja enviar os preços e ABRIR A LOJA para os clientes mesmo assim?`)) return;
     }
     
     setCarregando(true);
@@ -303,7 +320,7 @@ export default function Precificacao() {
     setCarregando(false);
     
     if (error) alert("Erro ao liberar loja.");
-    else alert("🚀 LOJA ABERTA! Preços atualizados e disponíveis para os clientes.");
+    else alert("🚀 LOJA ABERTA! Preços atualizados e disponíveis para os clientes instantaneamente.");
   };
 
   const handleAtualizarLista = (id, payload) => {
@@ -314,12 +331,13 @@ export default function Precificacao() {
     setProdModal(produto);
     setFormModal({
       preco: produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '',
-      fornecedor: produto.fornecedor || '',
+      fornecedor: produto.fornecedor || '', // Mantido no modal se quiser usar
       status: produto.status_cotacao || 'pendente',
       promocao: produto.promocao || false,
       novidade: produto.novidade || false,
       fotos_novas: [],
-      unidade: produto.unidade_medida || 'UN'
+      unidade: produto.unidade_medida || 'UN',
+      peso_caixa: produto.peso_caixa || ''
     });
     setModalAberto(true);
   };
@@ -370,11 +388,7 @@ export default function Precificacao() {
     if (formModal.status === 'falta' || formModal.status === 'sem_preco') precoFinal = 'R$ 0,00';
 
     let statusCalc = formModal.status;
-    if (statusCalc === 'pendente' && precoFinal !== 'R$ 0,00' && formModal.fornecedor) statusCalc = 'ativo';
-
-    if ((statusCalc === 'ativo' || statusCalc === 'mantido') && (!formModal.fornecedor.trim())) {
-      return alert("⚠️ É obrigatório informar o Fornecedor.");
-    }
+    if (statusCalc === 'pendente' && precoFinal !== 'R$ 0,00') statusCalc = 'ativo';
 
     const fotosAtuais = prodModal.foto_url ? String(prodModal.foto_url).split(',') : [];
     const qtdFotos = fotosAtuais.length + formModal.fotos_novas.length;
@@ -384,7 +398,7 @@ export default function Precificacao() {
 
     const payload = {
       preco: precoFinal,
-      fornecedor: formModal.status === 'falta' || formModal.status === 'sem_preco' ? '' : formModal.fornecedor.toUpperCase(),
+      peso_caixa: formModal.peso_caixa,
       status_cotacao: statusCalc,
       promocao: formModal.promocao,
       novidade: formModal.novidade,
@@ -394,7 +408,6 @@ export default function Precificacao() {
 
     if (statusCalc === 'ativo' || statusCalc === 'mantido') {
       payload.preco_anterior = payload.preco;
-      payload.fornecedor_anterior = payload.fornecedor;
     }
 
     setCarregando(true);
@@ -419,10 +432,6 @@ export default function Precificacao() {
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px', padding: '10px' }}>
       
-      <datalist id="lista-fornecedores">
-        {fornecedoresBd.map(f => <option key={f.id} value={f.nome_fantasia} />)}
-      </datalist>
-
       {/* 🎛️ HEADER DE COMANDO */}
       <div style={{ backgroundColor: '#111', padding: '25px', borderRadius: '24px', color: 'white', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
         
@@ -433,7 +442,7 @@ export default function Precificacao() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <button onClick={revisarItensOcultos} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', boxShadow: '0 4px 10px rgba(59,130,246,0.3)' }}>
-              🔄 REVISAR ITENS
+              🔄 REVISAR ITENS NOVOS
             </button>
             <button onClick={zerarCotacao} style={{ background: '#333', color: '#ef4444', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
               🗑️ ZERAR COTAÇÃO
@@ -476,8 +485,6 @@ export default function Precificacao() {
            <LinhaProduto 
              key={p.id} 
              produto={p} 
-             abas={CONFIG_ABAS}
-             abaAtiva={abaAtiva}
              corBorda={CONFIG_ABAS.find(a => a.id === p.status_cotacao)?.cor || '#3b82f6'}
              abrirModal={abrirEdicaoCompleta} 
              aoSalvar={handleAtualizarLista} 
@@ -503,15 +510,14 @@ export default function Precificacao() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '25px' }}>
               <button onClick={() => {
                 const pAntigo = prodModal.preco_anterior ? prodModal.preco_anterior.replace('R$ ', '') : '';
-                const fAntigo = prodModal.fornecedor_anterior || '';
-                setFormModal({...formModal, status: 'mantido', preco: pAntigo, fornecedor: fAntigo});
+                setFormModal({...formModal, status: 'mantido', preco: pAntigo});
               }} style={{ padding: '10px', borderRadius: '10px', border: formModal.status === 'mantido' ? '2px solid #eab308' : '1px solid #e2e8f0', background: formModal.status === 'mantido' ? '#fefce8' : '#fff', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer', color: formModal.status === 'mantido' ? '#ca8a04' : '#666' }}>
                 🔒 MANTER
               </button>
-              <button onClick={() => setFormModal({...formModal, status: 'sem_preco', preco: '', fornecedor: ''})} style={{ padding: '10px', borderRadius: '10px', border: formModal.status === 'sem_preco' ? '2px solid #f97316' : '1px solid #e2e8f0', background: formModal.status === 'sem_preco' ? '#fff7ed' : '#fff', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer', color: formModal.status === 'sem_preco' ? '#ea580c' : '#666' }}>
+              <button onClick={() => setFormModal({...formModal, status: 'sem_preco', preco: ''})} style={{ padding: '10px', borderRadius: '10px', border: formModal.status === 'sem_preco' ? '2px solid #f97316' : '1px solid #e2e8f0', background: formModal.status === 'sem_preco' ? '#fff7ed' : '#fff', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer', color: formModal.status === 'sem_preco' ? '#ea580c' : '#666' }}>
                 ⏸️ S/ PREÇO
               </button>
-              <button onClick={() => setFormModal({...formModal, status: 'falta', preco: '', fornecedor: ''})} style={{ padding: '10px', borderRadius: '10px', border: formModal.status === 'falta' ? '2px solid #ef4444' : '1px solid #e2e8f0', background: formModal.status === 'falta' ? '#fef2f2' : '#fff', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer', color: formModal.status === 'falta' ? '#ef4444' : '#666' }}>
+              <button onClick={() => setFormModal({...formModal, status: 'falta', preco: ''})} style={{ padding: '10px', borderRadius: '10px', border: formModal.status === 'falta' ? '2px solid #ef4444' : '1px solid #e2e8f0', background: formModal.status === 'falta' ? '#fef2f2' : '#fff', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer', color: formModal.status === 'falta' ? '#ef4444' : '#666' }}>
                 🚫 FALTA
               </button>
             </div>
@@ -546,16 +552,18 @@ export default function Precificacao() {
                 </select>
               </div>
 
-              <div style={{ flex: 2 }}>
-                <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>FORNECEDOR *</label>
-                <input 
-                  list="lista-fornecedores" type="text" value={formModal.fornecedor} 
-                  placeholder={prodModal.fornecedor_anterior || "Fornecedor..."}
-                  onChange={e => setFormModal({...formModal, fornecedor: e.target.value, status: 'ativo'})} 
-                  disabled={formModal.status === 'falta' || formModal.status === 'sem_preco'}
-                  style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '2px solid #f1f5f9', outline: 'none', fontSize: '14px', boxSizing: 'border-box', textTransform: 'uppercase' }} 
-                />
-              </div>
+              {formModal.unidade === 'KG' && (
+                <div style={{ width: '100px' }}>
+                  <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>CAIXA (Kg)</label>
+                  <input 
+                    type="text" value={formModal.peso_caixa} 
+                    placeholder="Ex: 20"
+                    onChange={e => setFormModal({...formModal, peso_caixa: e.target.value})} 
+                    disabled={formModal.status === 'falta' || formModal.status === 'sem_preco'}
+                    style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '2px solid #fef08a', background: '#fefce8', color: '#ca8a04', outline: 'none', fontSize: '14px', fontWeight: 'bold', boxSizing: 'border-box' }} 
+                  />
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: '15px', marginBottom: '25px', backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px' }}>
