@@ -182,17 +182,14 @@ export default function Precificacao() {
       
       if (prodData) {
         const produtosProntos = prodData.map(p => {
-          const isZer = !p.preco || p.preco === '0' || p.preco === '0,00' || String(p.preco).trim() === 'R$ 0,00';
           let novoStatus = p.status_cotacao;
           let novoPreco = p.preco;
           let atualizou = false;
 
-          // Se não é intencional, corrige se estiver vazio ou zerado (ignorando fornecedor agora)
-          if (novoStatus !== 'falta' && novoStatus !== 'sem_preco') {
-            if (!novoStatus || String(novoStatus).trim() === '' || (novoStatus === 'ativo' && isZer)) {
-               novoStatus = 'pendente';
-               atualizou = true;
-            }
+          // Se for produto virgem de cadastro (sem status), conserta
+          if (!novoStatus || String(novoStatus).trim() === '') {
+             novoStatus = 'pendente';
+             atualizou = true;
           }
 
           if (!novoPreco || novoPreco === '0' || String(novoPreco).trim() === '') {
@@ -215,7 +212,8 @@ export default function Precificacao() {
   const isZerado = (preco) => !preco || preco === '0' || preco === '0,00' || String(preco).trim() === 'R$ 0,00' || String(preco).trim() === 'R$0,00';
 
   const listas = {
-    pendentes: produtos.filter(p => p.status_cotacao === 'pendente' || !p.status_cotacao || (p.status_cotacao === 'ativo' && isZerado(p.preco))),
+    // Pendentes agora são apenas os que não tem status ou estão com o status explicitamente "pendente"
+    pendentes: produtos.filter(p => !p.status_cotacao || p.status_cotacao === 'pendente'),
     prontos: produtos.filter(p => p.status_cotacao === 'ativo' && !isZerado(p.preco)),
     mantidos: produtos.filter(p => p.status_cotacao === 'mantido'),
     sem_preco: produtos.filter(p => p.status_cotacao === 'sem_preco'),
@@ -224,7 +222,7 @@ export default function Precificacao() {
 
   const qtdPendentes = listas.pendentes.length;
 
-  // 💡 BOTÃO REVISAR: Puxa só os que estão como FALTA ou sem preço do banco
+  // 💡 BOTÃO REVISAR: Puxa APENAS os recém cadastrados (em branco) para Pendentes
   const revisarItensOcultos = async () => {
     setCarregando(true);
     try {
@@ -233,21 +231,15 @@ export default function Precificacao() {
 
       let loteUpdates = [];
       const novaLista = todos.map(p => {
-        const zerado = isZerado(p.preco);
-        let mudar = false;
-
-        // Regra do usuário: Se for novo e caiu como FALTA (vermelho), resgata para pendente!
-        if (p.status_cotacao === 'falta') mudar = true;
-        // Produto novo sem nenhum status
-        else if (!p.status_cotacao || String(p.status_cotacao).trim() === '') mudar = true;
-        // Preço zerado (exceto se o usuário intencionalmente marcou como "sem_preco")
-        else if (zerado && p.status_cotacao !== 'sem_preco') mudar = true;
-
-        if (mudar) {
+        
+        // 💡 REGRA V.I.R.T.U.S: Só resgata quem NÃO tem status (recém criados no banco)
+        if (!p.status_cotacao || String(p.status_cotacao).trim() === '') {
           const objAtualizado = { ...p, status_cotacao: 'pendente', preco: 'R$ 0,00' };
           loteUpdates.push(objAtualizado);
           return objAtualizado;
         }
+        
+        // Se já tem status (falta, mantido, sem_preco, ativo, pendente), ignora. Fica onde está!
         return p;
       });
 
@@ -256,10 +248,10 @@ export default function Precificacao() {
           const lote = loteUpdates.slice(i, i + 50);
           await supabase.from('produtos').upsert(lote);
         }
-        alert(`✅ REVISÃO CONCLUÍDA!\nResgatamos ${loteUpdates.length} produtos novos (que estavam vermelhos ou sem status) e os enviamos para a aba PENDENTES.`);
+        alert(`✅ REVISÃO CONCLUÍDA!\nResgatamos ${loteUpdates.length} produtos novos recém-cadastrados. Eles foram movidos para a aba PENDENTES.`);
         setProdutos(novaLista);
       } else {
-        alert("✔️ Tudo certo! Não há produtos perdidos na base de dados.");
+        alert("✔️ Nenhum produto novo aguardando revisão. Tudo nos conformes.");
       }
       setAbaAtiva('pendentes');
     } catch (err) {
