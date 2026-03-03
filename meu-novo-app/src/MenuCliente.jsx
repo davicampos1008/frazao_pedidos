@@ -44,7 +44,7 @@ export default function MenuCliente({ usuario, tema }) {
   const categoriasDinamicas = [
     'DESTAQUES', 'TODOS', '🍎 Frutas', '🥬 Verduras & Fungos', '🥕 Legumes', 
     '🥔 Raízes, Tubérculos & Grãos', '🍱 Bandejados', '🛒 Avulsos', 
-    '🌿 Folhagens', '📦 Caixaria', '🧄 BRADISBA', '🥥 POTY COCOS', '🧅 MEGA'
+    '🌿 Folhagens', '📦 Caixaria', '🧄 BRADISBA', '🥥 POTY COCOS', '🧅 MEGA', '⭐ LISTA PADRÃO'
   ];
 
   const [produtos, setProdutos] = useState([]);
@@ -138,6 +138,10 @@ export default function MenuCliente({ usuario, tema }) {
     if ("Notification" in window) setPermissaoPush(Notification.permission);
   }, []);
 
+  const removerAcentos = (str) => {
+    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  };
+
   const lidarComCliqueNotificacao = useCallback((msg) => {
     if (!produtos.length) return;
     let termoBusca = null;
@@ -148,7 +152,7 @@ export default function MenuCliente({ usuario, tema }) {
       if (matchPalavra) termoBusca = matchPalavra[1];
     }
     if (termoBusca) {
-      const prod = produtos.find(p => p.nome.toLowerCase().includes(termoBusca.toLowerCase().trim()));
+      const prod = produtos.find(p => removerAcentos(p.nome.toLowerCase()).includes(removerAcentos(termoBusca.toLowerCase().trim())));
       if (prod) {
         setModalNotificacoesAberto(false);
         setProdutoExpandido(prod);
@@ -183,10 +187,37 @@ export default function MenuCliente({ usuario, tema }) {
   }, []);
 
   const tratarPreco = (p) => parseFloat(String(p || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
+  
   const formatarMoeda = (v) => {
     const num = Number(v);
     return (isNaN(num) ? 0 : num).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
+  
+  // 💡 CALCULO DE CAIXA INTELIGENTE
+  const tratarInfosDeVenda = (produto) => {
+    const precoKg = tratarPreco(produto.preco);
+    const pesoCx = parseFloat(String(produto.peso_caixa || '').replace(/[^\d.]/g, ''));
+    
+    if (produto.unidade_medida === 'KG' && pesoCx > 0) {
+      const precoCaixa = precoKg * pesoCx;
+      return { 
+        isCaixa: true, 
+        precoBase: precoCaixa, 
+        textoPreco: `${formatarMoeda(precoCaixa)} / CX`, 
+        textoSecundario: `(Cx c/ ${pesoCx}kg - ${formatarMoeda(precoKg)} o Kg)`,
+        unidadeFinal: 'CX'
+      };
+    }
+    
+    return { 
+      isCaixa: false, 
+      precoBase: precoKg, 
+      textoPreco: `${produto.preco} / ${produto.unidade_medida}`, 
+      textoSecundario: '',
+      unidadeFinal: produto.unidade_medida
+    };
+  };
+
   const formatarQtdUnidade = (qtd, und) => {
     const u = String(und || 'UN').toUpperCase();
     const q = Number(qtd);
@@ -218,7 +249,8 @@ export default function MenuCliente({ usuario, tema }) {
           setBanners({ topo: bMap.topo || '', logo: bMap.logo || '', tematico: bMap.tematico || '' });
         }
         
-        const { data: pData } = await supabase.from('produtos').select('*').neq('status_cotacao', 'falta').order('nome', { ascending: true });
+        // Pega todos (mesmo em falta para mostrar com selo)
+        const { data: pData } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
         if (pData) {
           setProdutos(pData);
           produtosCarregadosRef.current = true;
@@ -246,6 +278,7 @@ export default function MenuCliente({ usuario, tema }) {
   const isAppTravado = !precosLiberados || (listaEnviadaHoje && !edicaoLiberadaBD);
 
   const abrirProduto = (p) => {
+    if(p.status_cotacao === 'falta' || p.status_cotacao === 'sem_preco') return;
     setProdutoExpandido(p);
     setQuantidade(carrinhoSeguro.find(i => i.id === p.id)?.quantidade || 1);
   };
@@ -257,16 +290,17 @@ export default function MenuCliente({ usuario, tema }) {
 
   const salvarNoCarrinho = () => {
     const qtdFinal = parseInt(quantidade, 10) || 1;
-    const vUnit = tratarPreco(produtoExpandido.preco);
-    if (vUnit === 0 && !window.confirm(`O item "${produtoExpandido.nome}" não possui preço. Confirmar?`)) return;
+    const infosVenda = tratarInfosDeVenda(produtoExpandido);
     
-    const valorTotalItem = vUnit * qtdFinal;
+    if (infosVenda.precoBase === 0 && !window.confirm(`O item "${produtoExpandido.nome}" não possui preço. Confirmar?`)) return;
+    
+    const valorTotalItem = infosVenda.precoBase * qtdFinal;
     const itemEx = carrinhoSeguro.find(i => i.id === produtoExpandido.id);
     
     if (itemEx) {
-      setCarrinho(carrinhoSeguro.map(i => i.id === produtoExpandido.id ? { ...i, quantidade: qtdFinal, total: valorTotalItem, valorUnit: vUnit } : i));
+      setCarrinho(carrinhoSeguro.map(i => i.id === produtoExpandido.id ? { ...i, quantidade: qtdFinal, total: valorTotalItem, valorUnit: infosVenda.precoBase, unidade_medida: infosVenda.unidadeFinal } : i));
     } else {
-      setCarrinho([...carrinhoSeguro, { ...produtoExpandido, quantidade: qtdFinal, valorUnit: vUnit, total: valorTotalItem }]);
+      setCarrinho([...carrinhoSeguro, { ...produtoExpandido, quantidade: qtdFinal, valorUnit: infosVenda.precoBase, total: valorTotalItem, unidade_medida: infosVenda.unidadeFinal }]);
     }
     setProdutoExpandido(null);
   };
@@ -291,6 +325,27 @@ export default function MenuCliente({ usuario, tema }) {
       setCarrinho([]);
       setModalCarrinhoAberto(false);
     }
+  };
+
+  // 💡 VERIFICAÇÃO DE LISTA PADRÃO ANTES DE ABRIR REVISÃO
+  const abrirRevisao = () => {
+    if(carrinhoSeguro.length === 0) return;
+
+    const itensPadrao = produtos.filter(p => p.lista_padrao === true && p.status_cotacao !== 'falta' && p.status_cotacao !== 'sem_preco');
+    const itensFaltando = itensPadrao.filter(pPadrao => !carrinhoSeguro.some(c => c.id === pPadrao.id));
+
+    if (itensFaltando.length > 0) {
+      const listaNomes = itensFaltando.map(i => `- ${i.nome}`).join('\n');
+      const confirma = window.confirm(`⚠️ AVISO DE LISTA PADRÃO\n\nVocê esqueceu de adicionar os seguintes itens da sua lista padrão:\n\n${listaNomes}\n\nDeseja revisar o pedido antes de enviar? (Clique em Cancelar para revisar, ou OK para ignorar e enviar mesmo assim)`);
+      
+      if (!confirma) {
+        setCategoriaAtiva('⭐ LISTA PADRÃO');
+        setModalCarrinhoAberto(false);
+        return;
+      }
+    }
+
+    setModalRevisaoAberto(true);
   };
 
   const confirmarEnvio = async () => {
@@ -347,8 +402,8 @@ export default function MenuCliente({ usuario, tema }) {
       const itensRestaurados = listaEnviadaHoje.map(dbItem => {
         const prodOriginal = produtos.find(p => p.nome === dbItem.nome_produto);
         if (prodOriginal) {
-          const vUnit = tratarPreco(prodOriginal.preco);
-          return { ...prodOriginal, quantidade: dbItem.quantidade, valorUnit: vUnit, total: vUnit * dbItem.quantidade };
+          const infosVenda = tratarInfosDeVenda(prodOriginal);
+          return { ...prodOriginal, quantidade: dbItem.quantidade, valorUnit: infosVenda.precoBase, total: infosVenda.precoBase * dbItem.quantidade, unidade_medida: infosVenda.unidadeFinal };
         }
         return { id: Math.random(), nome: dbItem.nome_produto, quantidade: dbItem.quantidade, valorUnit: 0, total: 0, unidade_medida: dbItem.unidade_medida };
       });
@@ -459,28 +514,60 @@ export default function MenuCliente({ usuario, tema }) {
       {/* PRODUTOS */}
       <div style={{ padding: '0 20px 20px 20px', display: 'grid', gridTemplateColumns: categoriaAtiva === 'DESTAQUES' ? '1fr' : 'repeat(auto-fill, minmax(140px, 1fr))', gap: '15px' }}>
         {produtos.filter(p => {
-          if (!(p.nome || '').toLowerCase().includes(buscaMenu.toLowerCase())) return false;
+          // 💡 BUSCA INTELIGENTE: ignora acentos, ignora aba ativa (a não ser que esteja na lista padrão)
+          const termoBuscado = removerAcentos(buscaMenu.toLowerCase().trim());
+          const nomeProduto = removerAcentos(p.nome.toLowerCase());
+          
+          if (termoBuscado) {
+            if (categoriaAtiva === '⭐ LISTA PADRÃO') {
+              return p.lista_padrao === true && nomeProduto.includes(termoBuscado);
+            }
+            return nomeProduto.includes(termoBuscado);
+          }
+
           if (categoriaAtiva === 'TODOS') return true;
           if (categoriaAtiva === 'DESTAQUES') return p.promocao || p.novidade;
+          if (categoriaAtiva === '⭐ LISTA PADRÃO') return p.lista_padrao === true;
+          
           return p.categoria && p.categoria.toUpperCase() === categoriaAtiva.replace(/[\u1000-\uFFFF]+/g, '').trim().toUpperCase();
         }).map(p => {
           const itemNoCarrinho = carrinhoSeguro.find(i => i.id === p.id);
+          const infosVenda = tratarInfosDeVenda(p);
+          
           let corBorda = configDesign.cores.fundoCards;
           let selo = null;
-          if (p.promocao) { corBorda = configDesign.cores.promocao; selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>PROMOÇÃO</div>; } 
-          else if (p.novidade) { corBorda = configDesign.cores.novidade; selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>NOVIDADE</div>; } 
-          else if (itemNoCarrinho) corBorda = configDesign.cores.primaria;
+          let opacidade = 1;
+
+          if (p.status_cotacao === 'falta') {
+            corBorda = configDesign.cores.alerta;
+            selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>EM FALTA</div>;
+            opacidade = 0.6;
+          } else if (p.status_cotacao === 'sem_preco') {
+            corBorda = configDesign.cores.promocao;
+            selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>SEM PREÇO HOJE</div>;
+          } else if (p.promocao) { 
+            corBorda = configDesign.cores.promocao; 
+            selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>PROMOÇÃO</div>; 
+          } else if (p.novidade) { 
+            corBorda = configDesign.cores.novidade; 
+            selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>NOVIDADE</div>; 
+          } else if (itemNoCarrinho) {
+            corBorda = configDesign.cores.primaria;
+          }
 
           return (
-            <div key={p.id} onClick={() => abrirProduto(p)} style={{ border: `2px solid ${corBorda}`, borderRadius: configDesign.cards.raioBorda, padding: '10px', cursor: 'pointer', position: 'relative', backgroundColor: configDesign.cores.fundoCards, boxShadow: configDesign.cards.sombra, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: selo ? '10px' : '0' }}>
+            <div key={p.id} onClick={() => abrirProduto(p)} style={{ border: `2px solid ${corBorda}`, borderRadius: configDesign.cards.raioBorda, padding: '10px', cursor: p.status_cotacao === 'falta' ? 'not-allowed' : 'pointer', position: 'relative', backgroundColor: configDesign.cores.fundoCards, boxShadow: configDesign.cards.sombra, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: selo ? '10px' : '0', opacity: opacidade }}>
                {selo}
                {itemNoCarrinho && !selo && <div style={{position: 'absolute', top: '-8px', right: '-8px', background: configDesign.cores.primaria, color: '#fff', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: '900', fontSize: '11px', border: `2px solid ${configDesign.cores.fundoCards}`, zIndex: 2}}>{itemNoCarrinho.quantidade}</div>}
                <div style={{ height: categoriaAtiva === 'DESTAQUES' ? configDesign.cards.alturaImgDestaque : configDesign.cards.alturaImgPequena, borderRadius: '8px', backgroundImage: `url(${(p.foto_url || '').split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: configDesign.cores.inputFundo }} />
                <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-                 <strong style={{ fontSize: categoriaAtiva === 'DESTAQUES' ? '14px' : '11px', color: configDesign.cores.textoForte, lineHeight: '1.2', height: categoriaAtiva === 'DESTAQUES' ? 'auto' : '26px', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{p.nome}</strong>
+                 <strong style={{ fontSize: categoriaAtiva === 'DESTAQUES' ? '14px' : '11px', color: configDesign.cores.textoForte, lineHeight: '1.2', height: categoriaAtiva === 'DESTAQUES' ? 'auto' : '26px', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                   {p.nome} {p.lista_padrao && '⭐'}
+                 </strong>
+                 {infosVenda.isCaixa && <small style={{fontSize: '9px', color: configDesign.cores.textoSuave, marginTop: '2px'}}>{infosVenda.textoSecundario}</small>}
                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto', paddingTop: '5px' }}>
-                   <span style={{ color: configDesign.cores.primaria, fontWeight: '900', fontSize: categoriaAtiva === 'DESTAQUES' ? '18px' : '13px' }}>{p.preco || 'R$ 0,00'}</span>
-                   <span style={{ fontSize: '10px', color: configDesign.cores.textoSuave, fontWeight: 'bold', background: configDesign.cores.inputFundo, padding: '2px 6px', borderRadius: '4px' }}>{itemNoCarrinho ? formatarQtdUnidade(itemNoCarrinho.quantidade, p.unidade_medida) : (p.unidade_medida || 'UN')}</span>
+                   <span style={{ color: configDesign.cores.primaria, fontWeight: '900', fontSize: categoriaAtiva === 'DESTAQUES' ? '18px' : '13px' }}>{infosVenda.textoPreco}</span>
+                   <span style={{ fontSize: '10px', color: configDesign.cores.textoSuave, fontWeight: 'bold', background: configDesign.cores.inputFundo, padding: '2px 6px', borderRadius: '4px' }}>{itemNoCarrinho ? formatarQtdUnidade(itemNoCarrinho.quantidade, infosVenda.unidadeFinal) : infosVenda.unidadeFinal}</span>
                  </div>
                </div>
             </div>
@@ -489,12 +576,11 @@ export default function MenuCliente({ usuario, tema }) {
       </div>
 
       {carrinhoSeguro.length > 0 && !isAppTravado && (
-        <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer', transition: configDesign.animacoes.transicaoSuave, transform: navState.show ? 'translateY(0)' : 'translateY(20px)' }}>
+        <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer' }}>
           🛒 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.primaria, color: '#fff', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: `2px solid ${configDesign.cores.textoForte}`, fontWeight: 'bold' }}>{carrinhoSeguro.reduce((a,c)=>a+(Number(c?.quantidade)||0),0)}</span>
         </button>
       )}
 
-      {/* NOVO: BOTÃO DE VOLTAR PARA O PEDIDO ENVIADO (MODO VISUALIZAÇÃO) */}
       {modoVisualizacao && listaEnviadaHoje && (
         <button onClick={() => setModoVisualizacao(false)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.sucesso, color: '#fff', border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer', transition: configDesign.animacoes.transicaoSuave, transform: navState.show ? 'translateY(0)' : 'translateY(20px)' }}>
           📝 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.textoForte, color: '#fff', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: `2px solid ${configDesign.cores.sucesso}`, fontWeight: 'bold' }}>✓</span>
@@ -544,48 +630,52 @@ export default function MenuCliente({ usuario, tema }) {
       )}
 
       {/* MODAL PRODUTO */}
-      {produtoExpandido && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
-           <button onClick={() => setProdutoExpandido(null)} style={{ alignSelf: 'flex-end', margin: '20px', color: '#fff', fontSize: '28px', background: 'none', border: 'none' }}>✕</button>
-           <div style={{ flex: 1, backgroundImage: `url(${(produtoExpandido.foto_url || '').split(',')[0]})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', margin: '20px' }} />
-           <div style={{ backgroundColor: configDesign.cores.fundoCards, padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <h2 style={{margin: 0, fontSize: '20px', color: configDesign.cores.textoForte, flex: 1}}>{produtoExpandido.nome}</h2>
-                <span style={{ fontSize: '12px', background: configDesign.cores.inputFundo, padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>Vendido por {produtoExpandido.unidade_medida || 'UN'}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
-                <div>
-                  <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário</span>
-                  <span style={{color: configDesign.cores.primaria, fontSize: '20px', fontWeight: '900'}}>{produtoExpandido.preco}</span>
+      {produtoExpandido && (() => {
+        const infos = tratarInfosDeVenda(produtoExpandido);
+        return (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
+            <button onClick={() => setProdutoExpandido(null)} style={{ alignSelf: 'flex-end', margin: '20px', color: '#fff', fontSize: '28px', background: 'none', border: 'none' }}>✕</button>
+            <div style={{ flex: 1, backgroundImage: `url(${(produtoExpandido.foto_url || '').split(',')[0]})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', margin: '20px' }} />
+            <div style={{ backgroundColor: configDesign.cores.fundoCards, padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <h2 style={{margin: 0, fontSize: '20px', color: configDesign.cores.textoForte, flex: 1}}>{produtoExpandido.nome}</h2>
+                  <span style={{ fontSize: '12px', background: configDesign.cores.inputFundo, padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>Vendido por {infos.unidadeFinal}</span>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Total de {formatarQtdUnidade((parseInt(quantidade) || 1), produtoExpandido.unidade_medida)}</span>
-                  <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>{formatarMoeda(tratarPreco(produtoExpandido.preco) * (parseInt(quantidade) || 1))}</span>
-                </div>
-              </div>
-              {!isAppTravado ? (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', margin: '25px 0' }}>
-                     <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>-</button>
-                     <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '80px', height: '55px', fontSize: '24px', fontWeight: '900', textAlign: 'center', borderRadius: '15px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
-                     <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>+</button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário {infos.isCaixa && '(Caixa Fechada)'}</span>
+                    <span style={{color: configDesign.cores.primaria, fontSize: '20px', fontWeight: '900'}}>{infos.textoPreco}</span>
+                    {infos.isCaixa && <span style={{display: 'block', fontSize: '10px', color: configDesign.cores.textoSuave}}>{infos.textoSecundario}</span>}
                   </div>
-                  <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px' }}>
-                    {carrinhoSeguro.find(i => i.id === produtoExpandido.id) ? 'ATUALIZAR QUANTIDADE' : 'ADICIONAR AO CARRINHO'}
-                  </button>
-                </>
-              ) : (
-                <div style={{ marginTop: '25px' }}>
-                  <button disabled style={{ width: '100%', padding: '22px', background: isEscuro ? '#334155' : '#e2e8f0', color: isEscuro ? '#94a3b8' : '#94a3b8', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '13px' }}>
-                    🔒 {modoVisualizacao ? 'PEDIDO JÁ ENVIADO' : 'AGUARDANDO LIBERAÇÃO DE PREÇOS'}
-                  </button>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Total de {formatarQtdUnidade((parseInt(quantidade) || 1), infos.unidadeFinal)}</span>
+                    <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>{formatarMoeda(infos.precoBase * (parseInt(quantidade) || 1))}</span>
+                  </div>
                 </div>
-              )}
-           </div>
-        </div>
-      )}
+                {!isAppTravado ? (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', margin: '25px 0' }}>
+                      <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>-</button>
+                      <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '80px', height: '55px', fontSize: '24px', fontWeight: '900', textAlign: 'center', borderRadius: '15px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
+                      <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>+</button>
+                    </div>
+                    <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px' }}>
+                      {carrinhoSeguro.find(i => i.id === produtoExpandido.id) ? 'ATUALIZAR QUANTIDADE' : 'ADICIONAR AO CARRINHO'}
+                    </button>
+                  </>
+                ) : (
+                  <div style={{ marginTop: '25px' }}>
+                    <button disabled style={{ width: '100%', padding: '22px', background: isEscuro ? '#334155' : '#e2e8f0', color: isEscuro ? '#94a3b8' : '#94a3b8', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '13px' }}>
+                      🔒 {modoVisualizacao ? 'PEDIDO JÁ ENVIADO' : 'AGUARDANDO LIBERAÇÃO DE PREÇOS'}
+                    </button>
+                  </div>
+                )}
+            </div>
+          </div>
+        );
+      })()}
 
-      {/* MODAL CARRINHO BLINDADO CONTRA TELA BRANCA NO CELULAR */}
+      {/* MODAL CARRINHO */}
       {modalCarrinhoAberto && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100dvh', backgroundColor: configDesign.cores.fundoCards, zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -626,7 +716,7 @@ export default function MenuCliente({ usuario, tema }) {
           <div style={{ padding: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral }}>
             {carrinhoSeguro.length > 0 && <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: isEscuro ? '#450a0a' : '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900', marginBottom: '15px' }}>🗑️ ESVAZIAR CARRINHO</button>}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontWeight: '900', fontSize: '18px', color: configDesign.cores.textoForte }}><span>Total Estimado:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
-            <button onClick={() => { if(carrinhoSeguro.length > 0) setModalRevisaoAberto(true); }} style={{ width: '100%', padding: '22px', background: carrinhoSeguro.length > 0 ? configDesign.cores.textoForte : configDesign.cores.borda, color: configDesign.cores.fundoGeral, borderRadius: '18px', fontWeight: '900', fontSize: '15px', border: 'none' }}>REVISAR E ENVIAR</button>
+            <button onClick={abrirRevisao} style={{ width: '100%', padding: '22px', background: carrinhoSeguro.length > 0 ? configDesign.cores.textoForte : configDesign.cores.borda, color: configDesign.cores.fundoGeral, borderRadius: '18px', fontWeight: '900', fontSize: '15px', border: 'none' }}>REVISAR E ENVIAR</button>
           </div>
         </div>
       )}
