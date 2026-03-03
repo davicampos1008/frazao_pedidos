@@ -47,7 +47,7 @@ export default function PlanilhaCompras() {
   });
   const [precosAgrupados, setPrecosAgrupados] = useState({});
   
-  // Controle de Notificações Próprias da Tela (Silenciosas)
+  const [grupoExpandido, setGrupoExpandido] = useState(null);
   const [notificacoes, setNotificacoes] = useState([]);
 
   const hoje = new Date().toLocaleDateString('en-CA');
@@ -73,10 +73,19 @@ export default function PlanilhaCompras() {
 
   const tratarPrecoNum = (p) => parseFloat(String(p || '0').replace('R$', '').trim().replaceAll('.', '').replace(',', '.')) || 0;
   const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatarApenasNumeroMoeda = (v) => {
+     let str = formatarMoeda(v);
+     return str.replace('R$', '').trim();
+  };
 
   const formatarNomeItem = (str) => {
     if (!str || typeof str !== 'string' || str.trim() === '') return 'Sem Nome';
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
+  };
+  
+  // Limpa o "(MEGA)", "(POTY)" do nome para impressão e mensagem
+  const limparNomeParaMsg = (nome) => {
+      return formatarNomeItem(nome).replace(/\s*\(.*?\)\s*/g, '').trim();
   };
 
   const mostrarNotificacao = (mensagem, tipo = 'info') => {
@@ -203,7 +212,7 @@ export default function PlanilhaCompras() {
 
                  const placaBase = lojaInfo && lojaInfo.placa_caminhao ? String(lojaInfo.placa_caminhao).toUpperCase().trim() : 'SEM PLACA';
                  const complemento = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
-                 const placaFinal = `${placaBase} | ${complemento}`;
+                 const placaFinal = `${placaBase} - ${complemento}`;
 
                  if (!mapaForn[fNome].lojas[nomeLoja]) {
                      mapaForn[fNome].lojas[nomeLoja] = { nome: nomeLoja, placa: placaFinal, totalLoja: 0, itens: [] };
@@ -391,7 +400,6 @@ export default function PlanilhaCompras() {
     await Promise.all(promessas);
     if (pedidosParaClonar.length > 0) await supabase.from('pedidos').insert(pedidosParaClonar);
     
-    // 💡 REMOVIDO: Pulo automático para fornecedores
     setItemModal(null);
     mostrarNotificacao(`✅ Novo pedido para ${dadosCompra.fornecedor.toUpperCase()} foi adicionado com sucesso!`, 'sucesso');
     carregarDados();
@@ -440,7 +448,6 @@ export default function PlanilhaCompras() {
     await Promise.all(promessas);
     if (pedidosParaClonar.length > 0) await supabase.from('pedidos').insert(pedidosParaClonar);
 
-    // 💡 REMOVIDO: Pulo automático para fornecedores
     setItemModal(null);
     mostrarNotificacao(`✅ Novo pedido fracionado para ${dadosCompra.fornecedor.toUpperCase()} concluído!`, 'sucesso');
     carregarDados();
@@ -514,31 +521,22 @@ export default function PlanilhaCompras() {
 
     let msg = `*${nomeFormatado}*\n\n`;
     let strNormais = '';
-    let strBonif = '';
     
     Object.values(mapaItensGerais).forEach(i => {
        const qtdCobrada = i.qtd - i.qtd_bonificada;
        let basePriceClean = String(i.valor_unit || '').includes('|') ? String(i.valor_unit).split('|')[1].trim() : String(i.valor_unit);
 
        if (qtdCobrada > 0) {
-         strNormais += `${qtdCobrada} - ${formatarNomeItem(i.nome)} - ${basePriceClean} = ${formatarMoeda(i.totalNum)}${i.isBoleto ? ' (B)' : ''}\n`;
+         strNormais += `${qtdCobrada} - ${limparNomeParaMsg(i.nome)}\n`;
        }
        if (i.qtd_bonificada > 0) {
-         const basePriceNum = tratarPrecoNum(basePriceClean);
-         const valBonif = basePriceNum * i.qtd_bonificada;
-         strBonif += `${i.qtd_bonificada} - ${formatarNomeItem(i.nome)} - ${formatarMoeda(valBonif)}\n`;
+         strNormais += `${i.qtd_bonificada} - ${limparNomeParaMsg(i.nome)} (Bonif.)\n`;
        }
     });
 
     msg += strNormais;
-
-    if (f.totalDescontoBonif > 0) {
-       msg += `\n*Bonificações:*\n${strBonif}`;
-       msg += `\nValor bruto = ${formatarMoeda(f.totalBruto)}\n`;
-    }
-
     msg += `\n${placaBase} - ${complemento}`;
-    msg += `\n- TOTAL = ${formatarMoeda(f.totalGeral)}`;
+    msg += `\n- TOTAL = ${formatarApenasNumeroMoeda(f.totalGeral)}`;
 
     navigator.clipboard.writeText(msg);
     setCopiadoGeral(btnId);
@@ -549,10 +547,10 @@ export default function PlanilhaCompras() {
     const nomeFormatado = lojaNome.replace(/^\d+\s*-\s*/, '').trim().toUpperCase();
     const partesPlaca = String(lojaData.placa || '').split('|');
     const placaBase = partesPlaca[0] ? partesPlaca[0].trim() : 'SEM PLACA';
-    const complemento = partesPlaca[1] ? partesPlaca[1].trim() : '';
+    const complemento = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
 
     let msg = `*${nomeFormatado}*\n\n`;
-    lojaData.itens.forEach(i => { msg += `${i.qtd} ${i.unidade} : ${formatarNomeItem(i.nome)}\n`; });
+    lojaData.itens.forEach(i => { msg += `${i.qtd} ${i.unidade} - ${limparNomeParaMsg(i.nome)}\n`; });
     msg += `\n${placaBase} - ${complemento}`;
     
     navigator.clipboard.writeText(msg);
@@ -605,6 +603,10 @@ export default function PlanilhaCompras() {
     );
   };
 
+  const isAgrupado = (nomeItem) => {
+    return agrupamentos.some(g => g.itens.includes(nomeItem));
+  };
+
   const criarGrupoFornecedor = () => {
     if (!nomeFornecedorLote.trim()) return alert("Digite o nome do fornecedor para agrupar.");
     if (itensSelecionados.length === 0) return alert("Selecione pelo menos um item.");
@@ -619,7 +621,6 @@ export default function PlanilhaCompras() {
     setItensSelecionados([]);
     setNomeFornecedorLote('');
     mostrarNotificacao(`Itens separados para ${novoGrupo.fornecedor}`, 'sucesso');
-    setAbaAtiva('pedidos_fornecedor');
   };
 
   const removerGrupoFornecedor = (idGrupo) => {
@@ -640,7 +641,7 @@ export default function PlanilhaCompras() {
              const comp = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
              lojasMap[loja.nome_fantasia] = { placa: `${placaBase} - ${comp}`, itens: [] };
           }
-          lojasMap[loja.nome_fantasia].itens.push(`${loja.qtd_pedida} ${demandaItem.unidade} : ${formatarNomeItem(nomeItem)}`);
+          lojasMap[loja.nome_fantasia].itens.push(`${loja.qtd_pedida} ${demandaItem.unidade} - ${limparNomeParaMsg(nomeItem)}`);
        });
     });
     
@@ -658,7 +659,6 @@ export default function PlanilhaCompras() {
     const grupo = agrupamentos.find(g => g.id === grupoId);
     if (!grupo) return;
 
-    // 💡 TIRA O FORNECEDOR DA TELA NA HORA! (Sensação de rapidez)
     setAgrupamentos(prev => prev.filter(g => g.id !== grupoId));
     mostrarNotificacao(`⏳ Salvando pedido de ${grupo.fornecedor}...`, 'info');
 
@@ -684,88 +684,11 @@ export default function PlanilhaCompras() {
         });
     });
     
-    // Executa as promessas no background e atualiza o radar
     Promise.all(promessas).then(() => {
         mostrarNotificacao(`✅ ${grupo.fornecedor} salvo com sucesso!`, 'sucesso');
         carregarDados(true);
     });
   };
-
-  if (modoImpressaoResumo) {
-      return (
-          <div style={{ backgroundColor: '#525659', minHeight: '100vh', padding: '10px', fontFamily: 'Arial, sans-serif' }}>
-              
-              <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', backgroundColor: '#333', padding: '15px', borderRadius: '8px', marginBottom: '20px', position: 'sticky', top: '10px', zIndex: 1000, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
-                 <button onClick={() => setModoImpressaoResumo(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬅ VOLTAR</button>
-                 <div style={{ display: 'flex', gap: '10px', flex: '1 1 auto', flexWrap: 'wrap' }}>
-                   <button onClick={() => processarPDFResumo('preview')} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>👁️ VISUALIZAR PDF</button>
-                   <button onClick={() => processarPDFResumo('whatsapp')} style={{ background: '#25d366', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🟢 COMPARTILHAR WHATSAPP</button>
-                   <button onClick={() => processarPDFResumo('baixar')} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
-                 </div>
-              </div>
-
-              <div style={{ overflowX: 'auto', paddingBottom: '20px' }}>
-                  <div id="area-impressao-resumo" className="print-section" style={{ backgroundColor: 'white', color: 'black', width: '100%', maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
-                      
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid black', paddingBottom: '10px', marginBottom: '20px' }}>
-                          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '900', textTransform: 'uppercase' }}>RESUMO DE ITENS</h2>
-                          <div style={{ textAlign: 'right' }}>
-                              <span style={{ fontSize: '12px', fontWeight: 'bold', display: 'block' }}>DATA: {dataBr}</span>
-                          </div>
-                      </div>
-
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                          <thead>
-                              <tr style={{ backgroundColor: '#e5e7eb', borderBottom: '2px solid black' }}>
-                                  <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px', border: '1px solid black', width: '35%' }}>PRODUTO</th>
-                                  <th style={{ padding: '8px', textAlign: 'center', fontSize: '12px', border: '1px solid black', width: '15%' }}>PEDIDO LOJAS</th>
-                                  <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px', border: '1px solid black', width: '50%' }}>FORNECEDORES (Qtd entregue)</th>
-                              </tr>
-                          </thead>
-                          <tbody>
-                              {listaGeralItens.map((item, idx) => {
-                                  let corLinha = 'black';
-                                  if (item.isFaltaTotal) corLinha = '#64748b'; 
-                                  else if (item.total_comprado === 0) corLinha = '#ef4444'; 
-                                  else if (item.total_comprado < item.total_solicitado) corLinha = '#d97706'; 
-                                  else corLinha = '#166534'; 
-
-                                  return (
-                                      <tr key={idx}>
-                                          <td style={{ padding: '8px', border: '1px solid black', fontSize: '12px', fontWeight: 'bold', color: corLinha, textDecoration: item.isFaltaTotal ? 'line-through' : 'none' }}>
-                                              {formatarNomeItem(item.nome)}
-                                          </td>
-                                          <td style={{ padding: '8px', border: '1px solid black', fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}>
-                                              {item.total_solicitado} {item.unidade}
-                                          </td>
-                                          <td style={{ padding: '8px', border: '1px solid black', fontSize: '11px', color: '#333' }}>
-                                              {Object.keys(item.fornecedores_comprados).length === 0 ? (
-                                                  <span style={{ color: '#ef4444', fontWeight: 'bold' }}>PENDENTE / FALTA</span>
-                                              ) : (
-                                                  Object.entries(item.fornecedores_comprados).map(([forn, data]) => (
-                                                      <div key={forn}><b>{data.qtd}x</b> - {forn}</div>
-                                                  ))
-                                              )}
-                                          </td>
-                                      </tr>
-                                  );
-                              })}
-                          </tbody>
-                      </table>
-                  </div>
-              </div>
-              <style>{`
-                @media print {
-                  .no-print { display: none !important; }
-                  html, body { height: auto !important; overflow: visible !important; background: white; margin: 0; padding: 0; }
-                  #root, div { overflow: visible !important; height: auto !important; }
-                  .print-section { box-shadow: none !important; min-width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; }
-                  @page { margin: 10mm; size: portrait; } 
-                }
-              `}</style>
-          </div>
-      );
-  }
 
   if (carregando && demandas.length === 0 && pedidosFeitos.length === 0) {
     return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Processando...</div>;
@@ -864,15 +787,17 @@ export default function PlanilhaCompras() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {demandas.filter(d => (d.nome || '').toLowerCase().includes(buscaSelecionar.toLowerCase())).map(item => (
-              <div key={item.nome} onClick={() => alternarSelecaoLote(item.nome)} style={{ display: 'flex', alignItems: 'center', gap: '15px', background: '#fff', padding: '15px', borderRadius: '12px', borderLeft: itensSelecionados.includes(item.nome) ? '5px solid #8b5cf6' : '5px solid #e2e8f0', cursor: 'pointer', transition: '0.2s', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
-                 <input type="checkbox" checked={itensSelecionados.includes(item.nome)} readOnly style={{ width: '20px', height: '20px', accentColor: '#8b5cf6', pointerEvents: 'none' }} />
-                 <div style={{ flex: 1 }}>
-                    <strong style={{ display: 'block', fontSize: '14px', color: '#111' }}>{item.nome}</strong>
+            {demandas.filter(d => (d.nome || '').toLowerCase().includes(buscaSelecionar.toLowerCase())).map(item => {
+              const agrupado = isAgrupado(item.nome);
+              return (
+              <div key={item.nome} onClick={() => !agrupado && alternarSelecaoLote(item.nome)} style={{ display: 'flex', alignItems: 'center', gap: '15px', background: agrupado ? '#fef2f2' : '#fff', padding: '15px', borderRadius: '12px', borderLeft: itensSelecionados.includes(item.nome) ? '5px solid #8b5cf6' : (agrupado ? '5px solid #ef4444' : '5px solid #e2e8f0'), cursor: agrupado ? 'not-allowed' : 'pointer', transition: '0.2s', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
+                 <input type="checkbox" checked={itensSelecionados.includes(item.nome)} disabled={agrupado} readOnly style={{ width: '20px', height: '20px', accentColor: '#8b5cf6', pointerEvents: 'none' }} />
+                 <div style={{ flex: 1, opacity: agrupado ? 0.5 : 1 }}>
+                    <strong style={{ display: 'block', fontSize: '14px', color: '#111', textDecoration: agrupado ? 'line-through' : 'none' }}>{item.nome}</strong>
                     <small style={{ color: '#666', fontSize: '11px' }}>{item.demanda} {item.unidade} • {item.lojas.length} Loja(s)</small>
                  </div>
               </div>
-            ))}
+            )})}
           </div>
 
           {/* BARRA FLUTUANTE DE AÇÃO */}
@@ -897,50 +822,59 @@ export default function PlanilhaCompras() {
           {agrupamentos.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '20px' }}>Nenhum fornecedor agrupado. Vá na aba "Selecionar Forn." para criar.</div>
           ) : (
-            agrupamentos.map((grupo) => (
+            agrupamentos.map((grupo) => {
+              const expandido = grupoExpandido === grupo.id;
+              return (
               <div key={grupo.id} style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', borderTop: '5px solid #14b8a6' }}>
-                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                    <h3 style={{ margin: 0, color: '#111', fontSize: '18px' }}>🏢 {grupo.fornecedor}</h3>
-                    <button onClick={() => removerGrupoFornecedor(grupo.id)} style={{ background: '#fef2f2', color: '#ef4444', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>Desfazer</button>
-                 </div>
-
-                 {/* Botão de WhatsApp Rápido (Lojas separadas sem preço) */}
-                 <button onClick={() => copiarWhatsappAgrupado(grupo)} style={{ width: '100%', background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '15px', borderRadius: '12px', fontWeight: '900', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginBottom: '20px', cursor: 'pointer' }}>
-                   🟢 COPIAR PEDIDO PARA WHATSAPP
-                 </button>
-
-                 <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
-                    <h4 style={{ margin: '0 0 15px 0', fontSize: '12px', color: '#64748b' }}>2. LANÇAR PREÇOS DO FORNECEDOR:</h4>
-                    {grupo.itens.map(nomeItem => {
-                       const demandaReal = demandas.find(d => d.nome === nomeItem);
-                       if (!demandaReal) return null;
-                       return (
-                         <div key={nomeItem} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '10px', marginBottom: '10px', borderBottom: '1px solid #e2e8f0' }}>
-                            <div style={{ flex: 1 }}>
-                               <strong style={{ display: 'block', fontSize: '13px', color: '#111' }}>{nomeItem}</strong>
-                               <small style={{ color: '#f97316', fontWeight: 'bold', fontSize: '10px' }}>Pediram: {demandaReal.demanda} {demandaReal.unidade}</small>
-                            </div>
-                            <div style={{ position: 'relative', width: '120px' }}>
-                               <span style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8', fontSize: '11px', fontWeight: 'bold' }}>R$</span>
-                               <input 
-                                 type="text" 
-                                 placeholder="0,00"
-                                 value={precosAgrupados[`${grupo.id}_${nomeItem}`] || ''}
-                                 onChange={(e) => setPrecosAgrupados({...precosAgrupados, [`${grupo.id}_${nomeItem}`]: e.target.value})}
-                                 style={{ width: '100%', padding: '10px 10px 10px 30px', borderRadius: '8px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold' }}
-                               />
-                            </div>
-                         </div>
-                       );
-                    })}
-                    
-                    <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-                      <button onClick={() => finalizarLoteFornecedor(grupo.id, false)} style={{ flex: 1, padding: '15px', background: '#111', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>FECHAR À VISTA</button>
-                      <button onClick={() => finalizarLoteFornecedor(grupo.id, true)} style={{ flex: 1, padding: '15px', background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>FECHAR NO BOLETO</button>
+                 <div onClick={() => setGrupoExpandido(expandido ? null : grupo.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: expandido ? '20px' : '0' }}>
+                    <h3 style={{ margin: 0, color: '#111', fontSize: '18px' }}>🏢 {grupo.fornecedor} <span style={{fontSize: '12px', color: '#666'}}>({grupo.itens.length})</span></h3>
+                    <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
+                       <button onClick={(e) => { e.stopPropagation(); removerGrupoFornecedor(grupo.id); }} style={{ background: '#fef2f2', color: '#ef4444', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>Desfazer</button>
+                       <span style={{ color: '#ccc', transform: expandido ? 'rotate(90deg)' : 'none', transition: '0.2s' }}>❯</span>
                     </div>
                  </div>
+
+                 {expandido && (
+                   <>
+                     {/* Botão de WhatsApp Rápido (Lojas separadas sem preço) */}
+                     <button onClick={() => copiarWhatsappAgrupado(grupo)} style={{ width: '100%', background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '15px', borderRadius: '12px', fontWeight: '900', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginBottom: '20px', cursor: 'pointer' }}>
+                       🟢 COPIAR PEDIDO PARA WHATSAPP
+                     </button>
+
+                     <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
+                        <h4 style={{ margin: '0 0 15px 0', fontSize: '12px', color: '#64748b' }}>2. LANÇAR PREÇOS DO FORNECEDOR:</h4>
+                        {grupo.itens.map(nomeItem => {
+                           const demandaReal = demandas.find(d => d.nome === nomeItem);
+                           if (!demandaReal) return null;
+                           return (
+                             <div key={nomeItem} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '10px', marginBottom: '10px', borderBottom: '1px solid #e2e8f0' }}>
+                                <div style={{ flex: 1 }}>
+                                   <strong style={{ display: 'block', fontSize: '13px', color: '#111' }}>{nomeItem}</strong>
+                                   <small style={{ color: '#f97316', fontWeight: 'bold', fontSize: '10px' }}>Pediram: {demandaReal.demanda} {demandaReal.unidade}</small>
+                                </div>
+                                <div style={{ position: 'relative', width: '120px' }}>
+                                   <span style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8', fontSize: '11px', fontWeight: 'bold' }}>R$</span>
+                                   <input 
+                                     type="text" 
+                                     placeholder="0,00"
+                                     value={precosAgrupados[`${grupo.id}_${nomeItem}`] || ''}
+                                     onChange={(e) => setPrecosAgrupados({...precosAgrupados, [`${grupo.id}_${nomeItem}`]: e.target.value})}
+                                     style={{ width: '100%', padding: '10px 10px 10px 30px', borderRadius: '8px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold' }}
+                                   />
+                                </div>
+                             </div>
+                           );
+                        })}
+                        
+                        <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+                          <button onClick={() => finalizarLoteFornecedor(grupo.id, false)} style={{ flex: 1, padding: '15px', background: '#111', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>FECHAR À VISTA</button>
+                          <button onClick={() => finalizarLoteFornecedor(grupo.id, true)} style={{ flex: 1, padding: '15px', background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>FECHAR NO BOLETO</button>
+                        </div>
+                     </div>
+                   </>
+                 )}
               </div>
-            ))
+            )})
           )}
         </div>
       )}
@@ -1067,7 +1001,7 @@ export default function PlanilhaCompras() {
                                 {loja.itens.map((item, idxx) => (
                                   <div key={idxx} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ flex: 1 }}>
-                                      <span>{item.qtd} {item.unidade} : <b>{formatarNomeItem(item.nome)}</b></span>
+                                      <span>{item.qtd} {item.unidade} - <b>{limparNomeParaMsg(item.nome)}</b></span>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                       {item.qtd_bonificada > 0 && (
