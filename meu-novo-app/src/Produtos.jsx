@@ -18,10 +18,9 @@ export default function Produtos() {
   
   const [mostrarSugestoesNome, setMostrarSugestoesNome] = useState(false);
   
-  // 💡 ESTADO INICIAL ATUALIZADO
-  const estadoInicial = { nome: '', categoria: 'Frutas', unidade_medida: 'KG', status: true };
+  // 💡 ESTADO INICIAL ATUALIZADO (Com peso_caixa e lista_padrao)
+  const estadoInicial = { nome: '', categoria: 'Frutas', unidade_medida: 'KG', status: true, peso_caixa: '', lista_padrao: false };
   const [dados, setDados] = useState(estadoInicial);
-  // 💡 Guarda o estado original para verificar se houve alteração na edição
   const [dadosOriginais, setDadosOriginais] = useState(null);
 
   async function carregarProdutos() {
@@ -56,7 +55,6 @@ export default function Produtos() {
        return alert(`⚠️ Ação Bloqueada! Já existe um produto com o nome "${dados.nome}" cadastrado no sistema.\n\nPor favor, utilize a lista de sugestões ao digitar o nome para editar o cadastro existente em vez de criar um novo.`);
     }
 
-    // 💡 ALERTA DE MODIFICAÇÃO (Apenas para produtos já existentes que sofreram alterações de nome, categoria ou unidade)
     if (dadosOriginais && dados.id) {
        const houveMudanca = 
           dados.nome !== dadosOriginais.nome || 
@@ -88,6 +86,22 @@ export default function Produtos() {
     }
   }
 
+  // 💡 FUNÇÃO DE MARCAR TODOS COMO LISTA PADRÃO EM MASSA
+  async function marcarTodosComoPadrao() {
+    if (!window.confirm(`Deseja marcar os ${filtrados.length} itens exibidos na tela como Lista Padrão?\n\nIsso enviará todos para a aba de atalhos do cliente futuramente.`)) return;
+    
+    // Pega os itens que estão aparecendo (filtrados pela busca) e muda o status
+    const updates = filtrados.map(p => ({ ...p, lista_padrao: true }));
+    
+    const { error } = await supabase.from('produtos').upsert(updates);
+    if (!error) {
+       alert("✅ Itens atualizados para Lista Padrão com sucesso!");
+       carregarProdutos();
+    } else {
+       alert("Erro ao atualizar em massa: " + error.message);
+    }
+  }
+
   const filtrados = produtos.filter(p => 
     p.nome?.toLowerCase().includes(busca.toLowerCase()) || 
     p.categoria?.toLowerCase().includes(busca.toLowerCase())
@@ -106,9 +120,18 @@ export default function Produtos() {
       
       <div style={{ display: 'flex', gap: '15px' }}>
         <input placeholder="Procurar hortifruti por nome ou categoria..." value={busca} onChange={e => setBusca(e.target.value)} style={{ flex: 1, padding: '18px', borderRadius: configDesign.geral.raioBordaGlobal, border: 'none', boxShadow: configDesign.geral.sombraSuave, outline: 'none' }} />
+        
+        {/* 💡 NOVO BOTÃO DE AÇÃO EM MASSA */}
+        <button 
+          onClick={marcarTodosComoPadrao}
+          style={{ backgroundColor: '#eab308', color: '#111', border: 'none', padding: '0 20px', borderRadius: configDesign.geral.raioBordaGlobal, fontWeight: '900', cursor: 'pointer', boxShadow: configDesign.geral.sombraSuave }}
+        >
+          ⭐ MARCAR LISTA PADRÃO
+        </button>
+
         <button 
           onClick={() => { setDados(estadoInicial); setDadosOriginais(null); setModalAberto({novo: true}); setEditando(true); setMostrarSugestoesNome(false); }}
-          style={{ backgroundColor: configDesign.botoes.salvar, color: configDesign.botoes.textoCor, border: 'none', padding: '0 30px', borderRadius: configDesign.geral.raioBordaGlobal, fontWeight: '900', cursor: 'pointer' }}
+          style={{ backgroundColor: configDesign.botoes.salvar, color: configDesign.botoes.textoCor, border: 'none', padding: '0 30px', borderRadius: configDesign.geral.raioBordaGlobal, fontWeight: '900', cursor: 'pointer', boxShadow: configDesign.geral.sombraSuave }}
         >
           + NOVO PRODUTO
         </button>
@@ -116,12 +139,14 @@ export default function Produtos() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
         {filtrados.map(p => (
-          <div key={p.id} onClick={() => { setModalAberto(p); setDados(p); setDadosOriginais(p); setEditando(false); setMostrarSugestoesNome(false); }} style={{ backgroundColor: configDesign.cards.fundo, padding: '20px', borderRadius: configDesign.geral.raioBordaGlobal, boxShadow: configDesign.geral.sombraSuave, display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', transition: '0.2s', opacity: p.status ? 1 : 0.5 }}>
+          <div key={p.id} onClick={() => { setModalAberto(p); setDados({...p, peso_caixa: p.peso_caixa || '', lista_padrao: p.lista_padrao || false}); setDadosOriginais(p); setEditando(false); setMostrarSugestoesNome(false); }} style={{ backgroundColor: configDesign.cards.fundo, padding: '20px', borderRadius: configDesign.geral.raioBordaGlobal, boxShadow: configDesign.geral.sombraSuave, display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', transition: '0.2s', opacity: p.status ? 1 : 0.5 }}>
             <div style={{ width: configDesign.cards.tamanhoIcone, height: configDesign.cards.tamanhoIcone, backgroundColor: configDesign.cards.fundoIcone, borderRadius: configDesign.cards.raioIcone, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', color: configDesign.cards.corIcone, fontSize: '20px', position: 'relative' }}>
               {p.nome?.charAt(0).toUpperCase()}
             </div>
             <div style={{ flex: 1 }}>
-              <strong style={{ display: 'block', textTransform: 'uppercase', fontSize: '13px', color: configDesign.geral.corTextoPrincipal }}>{p.nome}</strong>
+              <strong style={{ display: 'block', textTransform: 'uppercase', fontSize: '13px', color: configDesign.geral.corTextoPrincipal }}>
+                {p.nome} {p.lista_padrao && <span style={{fontSize: '12px'}}>⭐</span>}
+              </strong>
               <small style={{ color: configDesign.geral.corTextoSecundario, fontSize: '11px', display: 'block', marginTop: '2px' }}>{p.categoria} | Vendido em {p.unidade_medida}</small>
             </div>
             <span style={{fontSize: '18px'}}>{p.status ? '🟢' : '🔴'}</span>
@@ -162,7 +187,7 @@ export default function Produtos() {
                     <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', marginTop: '5px' }}>
                       <div style={{ padding: '10px', fontSize: '11px', color: '#f97316', fontWeight: 'bold', backgroundColor: '#fff7ed' }}>⚠️ Produtos parecidos já cadastrados:</div>
                       {produtosFiltradosNome.map(p => (
-                        <div key={p.id} onClick={() => { setDados(p); setDadosOriginais(p); setModalAberto(p); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px', fontWeight: 'bold', color: '#111' }}>
+                        <div key={p.id} onClick={() => { setDados({...p, peso_caixa: p.peso_caixa || '', lista_padrao: p.lista_padrao || false}); setDadosOriginais(p); setModalAberto(p); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px', fontWeight: 'bold', color: '#111' }}>
                           {p.nome} <span style={{ color: '#999', fontSize: '10px', marginLeft: '5px' }}>({p.categoria})</span>
                         </div>
                       ))}
@@ -177,7 +202,6 @@ export default function Produtos() {
                   <div>
                     <label style={cssLabel}>CATEGORIA *</label>
                     <select onKeyDown={handleKeyDown} disabled={!editando} value={dados.categoria} onChange={e => setDados({...dados, categoria: e.target.value})} style={cssInput(!editando)}>
-                      {/* 💡 CATEGORIAS ATUALIZADAS */}
                       <option value="Frutas">🍎 Frutas</option>
                       <option value="Verduras & Fungos">🥬 Verduras & Fungos</option>
                       <option value="Legumes">🥕 Legumes</option>
@@ -195,9 +219,10 @@ export default function Produtos() {
                   <div>
                     <label style={cssLabel}>VENDIDO POR *</label>
                     <select onKeyDown={handleKeyDown} disabled={!editando} value={dados.unidade_medida} onChange={e => setDados({...dados, unidade_medida: e.target.value})} style={cssInput(!editando)}>
-                      {/* 💡 UNIDADES ATUALIZADAS */}
                       <option value="KG">KG (Quilo)</option>
                       <option value="UN">UN (Unidade)</option>
+                      <option value="PCT">PCT (Pacote)</option>
+                      <option value="G">G (Gramas)</option>
                       <option value="BDJ">Bandeja</option>
                       <option value="MAÇO">Maço</option>
                       <option value="DZ">Dúzia</option>
@@ -205,9 +230,32 @@ export default function Produtos() {
                       <option value="CX com 4 bandejas">CX com 4 bandejas</option>
                       <option value="CX com 10 bandejas">CX com 10 bandejas</option>
                       <option value="SACO">Saco</option>
+                      <option value="L">L (Litros)</option>
+                      <option value="ML">ML (Mililitros)</option>
                     </select>
                   </div>
                 </div>
+
+                {/* 💡 INPUT CONDICIONAL PARA KG */}
+                {dados.unidade_medida === 'KG' && (
+                  <div style={{ marginTop: '5px' }}>
+                    <label style={cssLabel}>QUANTIDADE DA CAIXA FECHADA (Opcional)</label>
+                    <input 
+                      onKeyDown={handleKeyDown} 
+                      disabled={!editando} 
+                      value={dados.peso_caixa} 
+                      onChange={e => setDados({...dados, peso_caixa: e.target.value})} 
+                      style={cssInput(!editando)} 
+                      placeholder="Ex: 15kg, 20kg, 25kg..." 
+                    />
+                  </div>
+                )}
+
+                {/* 💡 TOGGLE INDIVIDUAL DE LISTA PADRÃO */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px', color: '#111' }}>
+                  <input type="checkbox" checked={dados.lista_padrao} disabled={!editando} onChange={e => setDados({...dados, lista_padrao: e.target.checked})} style={{ width: '18px', height: '18px', accentColor: '#eab308' }} />
+                  ⭐ Incluir na Lista Padrão do Cliente
+                </label>
               </div>
 
             </div>
