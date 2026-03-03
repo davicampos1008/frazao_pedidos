@@ -278,7 +278,7 @@ export default function MenuCliente({ usuario, tema }) {
   const isAppTravado = !precosLiberados || (listaEnviadaHoje && !edicaoLiberadaBD);
 
   const abrirProduto = (p) => {
-    if(p.status_cotacao === 'falta' || p.status_cotacao === 'sem_preco') return;
+    // 💡 REMOVIDA A TRAVA AQUI PARA PERMITIR ABRIR ITENS EM FALTA E SEM PREÇO
     setProdutoExpandido(p);
     setQuantidade(carrinhoSeguro.find(i => i.id === p.id)?.quantidade || 1);
   };
@@ -292,7 +292,12 @@ export default function MenuCliente({ usuario, tema }) {
     const qtdFinal = parseInt(quantidade, 10) || 1;
     const infosVenda = tratarInfosDeVenda(produtoExpandido);
     
-    if (infosVenda.precoBase === 0 && !window.confirm(`O item "${produtoExpandido.nome}" não possui preço. Confirmar?`)) return;
+    // 💡 AVISOS DE CONFIRMAÇÃO PARA PRODUTOS PROBLEMÁTICOS
+    if (produtoExpandido.status_cotacao === 'falta') {
+      if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está marcado como EM FALTA. Deseja adicionar ao pedido mesmo assim?`)) return;
+    } else if (produtoExpandido.status_cotacao === 'sem_preco' || infosVenda.precoBase === 0) {
+      if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está SEM PREÇO definido hoje. O valor final será atualizado posteriormente. Deseja confirmar?`)) return;
+    }
     
     const valorTotalItem = infosVenda.precoBase * qtdFinal;
     const itemEx = carrinhoSeguro.find(i => i.id === produtoExpandido.id);
@@ -556,7 +561,7 @@ export default function MenuCliente({ usuario, tema }) {
           }
 
           return (
-            <div key={p.id} onClick={() => abrirProduto(p)} style={{ border: `2px solid ${corBorda}`, borderRadius: configDesign.cards.raioBorda, padding: '10px', cursor: p.status_cotacao === 'falta' ? 'not-allowed' : 'pointer', position: 'relative', backgroundColor: configDesign.cores.fundoCards, boxShadow: configDesign.cards.sombra, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: selo ? '10px' : '0', opacity: opacidade }}>
+            <div key={p.id} onClick={() => abrirProduto(p)} style={{ border: `2px solid ${corBorda}`, borderRadius: configDesign.cards.raioBorda, padding: '10px', cursor: 'pointer', position: 'relative', backgroundColor: configDesign.cores.fundoCards, boxShadow: configDesign.cards.sombra, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: selo ? '10px' : '0', opacity: opacidade }}>
                {selo}
                {itemNoCarrinho && !selo && <div style={{position: 'absolute', top: '-8px', right: '-8px', background: configDesign.cores.primaria, color: '#fff', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: '900', fontSize: '11px', border: `2px solid ${configDesign.cores.fundoCards}`, zIndex: 2}}>{itemNoCarrinho.quantidade}</div>}
                <div style={{ height: categoriaAtiva === 'DESTAQUES' ? configDesign.cards.alturaImgDestaque : configDesign.cards.alturaImgPequena, borderRadius: '8px', backgroundImage: `url(${(p.foto_url || '').split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: configDesign.cores.inputFundo }} />
