@@ -40,12 +40,13 @@ export default function Usuarios() {
   const [lojaDigitada, setLojaDigitada] = useState('');
   
   const [mostrarSugestoesLoja, setMostrarSugestoesLoja] = useState(false);
-  // 💡 Controle de Nomes Parecidos (Evitar Duplicidade)
   const [mostrarSugestoesNome, setMostrarSugestoesNome] = useState(false); 
   
   const [usuarioAberto, setUsuarioAberto] = useState(null);
   const [editando, setEditando] = useState(false);
-  const [dados, setDados] = useState({ nome: '', codigo: '', senha: '', telefone: '', perfil: 'operador', status: true, loja: '' });
+  
+  // 💡 ESTADO INICIAL ATUALIZADO: Agora inclui codigo_loja
+  const [dados, setDados] = useState({ nome: '', codigo: '', senha: '', telefone: '', perfil: 'operador', status: true, loja: '', codigo_loja: null });
 
   async function carregarDados() {
     const { data: dataUsuarios } = await supabase.from('usuarios').select('*').order('nome', { ascending: true });
@@ -84,18 +85,17 @@ export default function Usuarios() {
     const usuariosDaLoja = usuarios.filter(u => u.codigo?.startsWith(prefixo));
     const proximoNumero = (usuariosDaLoja.length + 1).toString().padStart(2, '0');
     
-    setDados({ ...dados, loja: nomeDaLoja, codigo: `${prefixo}${proximoNumero}` });
+    // 💡 ATUALIZAÇÃO: Injetando o codigo_loja diretamente no objeto que será salvo
+    setDados({ ...dados, loja: nomeDaLoja, codigo: `${prefixo}${proximoNumero}`, codigo_loja: idDaLoja });
     setLojaDigitada(nomeDaLoja);
     setMostrarSugestoesLoja(false);
   };
 
-  // 🛡️ TRAVA V.I.R.T.U.S: Validação rigorosa
   async function salvar() {
     if (!dados.nome.trim()) return alert("⚠️ V.I.R.T.U.S INFORMA: O campo NOME COMPLETO é obrigatório!");
     if (!dados.loja.trim() || !dados.codigo) return alert("⚠️ V.I.R.T.U.S INFORMA: Você precisa buscar e selecionar uma LOJA para gerar o código de acesso!");
     if (!dados.senha.trim()) return alert("⚠️ V.I.R.T.U.S INFORMA: A SENHA é obrigatória!");
 
-    // 💡 TRAVA: Impede criar usuários com o mesmo nome exato na mesma loja, se for um novo código (Cadastro Duplicado).
     const duplicado = usuarios.find(u => u.nome.trim().toUpperCase() === dados.nome.trim().toUpperCase() && u.loja === dados.loja && u.codigo !== dados.codigo);
     if (duplicado) {
        return alert(`⚠️ Ação Bloqueada! Já existe um funcionário com o nome "${dados.nome}" cadastrado na loja "${dados.loja}".\n\nPor favor, utilize a lista de sugestões ao digitar o nome para editar o cadastro existente em vez de criar um novo.`);
@@ -125,7 +125,6 @@ export default function Usuarios() {
     return nome.toUpperCase().includes(lojaDigitada.toUpperCase());
   });
 
-  // 💡 Auto-completar inteligente para nomes parecidos (ajuda a achar usuários antigos antes de criar novos)
   const usuariosFiltradosNome = dados.nome && dados.nome.length > 2 
     ? usuarios.filter(u => u.nome?.toLowerCase().includes(dados.nome.toLowerCase()) && u.codigo !== dados.codigo) 
     : [];
@@ -140,7 +139,7 @@ export default function Usuarios() {
       <div style={{ display: 'flex', gap: '15px' }}>
         <input placeholder="Procurar funcionário..." value={busca} onChange={e => setBusca(e.target.value)} style={{ flex: 1, padding: '18px', borderRadius: design.geral.raioBordaGlobal, border: 'none', boxShadow: design.geral.sombraPadrao, outline: 'none' }} />
         <button 
-          onClick={() => { setDados({ nome: '', codigo: '', senha: '', telefone: '', perfil: 'operador', status: true, loja: '' }); setLojaDigitada(''); setUsuarioAberto({novo: true}); setEditando(true); }}
+          onClick={() => { setDados({ nome: '', codigo: '', senha: '', telefone: '', perfil: 'operador', status: true, loja: '', codigo_loja: null }); setLojaDigitada(''); setUsuarioAberto({novo: true}); setEditando(true); }}
           style={{ backgroundColor: design.botoes.primario, color: design.botoes.texto, border: 'none', padding: '0 30px', borderRadius: design.geral.raioBordaGlobal, fontWeight: '900', cursor: 'pointer' }}
         >
           + NOVO
