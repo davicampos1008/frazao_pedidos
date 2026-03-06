@@ -67,6 +67,9 @@ export default function MenuCliente({ usuario, tema }) {
 
   const [produtoExpandido, setProdutoExpandido] = useState(null);
   const [quantidade, setQuantidade] = useState(1);
+  const [qtdBonificada, setQtdBonificada] = useState(0); 
+  const [temBonificacao, setTemBonificacao] = useState(false);
+
   const [modalCarrinhoAberto, setModalCarrinhoAberto] = useState(false);
   const [modalRevisaoAberto, setModalRevisaoAberto] = useState(false);
   const [enviandoPedido, setEnviandoPedido] = useState(false);
@@ -155,8 +158,7 @@ export default function MenuCliente({ usuario, tema }) {
       const prod = produtos.find(p => removerAcentos(p.nome.toLowerCase()).includes(removerAcentos(termoBusca.toLowerCase().trim())));
       if (prod) {
         setModalNotificacoesAberto(false);
-        setProdutoExpandido(prod);
-        setQuantidade(carrinho.find(i => i.id === prod.id)?.quantidade || 1);
+        abrirProduto(prod);
       }
     }
   }, [produtos, carrinho]);
@@ -193,7 +195,6 @@ export default function MenuCliente({ usuario, tema }) {
     return (isNaN(num) ? 0 : num).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
   
-  // 💡 CALCULO DE CAIXA INTELIGENTE
   const tratarInfosDeVenda = (produto) => {
     const precoKg = tratarPreco(produto.preco);
     const pesoCx = parseFloat(String(produto.peso_caixa || '').replace(/[^\d.]/g, ''));
@@ -249,7 +250,6 @@ export default function MenuCliente({ usuario, tema }) {
           setBanners({ topo: bMap.topo || '', logo: bMap.logo || '', tematico: bMap.tematico || '' });
         }
         
-        // Pega todos (mesmo em falta para mostrar com selo)
         const { data: pData } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
         if (pData) {
           setProdutos(pData);
@@ -278,9 +278,11 @@ export default function MenuCliente({ usuario, tema }) {
   const isAppTravado = !precosLiberados || (listaEnviadaHoje && !edicaoLiberadaBD);
 
   const abrirProduto = (p) => {
-    // 💡 REMOVIDA A TRAVA AQUI PARA PERMITIR ABRIR ITENS EM FALTA E SEM PREÇO
     setProdutoExpandido(p);
-    setQuantidade(carrinhoSeguro.find(i => i.id === p.id)?.quantidade || 1);
+    const itemExistente = carrinhoSeguro.find(i => i.id === p.id);
+    setQuantidade(itemExistente?.quantidade || 1);
+    setQtdBonificada(itemExistente?.qtd_bonificada || 0);
+    setTemBonificacao(!!itemExistente?.qtd_bonificada && itemExistente.qtd_bonificada > 0);
   };
   
   const tratarInputQuantidade = (valorDigitado) => {
@@ -288,24 +290,43 @@ export default function MenuCliente({ usuario, tema }) {
     setQuantidade(isNaN(val) || val < 1 ? '' : val);
   };
 
+  const tratarInputBonificacao = (valorDigitado) => {
+    const val = parseInt(valorDigitado, 10);
+    setQtdBonificada(isNaN(val) || val < 0 ? 0 : val);
+  };
+
   const salvarNoCarrinho = () => {
     const qtdFinal = parseInt(quantidade, 10) || 1;
+    const bonifFinal = temBonificacao ? (parseInt(qtdBonificada, 10) || 0) : 0;
+    
+    // 💡 Blinda para não deixar a bonificação ser maior que a quantidade total pedida
+    const bonificacaoSegura = Math.min(qtdFinal, bonifFinal);
+    const qtdCobrada = Math.max(0, qtdFinal - bonificacaoSegura);
+
     const infosVenda = tratarInfosDeVenda(produtoExpandido);
     
-    // 💡 AVISOS DE CONFIRMAÇÃO PARA PRODUTOS PROBLEMÁTICOS
     if (produtoExpandido.status_cotacao === 'falta') {
       if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está marcado como EM FALTA. Deseja adicionar ao pedido mesmo assim?`)) return;
     } else if (produtoExpandido.status_cotacao === 'sem_preco' || infosVenda.precoBase === 0) {
       if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está SEM PREÇO definido hoje. O valor final será atualizado posteriormente. Deseja confirmar?`)) return;
     }
     
-    const valorTotalItem = infosVenda.precoBase * qtdFinal;
+    const valorTotalItem = infosVenda.precoBase * qtdCobrada;
     const itemEx = carrinhoSeguro.find(i => i.id === produtoExpandido.id);
     
+    const novoItemFormatado = {
+        ...produtoExpandido, 
+        quantidade: qtdFinal, 
+        qtd_bonificada: bonificacaoSegura, 
+        valorUnit: infosVenda.precoBase, 
+        total: valorTotalItem, 
+        unidade_medida: infosVenda.unidadeFinal
+    };
+
     if (itemEx) {
-      setCarrinho(carrinhoSeguro.map(i => i.id === produtoExpandido.id ? { ...i, quantidade: qtdFinal, total: valorTotalItem, valorUnit: infosVenda.precoBase, unidade_medida: infosVenda.unidadeFinal } : i));
+      setCarrinho(carrinhoSeguro.map(i => i.id === produtoExpandido.id ? novoItemFormatado : i));
     } else {
-      setCarrinho([...carrinhoSeguro, { ...produtoExpandido, quantidade: qtdFinal, valorUnit: infosVenda.precoBase, total: valorTotalItem, unidade_medida: infosVenda.unidadeFinal }]);
+      setCarrinho([...carrinhoSeguro, novoItemFormatado]);
     }
     setProdutoExpandido(null);
   };
@@ -314,7 +335,9 @@ export default function MenuCliente({ usuario, tema }) {
     setCarrinho(prev => prev.map(item => {
       if (item.id === id) {
         const novaQtd = Math.max(1, (Number(item.quantidade) || 0) + delta);
-        return { ...item, quantidade: novaQtd, total: novaQtd * (Number(item.valorUnit) || 0) };
+        const bonif = Number(item.qtd_bonificada) || 0;
+        const cobrada = Math.max(0, novaQtd - bonif);
+        return { ...item, quantidade: novaQtd, total: cobrada * (Number(item.valorUnit) || 0) };
       }
       return item;
     }));
@@ -322,7 +345,14 @@ export default function MenuCliente({ usuario, tema }) {
 
   const alterarQtdCartInput = (id, valor) => {
     const novaQtd = parseInt(valor, 10) || 1;
-    setCarrinho(prev => prev.map(item => item.id === id ? { ...item, quantidade: novaQtd, total: novaQtd * (Number(item.valorUnit) || 0) } : item));
+    setCarrinho(prev => prev.map(item => {
+        if (item.id === id) {
+            const bonif = Number(item.qtd_bonificada) || 0;
+            const cobrada = Math.max(0, novaQtd - bonif);
+            return { ...item, quantidade: novaQtd, total: cobrada * (Number(item.valorUnit) || 0) };
+        }
+        return item;
+    }));
   };
 
   const zerarCarrinho = () => {
@@ -332,7 +362,6 @@ export default function MenuCliente({ usuario, tema }) {
     }
   };
 
-  // 💡 VERIFICAÇÃO DE LISTA PADRÃO ANTES DE ABRIR REVISÃO
   const abrirRevisao = () => {
     if(carrinhoSeguro.length === 0) return;
 
@@ -361,8 +390,16 @@ export default function MenuCliente({ usuario, tema }) {
     
     try {
       const dadosParaEnviar = carrinhoSeguro.map(item => ({
-        loja_id: codLoja, nome_usuario: usuario?.nome || "Operador", nome_produto: item.nome, quantidade: item.quantidade || 1,
-        unidade_medida: item.unidade_medida || 'UN', data_pedido: hoje, solicitou_refazer: false, liberado_edicao: false, status_compra: 'pendente' 
+        loja_id: codLoja, 
+        nome_usuario: usuario?.nome || "Operador", 
+        nome_produto: item.nome, 
+        quantidade: item.quantidade || 1,
+        qtd_bonificada: item.qtd_bonificada || 0,
+        unidade_medida: item.unidade_medida || 'UN', 
+        data_pedido: hoje, 
+        solicitou_refazer: false, 
+        liberado_edicao: false, 
+        status_compra: 'pendente' 
       }));
 
       await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
@@ -408,9 +445,11 @@ export default function MenuCliente({ usuario, tema }) {
         const prodOriginal = produtos.find(p => p.nome === dbItem.nome_produto);
         if (prodOriginal) {
           const infosVenda = tratarInfosDeVenda(prodOriginal);
-          return { ...prodOriginal, quantidade: dbItem.quantidade, valorUnit: infosVenda.precoBase, total: infosVenda.precoBase * dbItem.quantidade, unidade_medida: infosVenda.unidadeFinal };
+          const bonif = Number(dbItem.qtd_bonificada) || 0;
+          const qtdCobr = Math.max(0, dbItem.quantidade - bonif);
+          return { ...prodOriginal, quantidade: dbItem.quantidade, qtd_bonificada: bonif, valorUnit: infosVenda.precoBase, total: infosVenda.precoBase * qtdCobr, unidade_medida: infosVenda.unidadeFinal };
         }
-        return { id: Math.random(), nome: dbItem.nome_produto, quantidade: dbItem.quantidade, valorUnit: 0, total: 0, unidade_medida: dbItem.unidade_medida };
+        return { id: Math.random(), nome: dbItem.nome_produto, quantidade: dbItem.quantidade, qtd_bonificada: dbItem.qtd_bonificada || 0, valorUnit: 0, total: 0, unidade_medida: dbItem.unidade_medida };
       });
       setCarrinho(itensRestaurados);
       setListaEnviadaHoje(null);
@@ -453,7 +492,7 @@ export default function MenuCliente({ usuario, tema }) {
           <h3 style={{ fontSize: '14px', color: configDesign.cores.textoSuave, marginBottom: '15px', marginTop: 0 }}>RESUMO DO PEDIDO:</h3>
           {listaEnviadaHoje.map((item, i) => (
             <div key={`resumo-${i}`} style={{ padding: '12px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{color: configDesign.cores.textoForte}}><b>{item.quantidade}x</b> {item.nome_produto}</span><small style={{ color: configDesign.cores.textoSuave }}>{item.unidade_medida}</small>
+              <span style={{color: configDesign.cores.textoForte}}><b>{item.quantidade}x</b> {item.nome_produto} {item.qtd_bonificada > 0 && <span style={{color: configDesign.cores.sucesso, fontSize: '10px'}}>(🎁 {item.qtd_bonificada})</span>}</span><small style={{ color: configDesign.cores.textoSuave }}>{item.unidade_medida}</small>
             </div>
           ))}
         </div>
@@ -519,7 +558,6 @@ export default function MenuCliente({ usuario, tema }) {
       {/* PRODUTOS */}
       <div style={{ padding: '0 20px 20px 20px', display: 'grid', gridTemplateColumns: categoriaAtiva === 'DESTAQUES' ? '1fr' : 'repeat(auto-fill, minmax(140px, 1fr))', gap: '15px' }}>
         {produtos.filter(p => {
-          // 💡 BUSCA INTELIGENTE: ignora acentos, ignora aba ativa (a não ser que esteja na lista padrão)
           const termoBuscado = removerAcentos(buscaMenu.toLowerCase().trim());
           const nomeProduto = removerAcentos(p.nome.toLowerCase());
           
@@ -637,15 +675,26 @@ export default function MenuCliente({ usuario, tema }) {
       {/* MODAL PRODUTO */}
       {produtoExpandido && (() => {
         const infos = tratarInfosDeVenda(produtoExpandido);
+        
+        // Matemáticas do modal em tempo real
+        const qtdFinal = parseInt(quantidade) || 1;
+        const bonifFinal = temBonificacao ? (parseInt(qtdBonificada) || 0) : 0;
+        const bonificacaoSegura = Math.min(qtdFinal, bonifFinal);
+        const qtdCobrada = Math.max(0, qtdFinal - bonificacaoSegura);
+        const valorTotalCalc = infos.precoBase * qtdCobrada;
+        const valorEconomia = infos.precoBase * bonificacaoSegura;
+
         return (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
             <button onClick={() => setProdutoExpandido(null)} style={{ alignSelf: 'flex-end', margin: '20px', color: '#fff', fontSize: '28px', background: 'none', border: 'none' }}>✕</button>
             <div style={{ flex: 1, backgroundImage: `url(${(produtoExpandido.foto_url || '').split(',')[0]})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', margin: '20px' }} />
+            
             <div style={{ backgroundColor: configDesign.cores.fundoCards, padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <h2 style={{margin: 0, fontSize: '20px', color: configDesign.cores.textoForte, flex: 1}}>{produtoExpandido.nome}</h2>
                   <span style={{ fontSize: '12px', background: configDesign.cores.inputFundo, padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>Vendido por {infos.unidadeFinal}</span>
                 </div>
+                
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
                   <div>
                     <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário {infos.isCaixa && '(Caixa Fechada)'}</span>
@@ -653,21 +702,50 @@ export default function MenuCliente({ usuario, tema }) {
                     {infos.isCaixa && <span style={{display: 'block', fontSize: '10px', color: configDesign.cores.textoSuave}}>{infos.textoSecundario}</span>}
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Total de {formatarQtdUnidade((parseInt(quantidade) || 1), infos.unidadeFinal)}</span>
-                    <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>{formatarMoeda(infos.precoBase * (parseInt(quantidade) || 1))}</span>
+                    <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Total a Pagar ({formatarQtdUnidade(qtdCobrada, infos.unidadeFinal)})</span>
+                    <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>{formatarMoeda(valorTotalCalc)}</span>
+                    {temBonificacao && bonificacaoSegura > 0 && (
+                       <span style={{color: configDesign.cores.sucesso, fontSize: '11px', fontWeight: 'bold', display: 'block'}}>
+                          Desconto: -{formatarMoeda(valorEconomia)}
+                       </span>
+                    )}
                   </div>
                 </div>
+
                 {!isAppTravado ? (
-                  <>
-                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', margin: '25px 0' }}>
-                      <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>-</button>
-                      <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '80px', height: '55px', fontSize: '24px', fontWeight: '900', textAlign: 'center', borderRadius: '15px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
-                      <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '55px', height: '55px', fontSize: '24px', borderRadius: '15px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>+</button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', margin: '20px 0' }}>
+                    
+                    {/* CONTROLE DE QUANTIDADE NORMAL */}
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px' }}>
+                      <span style={{fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave}}>QTD. TOTAL:</span>
+                      <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '45px', height: '45px', fontSize: '20px', borderRadius: '12px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>-</button>
+                      <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '60px', height: '45px', fontSize: '20px', fontWeight: '900', textAlign: 'center', borderRadius: '12px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
+                      <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '45px', height: '45px', fontSize: '20px', borderRadius: '12px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>+</button>
                     </div>
+
+                    {/* 💡 CAIXA DE BONIFICAÇÃO EXCLUSIVA DO CLIENTE */}
+                    <div style={{ backgroundColor: temBonificacao ? (isEscuro ? '#14532d' : '#dcfce7') : configDesign.cores.inputFundo, padding: '12px 15px', borderRadius: '12px', border: temBonificacao ? '1px solid #86efac' : `1px solid ${configDesign.cores.borda}`, transition: '0.2s' }}>
+                       <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: temBonificacao ? (isEscuro ? '#86efac' : '#166534') : configDesign.cores.textoForte, fontWeight: '900', fontSize: '13px', cursor: 'pointer' }}>
+                         <input type="checkbox" checked={temBonificacao} onChange={(e) => { setTemBonificacao(e.target.checked); if(!e.target.checked) setQtdBonificada(0); }} style={{ width: '20px', height: '20px', accentColor: configDesign.cores.sucesso }} />
+                         🎁 INCLUIR BONIFICAÇÃO (Opção Loja)
+                       </label>
+                       
+                       {temBonificacao && (
+                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', paddingTop: '10px', borderTop: isEscuro ? '1px dashed #22c55e' : '1px dashed #86efac' }}>
+                            <span style={{fontSize: '12px', fontWeight: 'bold', color: isEscuro ? '#86efac' : '#166534'}}>Qtd Bonificada:</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                               <button onClick={() => tratarInputBonificacao(Math.max(0, (parseInt(qtdBonificada) || 0) - 1))} style={{ width: '35px', height: '35px', fontSize: '18px', borderRadius: '8px', border: 'none', background: '#bbf7d0', color: '#166534' }}>-</button>
+                               <input type="number" value={qtdBonificada} onChange={(e) => tratarInputBonificacao(e.target.value)} style={{ width: '50px', height: '35px', fontSize: '16px', fontWeight: '900', textAlign: 'center', borderRadius: '8px', border: `1px solid #22c55e`, outline: 'none', color: '#166534', background: '#fff' }} />
+                               <button onClick={() => tratarInputBonificacao((parseInt(qtdBonificada) || 0) + 1)} style={{ width: '35px', height: '35px', fontSize: '18px', borderRadius: '8px', border: 'none', background: '#bbf7d0', color: '#166534' }}>+</button>
+                            </div>
+                         </div>
+                       )}
+                    </div>
+
                     <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px' }}>
                       {carrinhoSeguro.find(i => i.id === produtoExpandido.id) ? 'ATUALIZAR QUANTIDADE' : 'ADICIONAR AO CARRINHO'}
                     </button>
-                  </>
+                  </div>
                 ) : (
                   <div style={{ marginTop: '25px' }}>
                     <button disabled style={{ width: '100%', padding: '22px', background: isEscuro ? '#334155' : '#e2e8f0', color: isEscuro ? '#94a3b8' : '#94a3b8', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '13px' }}>
@@ -708,6 +786,7 @@ export default function MenuCliente({ usuario, tema }) {
                       <div style={{ flex: 1 }}>
                         <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria, fontSize: '15px'}}>{formatarQtdUnidade(item?.quantidade, item?.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
                         <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item?.valorUnit)} / {item?.unidade_medida || 'UN'} • Toque para editar</div>
+                        {item?.qtd_bonificada > 0 && <div style={{ fontSize: '10px', color: configDesign.cores.sucesso, fontWeight: 'bold', marginTop: '2px' }}>🎁 {item.qtd_bonificada} item(ns) bonificado(s)</div>}
                       </div>
                       <div style={{ fontWeight: '900', color: configDesign.cores.textoForte, fontSize: '14px' }}>{formatarMoeda(item?.total)}</div>
                     </div>
@@ -738,6 +817,7 @@ export default function MenuCliente({ usuario, tema }) {
                       <div>
                         <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item?.quantidade, item?.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
                         <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item?.valorUnit)} / {item?.unidade_medida || 'UN'}</div>
+                        {item?.qtd_bonificada > 0 && <div style={{ fontSize: '10px', color: configDesign.cores.sucesso, fontWeight: 'bold', marginTop: '2px' }}>🎁 {item.qtd_bonificada} Bonificado(s)</div>}
                       </div>
                       <span style={{fontWeight: 'bold', color: configDesign.cores.textoSuave}}>{formatarMoeda(item?.total)}</span>
                   </div>
