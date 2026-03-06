@@ -31,8 +31,10 @@ export default function PlanilhaCompras() {
 
   const [fornExpandido, setFornExpandido] = useState(null);
   const [lojaGeralSelecionada, setLojaGeralSelecionada] = useState({});
-  const [localCompra, setLocalCompra] = useState(''); // 💡 INICIA VAZIO PARA OBRIGAR A ESCOLHA
+  const [localCompra, setLocalCompra] = useState(''); 
 
+  const [copiadoGeral, setCopiadoGeral] = useState(null);
+  const [copiadoLoja, setCopiadoLoja] = useState(null);
   const [fornecedorDestaque, setFornecedorDestaque] = useState(null);
 
   const [itensSelecionados, setItensSelecionados] = useState([]);
@@ -46,7 +48,6 @@ export default function PlanilhaCompras() {
   const [precosAgrupados, setPrecosAgrupados] = useState({});
   const [grupoExpandido, setGrupoExpandido] = useState(null);
   
-  // 💡 RASTREIO DE MENSAGENS COPIADAS
   const [mensagensCopiadas, setMensagensCopiadas] = useState([]);
   const [notificacoes, setNotificacoes] = useState([]);
 
@@ -66,9 +67,11 @@ export default function PlanilhaCompras() {
     localStorage.setItem('agrupamentos_virtus', JSON.stringify(agrupamentos));
   }, [agrupamentos]);
 
+  // 💡 CORREÇÃO: Lê o zero perfeitamente
   const extrairNum = (valor) => {
-    const num = String(valor || "").match(/\d+/);
-    return num ? parseInt(num[0], 10) : null;
+    if (valor === null || valor === undefined) return null;
+    const apenasNumeros = String(valor).replace(/\D/g, ''); 
+    return apenasNumeros !== '' ? parseInt(apenasNumeros, 10) : null;
   };
 
   const tratarPrecoNum = (p) => parseFloat(String(p || '0').replace('R$', '').trim().replaceAll('.', '').replace(',', '.')) || 0;
@@ -80,7 +83,6 @@ export default function PlanilhaCompras() {
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
   };
 
-  // 💡 REMOVE PARÊNTESES, CÓDIGOS EXTRAS PARA O WHATSAPP FICAR LIMPO
   const limparNomeParaWhatsapp = (str) => {
     return str.replace(/\s*\(.*?\)\s*/g, '').trim().toUpperCase();
   };
@@ -102,7 +104,15 @@ export default function PlanilhaCompras() {
       if (fornData) setFornecedoresBd(fornData);
 
       const { data: lojasData } = await supabase.from('lojas').select('*');
-      if (lojasData) setLojasBd(lojasData);
+      
+      const lojasDb = lojasData || [];
+      
+      // 💡 GARANTE QUE A LOJA FRAZÃO (TESTE) CÓDIGO 00 EXISTE NO ARRAY
+      const temFrazao = lojasDb.some(l => extrairNum(l.codigo_loja) === 0);
+      if (!temFrazao) {
+        lojasDb.unshift({ id: 99999, codigo_loja: '00', nome_fantasia: 'FRAZÃO (TESTE)' });
+      }
+      setLojasBd(lojasDb);
       
       const { data: prodData } = await supabase.from('produtos').select('*');
       const { data: pedData } = await supabase.from('pedidos').select('*').eq('data_pedido', hoje);
@@ -120,8 +130,9 @@ export default function PlanilhaCompras() {
         const qtdPedida = Number(p.quantidade || 0);
         const qtdBonificadaCliente = Number(p.qtd_bonificada || 0);
 
-        if (idLoja && idLoja > 1) { 
-          const lojaInfo = (lojasData || []).find(l => extrairNum(l.codigo_loja) === idLoja);
+        // 💡 ACEITA A LOJA ZERO (00) NO FLUXO
+        if (idLoja !== null && idLoja >= 0) { 
+          const lojaInfo = lojasDb.find(l => extrairNum(l.codigo_loja) === idLoja);
           const nomeLoja = lojaInfo ? lojaInfo.nome_fantasia : `Loja ${idLoja}`;
 
           let isAlertaFornecedor = false;
@@ -137,7 +148,7 @@ export default function PlanilhaCompras() {
               mapaPendentes[nomeProdutoUpper] = { nome: nomeProdutoUpper, demanda: 0, qtd_bonificada_cliente: 0, unidade: String(p.unidade_medida || "UN"), lojas: [] };
             }
             mapaPendentes[nomeProdutoUpper].demanda += qtdPedida;
-            mapaPendentes[nomeProdutoUpper].qtd_bonificada_cliente += qtdBonificadaCliente; // 💡 RASTREIA SE O CLIENTE PEDIU BONIFICADO
+            mapaPendentes[nomeProdutoUpper].qtd_bonificada_cliente += qtdBonificadaCliente;
             mapaPendentes[nomeProdutoUpper].lojas.push({ 
               id_pedido: p.id, loja_id: idLoja, nome_fantasia: nomeLoja, qtd_pedida: qtdPedida, qtd_bonificada_cliente: qtdBonificadaCliente 
             });
@@ -333,7 +344,6 @@ export default function PlanilhaCompras() {
     }));
   };
 
-  // 💡 ACEITAR BONIFICAÇÃO DO CLIENTE COM 1 CLIQUE
   const aceitarBonificacaoCliente = () => {
      setDadosCompra({...dadosCompra, temBonificacao: true});
      setLojasEnvolvidas(lojasEnvolvidas.map(l => ({
@@ -453,7 +463,6 @@ export default function PlanilhaCompras() {
      carregarDados();
   };
 
-  // 💡 MENSAGEM DO WHATSAPP GERAL (Aba Fornecedores Originais)
   const gerarPedidoGeral = (f) => {
     if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de copiar os pedidos!");
     
@@ -467,7 +476,7 @@ export default function PlanilhaCompras() {
     const mapaItensGerais = {};
     Object.values(f.lojas).forEach(loja => {
       loja.itens.forEach(item => {
-        const key = `${item.nome}`; // Unifica tudo no geral, sem importar se é boleto ou preço na mensagem pro cara da separação
+        const key = `${item.nome}`;
         if (!mapaItensGerais[key]) {
           mapaItensGerais[key] = { ...item, qtd: 0 };
         }
@@ -488,7 +497,6 @@ export default function PlanilhaCompras() {
     mostrarNotificacao('✅ Pedido Geral copiado para o WhatsApp!', 'sucesso');
   };
 
-  // 💡 MENSAGEM DO WHATSAPP POR LOJA (Na Aba Fornecedores ou Modal)
   const copiarMensagemWhatsapp = (lojaNome, lojaData, btnId) => {
     if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de copiar os pedidos!");
 
@@ -507,162 +515,13 @@ export default function PlanilhaCompras() {
     mostrarNotificacao('✅ Lista copiada para o WhatsApp!', 'sucesso');
   };
 
-  // 💡 NOVO: AGRUPAR PARA SEPARAÇÃO DE FORNECEDORES (TELA DE SELECIONAR)
-  const itensJaAgrupados = agrupamentos.flatMap(g => g.itens);
-
-  const alternarSelecaoLote = (nomeItem) => {
-    setItensSelecionados(prev => 
-      prev.includes(nomeItem) ? prev.filter(i => i !== nomeItem) : [...prev, nomeItem]
-    );
-  };
-
-  const criarGrupoFornecedor = () => {
-    if (!nomeFornecedorLote.trim()) return alert("Digite o nome do fornecedor para agrupar.");
-    if (itensSelecionados.length === 0) return alert("Selecione pelo menos um item.");
-    
-    const novoGrupo = {
-      id: Date.now(),
-      fornecedor: nomeFornecedorLote.toUpperCase().trim(),
-      itens: itensSelecionados,
-      status: 'pendente'
-    };
-    
-    setAgrupamentos(prev => [...prev, novoGrupo]);
-    setItensSelecionados([]);
-    setNomeFornecedorLote('');
-    mostrarNotificacao(`Itens separados para ${novoGrupo.fornecedor}`, 'sucesso');
-    setAbaAtiva('pedidos_fornecedor');
-    setGrupoExpandido(novoGrupo.id);
-  };
-
-  const removerGrupoFornecedor = (idGrupo) => {
-    if(window.confirm("Deseja desfazer este grupo? Os itens voltarão a ficar disponíveis para seleção.")) {
-       setAgrupamentos(prev => prev.filter(g => g.id !== idGrupo));
-    }
-  };
-
-  // 💡 MENSAGEM DO WHATSAPP (AGRUPADOS - TELA NOVA)
-  const copiarWhatsappAgrupadoLoja = (grupo) => {
-    if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de copiar os pedidos!");
-
-    let msg = ``;
-    const lojasMap = {};
-    const comp = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
-    
-    grupo.itens.forEach(nomeItem => {
-       const demandaItem = demandas.find(d => d.nome === nomeItem);
-       if(!demandaItem) return;
-       demandaItem.lojas.forEach(loja => {
-          if(!lojasMap[loja.nome_fantasia]) {
-             const lojaInfo = lojasBd.find(l => parseInt(l.codigo_loja) === loja.loja_id);
-             const placaBase = lojaInfo?.placa_caminhao ? lojaInfo.placa_caminhao.split('|')[0].trim() : 'SEM PLACA';
-             lojasMap[loja.nome_fantasia] = { placa: `${placaBase} - ${comp}`, itens: [] };
-          }
-          lojasMap[loja.nome_fantasia].itens.push(`${loja.qtd_pedida} ${String(demandaItem.unidade).toUpperCase()} - ${limparNomeParaWhatsapp(formatarNomeItem(nomeItem))}`);
-       });
-    });
-    
-    Object.entries(lojasMap).forEach(([nomeLoja, dados]) => {
-       msg += `*${nomeLoja.replace(/^\d+\s*-\s*/, '').trim().toUpperCase()}*\n\n`;
-       dados.itens.forEach(i => msg += `${i}\n`);
-       msg += `\n${dados.placa}\n\n`;
-    });
-    
-    navigator.clipboard.writeText(msg.trim());
-    marcarComoCopiado(`grupo_${grupo.id}`);
-    mostrarNotificacao('✅ Pedidos agrupados copiados para o WhatsApp!', 'sucesso');
-  };
-
-  // 💡 FINALIZAÇÃO DO LOTE COM OS 3 BOTÕES (À Vista, Boleto e Sem Preço)
-  const finalizarLoteFornecedor = (grupoId, tipoFechamento) => {
-    if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de enviar o pedido.");
-    
-    const grupo = agrupamentos.find(g => g.id === grupoId);
-    if (!grupo) return;
-
-    setCarregando(true);
-    const promessas = [];
-    
-    if (tipoFechamento === 'sem_preco') {
-        // Envia para o banco sem preço, MAS NÃO REMOVE DA TELA. Apenas pinta de Laranja.
-        grupo.itens.forEach(nomeItem => {
-            const demandaItem = demandas.find(d => d.nome === nomeItem);
-            if (!demandaItem) return;
-            demandaItem.lojas.forEach(loja => {
-                promessas.push(supabase.from('pedidos').update({
-                    fornecedor_compra: grupo.fornecedor,
-                    custo_unit: 'R$ 0,00',
-                    qtd_atendida: loja.qtd_pedida, 
-                    status_compra: 'atendido'
-                }).eq('id', loja.id_pedido));
-            });
-        });
-        
-        Promise.all(promessas).then(() => {
-            setAgrupamentos(prev => prev.map(g => g.id === grupoId ? {...g, status: 'enviado_sem_preco'} : g));
-            mostrarNotificacao(`📦 Pedido para ${grupo.fornecedor} enviado (Aguardando Preços).`, 'sucesso');
-            carregarDados(true);
-            setCarregando(false);
-        });
-
-    } else {
-        // FECHAMENTO DEFINITIVO COM PREÇO (Remove da tela e vai pro fornecedor real)
-        let isBoleto = tipoFechamento === 'boleto';
-        let tudoPreenchido = true;
-
-        grupo.itens.forEach(nomeItem => {
-            const demandaItem = demandas.find(d => d.nome === nomeItem);
-            const precoDigitado = precosAgrupados[`${grupoId}_${nomeItem}`];
-            if (!precoDigitado || precoDigitado === '0') tudoPreenchido = false;
-
-            let precoLimpo = precoDigitado ? precoDigitado.replace(/[^\d,.-]/g, '').trim() : '';
-            if (!precoLimpo.includes(',') && precoLimpo) precoLimpo += ',00';
-            const precoFinal = precoLimpo ? `R$ ${precoLimpo}` : 'R$ 0,00';
-
-            if (demandaItem) {
-               demandaItem.lojas.forEach(loja => {
-                   promessas.push(supabase.from('pedidos').update({
-                       fornecedor_compra: grupo.fornecedor,
-                       custo_unit: precoFinal,
-                       qtd_atendida: loja.qtd_pedida, 
-                       status_compra: isBoleto ? 'boleto' : 'atendido'
-                   }).eq('id', loja.id_pedido));
-               });
-            }
-        });
-        
-        if (!tudoPreenchido && !window.confirm("Alguns itens estão sem preço. Deseja finalizar mesmo assim?")) {
-           setCarregando(false);
-           return;
-        }
-
-        Promise.all(promessas).then(() => {
-            setAgrupamentos(prev => prev.filter(g => g.id !== grupoId));
-            mostrarNotificacao(`✅ Preços de ${grupo.fornecedor} lançados!`, 'sucesso');
-            carregarDados(true);
-            setCarregando(false);
-        });
-    }
-  };
-
   const processarPDFResumo = async (modo = 'baixar') => {
      const elemento = document.getElementById('area-impressao-resumo');
      if (!elemento) return;
-
      const nomeArquivo = `Resumo_Compras_${dataBr.replace(/\//g, '-')}.pdf`;
-     const opt = {
-       margin:       [10, 10, 15, 10], 
-       filename:     nomeArquivo,
-       image:        { type: 'jpeg', quality: 0.98 },
-       html2canvas:  { scale: 2, useCORS: true, logging: false },
-       jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-     };
+     const opt = { margin: [10, 10, 15, 10], filename: nomeArquivo, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true, logging: false }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
 
-     if (!window.html2pdf) {
-       alert("Aguarde, carregando biblioteca PDF...");
-       return;
-     }
-
+     if (!window.html2pdf) return alert("Aguarde, carregando biblioteca PDF...");
      if (modo === 'whatsapp') {
        try {
          const pdfBlob = await window.html2pdf().set(opt).from(elemento).output('blob');
@@ -677,9 +536,7 @@ export default function PlanilhaCompras() {
      } else if (modo === 'preview') {
        const pdfBlobUrl = await window.html2pdf().set(opt).from(elemento).output('bloburl');
        window.open(pdfBlobUrl, '_blank');
-     } else {
-       window.html2pdf().set(opt).from(elemento).save();
-     }
+     } else { window.html2pdf().set(opt).from(elemento).save(); }
   };
 
   const renderListaLojasModal = () => (
@@ -720,9 +577,142 @@ export default function PlanilhaCompras() {
     </div>
   );
 
+  const alternarSelecaoLote = (nomeItem) => {
+    setItensSelecionados(prev => 
+      prev.includes(nomeItem) ? prev.filter(i => i !== nomeItem) : [...prev, nomeItem]
+    );
+  };
+
+  const criarGrupoFornecedor = () => {
+    if (!nomeFornecedorLote.trim()) return alert("Digite o nome do fornecedor para agrupar.");
+    if (itensSelecionados.length === 0) return alert("Selecione pelo menos um item.");
+    
+    const novoGrupo = {
+      id: Date.now(),
+      fornecedor: nomeFornecedorLote.toUpperCase().trim(),
+      itens: itensSelecionados,
+      status: 'pendente'
+    };
+    
+    setAgrupamentos(prev => [...prev, novoGrupo]);
+    setItensSelecionados([]);
+    setNomeFornecedorLote('');
+    mostrarNotificacao(`Itens separados para ${novoGrupo.fornecedor}`, 'sucesso');
+    setAbaAtiva('pedidos_fornecedor');
+    setGrupoExpandido(novoGrupo.id);
+  };
+
+  const removerGrupoFornecedor = (idGrupo) => {
+    if(window.confirm("Deseja desfazer este grupo? Os itens voltarão a ficar disponíveis para seleção.")) {
+       setAgrupamentos(prev => prev.filter(g => g.id !== idGrupo));
+    }
+  };
+
+  const copiarWhatsappAgrupadoLoja = (grupo) => {
+    if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de copiar os pedidos!");
+
+    let msg = ``;
+    const lojasMap = {};
+    const comp = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
+    
+    grupo.itens.forEach(nomeItem => {
+       const demandaItem = demandas.find(d => d.nome === nomeItem);
+       if(!demandaItem) return;
+       demandaItem.lojas.forEach(loja => {
+          if(!lojasMap[loja.nome_fantasia]) {
+             const lojaInfo = lojasBd.find(l => parseInt(l.codigo_loja) === loja.loja_id);
+             const placaBase = lojaInfo?.placa_caminhao ? lojaInfo.placa_caminhao.split('|')[0].trim() : 'SEM PLACA';
+             lojasMap[loja.nome_fantasia] = { placa: `${placaBase} - ${comp}`, itens: [] };
+          }
+          lojasMap[loja.nome_fantasia].itens.push(`${loja.qtd_pedida} ${String(demandaItem.unidade).toUpperCase()} - ${limparNomeParaWhatsapp(formatarNomeItem(nomeItem))}`);
+       });
+    });
+    
+    Object.entries(lojasMap).forEach(([nomeLoja, dados]) => {
+       msg += `*${nomeLoja.replace(/^\d+\s*-\s*/, '').trim().toUpperCase()}*\n\n`;
+       dados.itens.forEach(i => msg += `${i}\n`);
+       msg += `\n${dados.placa}\n\n`;
+    });
+    
+    navigator.clipboard.writeText(msg.trim());
+    marcarComoCopiado(`grupo_${grupo.id}`);
+    mostrarNotificacao('✅ Pedidos agrupados copiados para o WhatsApp!', 'sucesso');
+  };
+
+  const finalizarLoteFornecedor = (grupoId, tipoFechamento) => {
+    if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de enviar o pedido.");
+    
+    const grupo = agrupamentos.find(g => g.id === grupoId);
+    if (!grupo) return;
+
+    setCarregando(true);
+    const promessas = [];
+    
+    if (tipoFechamento === 'sem_preco') {
+        grupo.itens.forEach(nomeItem => {
+            const demandaItem = demandas.find(d => d.nome === nomeItem);
+            if (!demandaItem) return;
+            demandaItem.lojas.forEach(loja => {
+                promessas.push(supabase.from('pedidos').update({
+                    fornecedor_compra: grupo.fornecedor,
+                    custo_unit: 'R$ 0,00',
+                    qtd_atendida: loja.qtd_pedida, 
+                    status_compra: 'atendido'
+                }).eq('id', loja.id_pedido));
+            });
+        });
+        
+        Promise.all(promessas).then(() => {
+            setAgrupamentos(prev => prev.map(g => g.id === grupoId ? {...g, status: 'enviado_sem_preco'} : g));
+            mostrarNotificacao(`📦 Pedido para ${grupo.fornecedor} enviado (Aguardando Preços).`, 'sucesso');
+            carregarDados(true);
+            setCarregando(false);
+        });
+
+    } else {
+        let isBoleto = tipoFechamento === 'boleto';
+        let tudoPreenchido = true;
+
+        grupo.itens.forEach(nomeItem => {
+            const demandaItem = demandas.find(d => d.nome === nomeItem);
+            const precoDigitado = precosAgrupados[`${grupoId}_${nomeItem}`];
+            if (!precoDigitado || precoDigitado === '0') tudoPreenchido = false;
+
+            let precoLimpo = precoDigitado ? precoDigitado.replace(/[^\d,.-]/g, '').trim() : '';
+            if (!precoLimpo.includes(',') && precoLimpo) precoLimpo += ',00';
+            const precoFinal = precoLimpo ? `R$ ${precoLimpo}` : 'R$ 0,00';
+
+            if (demandaItem) {
+               demandaItem.lojas.forEach(loja => {
+                   promessas.push(supabase.from('pedidos').update({
+                       fornecedor_compra: grupo.fornecedor,
+                       custo_unit: precoFinal,
+                       qtd_atendida: loja.qtd_pedida, 
+                       status_compra: isBoleto ? 'boleto' : 'atendido'
+                   }).eq('id', loja.id_pedido));
+               });
+            }
+        });
+        
+        if (!tudoPreenchido && !window.confirm("Alguns itens estão sem preço. Deseja finalizar mesmo assim?")) {
+           setCarregando(false);
+           return;
+        }
+
+        Promise.all(promessas).then(() => {
+            setAgrupamentos(prev => prev.filter(g => g.id !== grupoId));
+            mostrarNotificacao(`✅ Preços de ${grupo.fornecedor} lançados!`, 'sucesso');
+            carregarDados(true);
+            setCarregando(false);
+        });
+    }
+  };
+
   if (carregando && demandas.length === 0 && pedidosFeitos.length === 0) {
     return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Carregando...</div>;
   }
+
+  const itensJaAgrupados = agrupamentos.flatMap(g => g.itens);
 
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px', padding: '10px' }}>
@@ -801,7 +791,6 @@ export default function PlanilhaCompras() {
                   <span style={{ fontSize: '10px', color: item.isResto ? '#ef4444' : '#64748b', fontWeight: item.isResto ? 'bold' : 'normal', marginTop: '5px' }}>
                     {item.isResto ? 'RESTA COMPRAR' : `${item.lojas.length} Loja(s)`}
                   </span>
-                  {/* 💡 ALERTA VISUAL DE BONIFICAÇÃO DO CLIENTE NA CAIXINHA */}
                   {item.qtd_bonificada_cliente > 0 && (
                      <span style={{ fontSize: '10px', color: '#16a34a', background: '#dcfce7', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold', marginTop: '5px' }}>
                        🎁 {item.qtd_bonificada_cliente} Bonif. Solicitada
@@ -839,7 +828,6 @@ export default function PlanilhaCompras() {
             )}
           </div>
 
-          {/* BARRA FLUTUANTE DE AÇÃO */}
           {itensSelecionados.length > 0 && (
             <div style={{ position: 'fixed', bottom: 0, left: 0, width: '100%', backgroundColor: '#fff', padding: '20px', boxShadow: '0 -10px 30px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '10px', zIndex: 1000, boxSizing: 'border-box' }}>
                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -875,7 +863,6 @@ export default function PlanilhaCompras() {
                  }
               });
 
-              // Verifica se já mandou pro fornecedor sem preço
               const isEnviadoSemPreco = grupo.status === 'enviado_sem_preco';
 
               return (
@@ -1000,7 +987,6 @@ export default function PlanilhaCompras() {
               let iconeTopo = '';
               let corH3 = '#111';
 
-              // 💡 Verifica se todas as lojas do fornecedor já foram copiadas
               const todasLojasCopiadas = Object.values(f.lojas).every(loja => mensagensCopiadas.includes(`loja_${f.nome}_${loja.nome}`));
 
               if (temAlerta) {
@@ -1208,7 +1194,6 @@ export default function PlanilhaCompras() {
               <button onClick={() => setItemModal(null)} style={{ background: '#f1f5f9', border: 'none', width: '35px', height: '35px', borderRadius: '50%', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
             </div>
 
-            {/* 💡 AVISO E BOTÃO DE BONIFICAÇÃO DO CLIENTE */}
             {itemModal.qtd_bonificada_cliente > 0 && !dadosCompra.temBonificacao && (
                <div style={{ background: '#fef3c7', border: '1px solid #fde68a', padding: '15px', borderRadius: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>

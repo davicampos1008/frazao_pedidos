@@ -10,10 +10,11 @@ export default function Listas() {
   const dataAtual = new Date();
   const hojeBanco = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}-${String(dataAtual.getDate()).padStart(2, '0')}`;
 
+  // 💡 CORREÇÃO: Lê o zero perfeitamente
   const extrairNum = (valor) => {
     if (valor === null || valor === undefined) return null;
     const apenasNumeros = String(valor).replace(/\D/g, ''); 
-    return apenasNumeros ? parseInt(apenasNumeros, 10) : null;
+    return apenasNumeros !== '' ? parseInt(apenasNumeros, 10) : null;
   };
 
   const formatarNomeItem = (str) => {
@@ -29,9 +30,10 @@ export default function Listas() {
       
       const lojasDb = dLojas || [];
       
-      const temFrazao = lojasDb.some(l => extrairNum(l.codigo_loja) === 1);
+      // 💡 GARANTE QUE A LOJA FRAZÃO (TESTE) CÓDIGO 00 EXISTE NO ARRAY
+      const temFrazao = lojasDb.some(l => extrairNum(l.codigo_loja) === 0);
       if (!temFrazao) {
-        lojasDb.unshift({ id: 99999, codigo_loja: '1', nome_fantasia: 'FRAZÃO (TESTE)' });
+        lojasDb.unshift({ id: 99999, codigo_loja: '00', nome_fantasia: 'FRAZÃO (TESTE)' });
       }
 
       setLojas(lojasDb);
@@ -46,8 +48,8 @@ export default function Listas() {
     const mapa = {};
     pedidosDia.forEach(p => {
       const idLoja = extrairNum(p.loja_id);
-      // 💡 CORREÇÃO: Agora ele lê QUALQUER loja maior que ZERO (ou seja, pega a Frazão Código 1 também)
-      if (idLoja !== null && idLoja > 0 && p.liberado_edicao !== true) { 
+      // 💡 ACEITA A LOJA ZERO (00) NA SOMA
+      if (idLoja !== null && idLoja >= 0 && p.liberado_edicao !== true) { 
         const nome = String(p.nome_produto || "Sem Nome").toUpperCase();
         if (!mapa[nome]) mapa[nome] = { nome, total: 0, unidade: p.unidade_medida || "UN", lojasQuePediram: new Set() };
         mapa[nome].total += Number(p.quantidade || 0);
@@ -58,10 +60,10 @@ export default function Listas() {
   };
 
   const listaConsolidada = obterSomaTotal();
-  // Mantemos a barra de progresso ignorando a Frazão para não bugar a meta diária (Faltam X lojas)
-  const idsQueEnviaramProgresso = pedidosDia.filter(p => p.liberado_edicao !== true).map(p => extrairNum(p.loja_id)).filter(id => id !== null && id > 1);
+  // Mantemos a barra de progresso ignorando a Frazão para não bugar a meta diária
+  const idsQueEnviaramProgresso = pedidosDia.filter(p => p.liberado_edicao !== true).map(p => extrairNum(p.loja_id)).filter(id => id !== null && id > 0);
 
-  const totalLojasValidas = lojas.filter(l => extrairNum(l.codigo_loja) > 1).length;
+  const totalLojasValidas = lojas.filter(l => extrairNum(l.codigo_loja) > 0).length;
   const lojasQueEnviaramUnicas = new Set(idsQueEnviaramProgresso).size;
   const lojasFaltantes = totalLojasValidas - lojasQueEnviaramUnicas;
 
@@ -190,14 +192,15 @@ export default function Listas() {
       <h3 style={{ marginLeft: '10px', color: '#333' }}>Status das Filiais</h3>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '15px' }}>
         
-        {lojas.filter(l => extrairNum(l.codigo_loja) >= 1).map(loja => {
+        {/* 💡 ACEITA A LOJA ZERO (FRAZÃO) NA LISTA DE CARDS */}
+        {lojas.filter(l => extrairNum(l.codigo_loja) >= 0).map(loja => {
           const idDestaLoja = extrairNum(loja.codigo_loja);
           const pedidosDaLoja = pedidosDia.filter(p => extrairNum(p.loja_id) === idDestaLoja);
           const enviou = pedidosDaLoja.length > 0;
           
           const solicitouRefazer = pedidosDaLoja.some(p => p.solicitou_refazer === true);
           const jaLiberada = pedidosDaLoja.some(p => p.liberado_edicao === true);
-          const isLojaTeste = idDestaLoja === 1;
+          const isLojaTeste = idDestaLoja === 0;
           
           let bordaCor = enviou ? '#22c55e' : '#f1f5f9';
           let textoCor = enviou ? '#22c55e' : '#ef4444';
