@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabaseClient';
 
 export default function PlanilhaCompras() {
@@ -31,10 +31,8 @@ export default function PlanilhaCompras() {
 
   const [fornExpandido, setFornExpandido] = useState(null);
   const [lojaGeralSelecionada, setLojaGeralSelecionada] = useState({});
-  const [localCompra, setLocalCompra] = useState('ceasa'); 
+  const [localCompra, setLocalCompra] = useState(''); // 💡 INICIA VAZIO PARA OBRIGAR A ESCOLHA
 
-  const [copiadoGeral, setCopiadoGeral] = useState(null);
-  const [copiadoLoja, setCopiadoLoja] = useState(null);
   const [fornecedorDestaque, setFornecedorDestaque] = useState(null);
 
   const [itensSelecionados, setItensSelecionados] = useState([]);
@@ -46,8 +44,10 @@ export default function PlanilhaCompras() {
     } catch (e) { return []; }
   });
   const [precosAgrupados, setPrecosAgrupados] = useState({});
+  const [grupoExpandido, setGrupoExpandido] = useState(null);
   
-  // Controle de Notificações Próprias da Tela (Silenciosas)
+  // 💡 RASTREIO DE MENSAGENS COPIADAS
+  const [mensagensCopiadas, setMensagensCopiadas] = useState([]);
   const [notificacoes, setNotificacoes] = useState([]);
 
   const hoje = new Date().toLocaleDateString('en-CA');
@@ -73,10 +73,16 @@ export default function PlanilhaCompras() {
 
   const tratarPrecoNum = (p) => parseFloat(String(p || '0').replace('R$', '').trim().replaceAll('.', '').replace(',', '.')) || 0;
   const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatarValorSemSimbolo = (v) => (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const formatarNomeItem = (str) => {
     if (!str || typeof str !== 'string' || str.trim() === '') return 'Sem Nome';
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
+  };
+
+  // 💡 REMOVE PARÊNTESES, CÓDIGOS EXTRAS PARA O WHATSAPP FICAR LIMPO
+  const limparNomeParaWhatsapp = (str) => {
+    return str.replace(/\s*\(.*?\)\s*/g, '').trim().toUpperCase();
   };
 
   const mostrarNotificacao = (mensagem, tipo = 'info') => {
@@ -85,7 +91,11 @@ export default function PlanilhaCompras() {
     setTimeout(() => { setNotificacoes(prev => prev.filter(n => n.id !== id)); }, 3000);
   };
 
-  async function carregarDados(silencioso = false) {
+  const marcarComoCopiado = (id) => {
+    setMensagensCopiadas(prev => prev.includes(id) ? prev : [...prev, id]);
+  };
+
+  const carregarDados = useCallback(async (silencioso = false) => {
     if (!silencioso) setCarregando(true);
     try {
       const { data: fornData } = await supabase.from('fornecedores').select('*').order('nome_fantasia', { ascending: true });
@@ -107,6 +117,8 @@ export default function PlanilhaCompras() {
       (pedData || []).forEach(p => {
         const idLoja = extrairNum(p.loja_id);
         const nomeProdutoUpper = String(p.nome_produto || "DESCONHECIDO").toUpperCase();
+        const qtdPedida = Number(p.quantidade || 0);
+        const qtdBonificadaCliente = Number(p.qtd_bonificada || 0);
 
         if (idLoja && idLoja > 1) { 
           const lojaInfo = (lojasData || []).find(l => extrairNum(l.codigo_loja) === idLoja);
@@ -121,9 +133,14 @@ export default function PlanilhaCompras() {
           }
 
           if (p.status_compra === 'pendente') {
-            if (!mapaPendentes[nomeProdutoUpper]) mapaPendentes[nomeProdutoUpper] = { nome: nomeProdutoUpper, demanda: 0, unidade: String(p.unidade_medida || "UN"), lojas: [] };
-            mapaPendentes[nomeProdutoUpper].demanda += Number(p.quantidade || 0);
-            mapaPendentes[nomeProdutoUpper].lojas.push({ id_pedido: p.id, loja_id: idLoja, nome_fantasia: nomeLoja, qtd_pedida: Number(p.quantidade || 0) });
+            if (!mapaPendentes[nomeProdutoUpper]) {
+              mapaPendentes[nomeProdutoUpper] = { nome: nomeProdutoUpper, demanda: 0, qtd_bonificada_cliente: 0, unidade: String(p.unidade_medida || "UN"), lojas: [] };
+            }
+            mapaPendentes[nomeProdutoUpper].demanda += qtdPedida;
+            mapaPendentes[nomeProdutoUpper].qtd_bonificada_cliente += qtdBonificadaCliente; // 💡 RASTREIA SE O CLIENTE PEDIU BONIFICADO
+            mapaPendentes[nomeProdutoUpper].lojas.push({ 
+              id_pedido: p.id, loja_id: idLoja, nome_fantasia: nomeLoja, qtd_pedida: qtdPedida, qtd_bonificada_cliente: qtdBonificadaCliente 
+            });
             
             if (isAlertaFornecedor && nomeFornOriginal && nomeFornOriginal !== 'REFAZER') {
                if (!mapaForn[nomeFornOriginal]) {
@@ -135,7 +152,7 @@ export default function PlanilhaCompras() {
             }
           } else {
             if (!mapaFeitos[nomeProdutoUpper]) mapaFeitos[nomeProdutoUpper] = { nome: nomeProdutoUpper, total_resolvido: 0, status: p.status_compra, unidade: String(p.unidade_medida || "UN"), itens: [] };
-            mapaFeitos[nomeProdutoUpper].total_resolvido += Number(p.quantidade || 0);
+            mapaFeitos[nomeProdutoUpper].total_resolvido += qtdPedida;
             mapaFeitos[nomeProdutoUpper].itens.push(p);
           }
 
@@ -144,7 +161,7 @@ export default function PlanilhaCompras() {
                 nome: nomeProdutoUpper, unidade: String(p.unidade_medida || "UN"), total_solicitado: 0, total_comprado: 0, isFaltaTotal: false, temBoleto: false, fornecedores_comprados: {}
              };
           }
-          mapaGeralItens[nomeProdutoUpper].total_solicitado += Number(p.quantidade || 0);
+          mapaGeralItens[nomeProdutoUpper].total_solicitado += qtdPedida;
 
           if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
              mapaGeralItens[nomeProdutoUpper].total_comprado += Number(p.qtd_atendida || 0);
@@ -157,9 +174,7 @@ export default function PlanilhaCompras() {
                  displayFornName = `${fName} (PJ)`;
              }
 
-             if (p.status_compra === 'boleto') {
-                displayFornName += ' (B)';
-             }
+             if (p.status_compra === 'boleto') displayFornName += ' (B)';
              
              if (!mapaGeralItens[nomeProdutoUpper].fornecedores_comprados[displayFornName]) {
                  mapaGeralItens[nomeProdutoUpper].fornecedores_comprados[displayFornName] = { qtd: 0, isBoleto: p.status_compra === 'boleto' };
@@ -169,7 +184,7 @@ export default function PlanilhaCompras() {
           }
           
           if (p.status_compra === 'falta') {
-             mapaGeralItens[nomeProdutoUpper].total_solicitado -= Number(p.quantidade || 0); 
+             mapaGeralItens[nomeProdutoUpper].total_solicitado -= qtdPedida; 
           }
 
           if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
@@ -202,11 +217,9 @@ export default function PlanilhaCompras() {
                  const valorEconomizadoBonif = qtdBonifFornecedor * valNum;
 
                  const placaBase = lojaInfo && lojaInfo.placa_caminhao ? String(lojaInfo.placa_caminhao).toUpperCase().trim() : 'SEM PLACA';
-                 const complemento = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
-                 const placaFinal = `${placaBase} | ${complemento}`;
-
+                 
                  if (!mapaForn[fNome].lojas[nomeLoja]) {
-                     mapaForn[fNome].lojas[nomeLoja] = { nome: nomeLoja, placa: placaFinal, totalLoja: 0, itens: [] };
+                     mapaForn[fNome].lojas[nomeLoja] = { nome: nomeLoja, placa: placaBase, totalLoja: 0, itens: [] };
                  }
 
                  const idxItemForn = mapaForn[fNome].lojas[nomeLoja].itens.findIndex(i => 
@@ -219,14 +232,7 @@ export default function PlanilhaCompras() {
                      mapaForn[fNome].lojas[nomeLoja].itens[idxItemForn].totalNum += totalItemFornCobrado;
                  } else {
                      mapaForn[fNome].lojas[nomeLoja].itens.push({
-                         id_pedido: p.id,
-                         nome: nomeProdutoUpper,
-                         qtd: p.qtd_atendida,
-                         qtd_bonificada: qtdBonifFornecedor,
-                         unidade: String(p.unidade_medida || 'UN'),
-                         valor_unit: baseValFormatado,
-                         totalNum: totalItemFornCobrado,
-                         isBoleto: isBoleto
+                         id_pedido: p.id, nome: nomeProdutoUpper, qtd: p.qtd_atendida, qtd_bonificada: qtdBonifFornecedor, unidade: String(p.unidade_medida || 'UN'), valor_unit: baseValFormatado, totalNum: totalItemFornCobrado, isBoleto: isBoleto
                      });
                  }
 
@@ -272,9 +278,9 @@ export default function PlanilhaCompras() {
 
     } catch (err) { console.error("Erro VIRTUS:", err); } 
     finally { if (!silencioso) setCarregando(false); }
-  }
+  }, [hoje]);
 
-  useEffect(() => { carregarDados(); }, []);
+  useEffect(() => { carregarDados(); }, [carregarDados]);
 
   const resetarPedidosDoDia = async () => {
     if (!window.confirm("🚨 ATENÇÃO: Isso vai ZERAR todos os pedidos, boletos e faltas que você já processou hoje.\n\nTudo voltará para a aba de PENDENTES.\n\nDeseja realmente recomeçar?")) return;
@@ -289,9 +295,7 @@ export default function PlanilhaCompras() {
   const desfazerFeito = async (item) => {
     if (!window.confirm(`Deseja editar o pedido "${item.nome}" e devolvê-lo para a lista de PENDENTES?`)) return;
     setCarregando(true);
-    const promessas = item.itens.map(p => 
-      supabase.from('pedidos').update({ fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, status_compra: 'pendente' }).eq('id', p.id)
-    );
+    const promessas = item.itens.map(p => supabase.from('pedidos').update({ fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, status_compra: 'pendente' }).eq('id', p.id));
     await Promise.all(promessas);
     carregarDados();
   };
@@ -299,9 +303,7 @@ export default function PlanilhaCompras() {
   const marcarFaltaDireto = async (item, e) => {
     e.stopPropagation(); 
     setCarregando(true);
-    const promessas = item.lojas.map(l => 
-      supabase.from('pedidos').update({ status_compra: 'falta', qtd_atendida: 0, custo_unit: 'FALTA' }).eq('id', l.id_pedido)
-    );
+    const promessas = item.lojas.map(l => supabase.from('pedidos').update({ status_compra: 'falta', qtd_atendida: 0, custo_unit: 'FALTA' }).eq('id', l.id_pedido));
     await Promise.all(promessas);
     carregarDados();
   };
@@ -331,84 +333,86 @@ export default function PlanilhaCompras() {
     }));
   };
 
+  // 💡 ACEITAR BONIFICAÇÃO DO CLIENTE COM 1 CLIQUE
+  const aceitarBonificacaoCliente = () => {
+     setDadosCompra({...dadosCompra, temBonificacao: true});
+     setLojasEnvolvidas(lojasEnvolvidas.map(l => ({
+        ...l,
+        qtd_bonificada: l.qtd_bonificada_cliente || 0
+     })));
+     mostrarNotificacao('✅ Bonificações preenchidas conforme pedido das lojas.', 'sucesso');
+  };
+
   const gerarCustoUnitarioFinal = (precoBaseFinal, qtdBonificada) => {
-     if (qtdBonificada > 0) return `${qtdBonificada} | ${precoBaseFinal}`;
+     if (qtdBonificada > 0) return `BONIFICAÇÃO | ${precoBaseFinal}`;
      return precoBaseFinal;
   };
 
-  const finalizarPedidoCompleto = async () => {
-    if (dadosCompra.isFaltaGeral) {
-      setCarregando(true);
-      const promessas = lojasEnvolvidas.map(l => supabase.from('pedidos').update({ status_compra: 'falta', qtd_atendida: 0, custo_unit: 'FALTA' }).eq('id', l.id_pedido));
-      await Promise.all(promessas);
-      setItemModal(null);
-      return carregarDados();
-    }
-
-    const isAlgumBoleto = lojasEnvolvidas.some(l => l.isBoleto);
-    if (!isAlgumBoleto && (!dadosCompra.fornecedor || !dadosCompra.valor_unit)) return alert("⚠️ Preencha o fornecedor e o valor unitário.");
-    if (!dadosCompra.fornecedor) return alert("⚠️ Preencha o fornecedor.");
-
-    const qtdDesejada = Number(dadosCompra.qtd_pedir) || 0;
-    if (qtdDesejada <= 0) return alert("Quantidade inválida.");
+  const finalizarPedidoCompleto = () => {
+    if (!dadosCompra.isFaltaGeral && !dadosCompra.fornecedor) return alert("⚠️ Preencha o fornecedor.");
 
     let precoLimpo = dadosCompra.valor_unit.replace(/[^\d,.-]/g, '').trim();
     if (!precoLimpo.includes(',') && precoLimpo) precoLimpo += ',00';
     const precoFinal = precoLimpo ? `R$ ${precoLimpo}` : 'R$ 0,00';
+    const isAlgumBoleto = lojasEnvolvidas.some(l => l.isBoleto);
     const statusGeral = isAlgumBoleto ? 'boleto' : 'atendido';
+    const qtdDesejada = Number(dadosCompra.qtd_pedir) || 0;
 
+    setItemModal(null);
     setCarregando(true);
-    let qtdRestanteParaDistribuir = qtdDesejada;
+
     const promessas = [];
     const pedidosParaClonar = [];
+    let qtdRestanteParaDistribuir = qtdDesejada;
 
-    lojasEnvolvidas.forEach(loja => {
-      const bonificada = Number(loja.qtd_bonificada) || 0;
+    if (dadosCompra.isFaltaGeral) {
+      lojasEnvolvidas.forEach(l => promessas.push(supabase.from('pedidos').update({ status_compra: 'falta', qtd_atendida: 0, custo_unit: 'FALTA' }).eq('id', l.id_pedido)));
+    } else {
+      lojasEnvolvidas.forEach(loja => {
+        const bonificada = Number(loja.qtd_bonificada) || 0;
 
-      if (qtdRestanteParaDistribuir >= loja.qtd_pedida) {
-        const custoFormatado = gerarCustoUnitarioFinal(precoFinal, bonificada);
-        promessas.push(supabase.from('pedidos').update({
-          fornecedor_compra: dadosCompra.fornecedor.toUpperCase(), custo_unit: custoFormatado, qtd_atendida: loja.qtd_pedida, status_compra: statusGeral
-        }).eq('id', loja.id_pedido));
-        qtdRestanteParaDistribuir -= loja.qtd_pedida;
+        if (qtdRestanteParaDistribuir >= loja.qtd_pedida) {
+          const custoFormatado = gerarCustoUnitarioFinal(precoFinal, bonificada);
+          promessas.push(supabase.from('pedidos').update({
+            fornecedor_compra: dadosCompra.fornecedor.toUpperCase(), custo_unit: custoFormatado, qtd_atendida: loja.qtd_pedida, status_compra: statusGeral
+          }).eq('id', loja.id_pedido));
+          qtdRestanteParaDistribuir -= loja.qtd_pedida;
+        } else if (qtdRestanteParaDistribuir > 0) {
+          const custoFormatado = gerarCustoUnitarioFinal(precoFinal, bonificada);
+          promessas.push(supabase.from('pedidos').update({
+            fornecedor_compra: dadosCompra.fornecedor.toUpperCase(), custo_unit: custoFormatado, qtd_atendida: qtdRestanteParaDistribuir, quantidade: qtdRestanteParaDistribuir, status_compra: statusGeral
+          }).eq('id', loja.id_pedido));
 
-      } else if (qtdRestanteParaDistribuir > 0) {
-        const custoFormatado = gerarCustoUnitarioFinal(precoFinal, bonificada);
-        promessas.push(supabase.from('pedidos').update({
-          fornecedor_compra: dadosCompra.fornecedor.toUpperCase(), custo_unit: custoFormatado, qtd_atendida: qtdRestanteParaDistribuir, quantidade: qtdRestanteParaDistribuir, status_compra: statusGeral
-        }).eq('id', loja.id_pedido));
+          const resto = loja.qtd_pedida - qtdRestanteParaDistribuir;
+          const rowOriginal = pedidosRaw.find(p => p.id === loja.id_pedido);
+          if (rowOriginal) {
+            const { id, created_at, ...dadosLimpos } = rowOriginal;
+            pedidosParaClonar.push({ ...dadosLimpos, quantidade: resto, qtd_atendida: 0, status_compra: 'pendente', fornecedor_compra: '', custo_unit: '' });
+          }
+          qtdRestanteParaDistribuir = 0;
+        } 
+      });
+    }
 
-        const resto = loja.qtd_pedida - qtdRestanteParaDistribuir;
-        const rowOriginal = pedidosRaw.find(p => p.id === loja.id_pedido);
-        if (rowOriginal) {
-          const { id, created_at, ...dadosLimpos } = rowOriginal;
-          pedidosParaClonar.push({ ...dadosLimpos, quantidade: resto, qtd_atendida: 0, status_compra: 'pendente', fornecedor_compra: '', custo_unit: '' });
-        }
-        qtdRestanteParaDistribuir = 0;
-      } 
+    Promise.all(promessas).then(async () => {
+      if (pedidosParaClonar.length > 0) await supabase.from('pedidos').insert(pedidosParaClonar);
+      mostrarNotificacao("✅ Pedido fechado com sucesso!", "sucesso");
+      carregarDados(true);
+      setCarregando(false);
     });
-
-    await Promise.all(promessas);
-    if (pedidosParaClonar.length > 0) await supabase.from('pedidos').insert(pedidosParaClonar);
-    
-    // 💡 REMOVIDO: Pulo automático para fornecedores
-    setItemModal(null);
-    mostrarNotificacao(`✅ Novo pedido para ${dadosCompra.fornecedor.toUpperCase()} foi adicionado com sucesso!`, 'sucesso');
-    carregarDados();
   };
 
-  const finalizarPedidoFracionado = async () => {
+  const finalizarPedidoFracionado = () => {
     const temCompra = lojasEnvolvidas.some(l => (Number(l.qtd_receber) > 0));
-    const tudoBoleto = lojasEnvolvidas.every(l => Number(l.qtd_receber) === 0 || l.isBoleto);
-    
-    if (temCompra && !tudoBoleto && (!dadosCompra.fornecedor || !dadosCompra.valor_unit)) return alert("⚠️ Preencha fornecedor e valor unitário para os itens comprados fora de boleto.");
     if (temCompra && !dadosCompra.fornecedor) return alert("⚠️ O fornecedor é obrigatório.");
 
     let precoLimpo = dadosCompra.valor_unit.replace(/[^\d,.-]/g, '').trim();
     if (!precoLimpo.includes(',') && precoLimpo) precoLimpo += ',00';
     const precoFinal = precoLimpo ? `R$ ${precoLimpo}` : 'R$ 0,00';
 
+    setItemModal(null);
     setCarregando(true);
+
     const promessas = [];
     const pedidosParaClonar = [];
 
@@ -416,8 +420,6 @@ export default function PlanilhaCompras() {
       const receber = Number(loja.qtd_receber) || 0;
       const bonificada = Number(loja.qtd_bonificada) || 0;
       
-      if (receber > loja.qtd_pedida) return alert(`⚠️ A loja ${loja.nome_fantasia} pediu ${loja.qtd_pedida}. Não mande a mais!`);
-
       if (receber > 0) {
         const custoFormatado = gerarCustoUnitarioFinal(precoFinal, bonificada);
         promessas.push(supabase.from('pedidos').update({
@@ -432,24 +434,215 @@ export default function PlanilhaCompras() {
             pedidosParaClonar.push({ ...dadosLimpos, quantidade: resto, qtd_atendida: 0, status_compra: loja.isFalta ? 'falta' : 'pendente', custo_unit: loja.isFalta ? 'FALTA' : '', fornecedor_compra: '' });
           }
         }
-      } else {
-        if (loja.isFalta) promessas.push(supabase.from('pedidos').update({ status_compra: 'falta', qtd_atendida: 0, custo_unit: 'FALTA' }).eq('id', loja.id_pedido));
+      } else if (loja.isFalta) {
+        promessas.push(supabase.from('pedidos').update({ status_compra: 'falta', qtd_atendida: 0, custo_unit: 'FALTA' }).eq('id', loja.id_pedido));
       }
     });
 
-    await Promise.all(promessas);
-    if (pedidosParaClonar.length > 0) await supabase.from('pedidos').insert(pedidosParaClonar);
-
-    // 💡 REMOVIDO: Pulo automático para fornecedores
-    setItemModal(null);
-    mostrarNotificacao(`✅ Novo pedido fracionado para ${dadosCompra.fornecedor.toUpperCase()} concluído!`, 'sucesso');
-    carregarDados();
+    Promise.all(promessas).then(async () => {
+      if (pedidosParaClonar.length > 0) await supabase.from('pedidos').insert(pedidosParaClonar);
+      mostrarNotificacao("✅ Pedido fracionado salvo!", "sucesso");
+      carregarDados(true);
+      setCarregando(false);
+    });
   };
 
   const limparAlertaFornecedor = async (nomeForn) => {
      setCarregando(true);
      await supabase.from('pedidos').update({ fornecedor_compra: '' }).eq('data_pedido', hoje).eq('status_compra', 'pendente').like('fornecedor_compra', `ALERTA|${nomeForn}`);
      carregarDados();
+  };
+
+  // 💡 MENSAGEM DO WHATSAPP GERAL (Aba Fornecedores Originais)
+  const gerarPedidoGeral = (f) => {
+    if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de copiar os pedidos!");
+    
+    const nomeLoja = lojaGeralSelecionada[f.nome];
+    if (!nomeLoja) return alert("⚠️ Selecione a loja titular da banca para o cabeçalho.");
+
+    const lojaData = f.lojas[nomeLoja];
+    const placaBase = lojaData.placa.split('|')[0].trim() || 'SEM PLACA';
+    const comp = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
+    
+    const mapaItensGerais = {};
+    Object.values(f.lojas).forEach(loja => {
+      loja.itens.forEach(item => {
+        const key = `${item.nome}`; // Unifica tudo no geral, sem importar se é boleto ou preço na mensagem pro cara da separação
+        if (!mapaItensGerais[key]) {
+          mapaItensGerais[key] = { ...item, qtd: 0 };
+        }
+        mapaItensGerais[key].qtd += item.qtd;
+      });
+    });
+
+    let msg = `*FORNECEDOR: ${f.nome.toUpperCase()}*\n\n`;
+    
+    Object.values(mapaItensGerais).forEach(i => {
+       msg += `${i.qtd} ${String(i.unidade).toUpperCase()} - ${limparNomeParaWhatsapp(formatarNomeItem(i.nome))}\n`;
+    });
+
+    msg += `\n${placaBase} - ${comp} TOTAL: ${formatarValorSemSimbolo(f.totalGeral)}`;
+
+    navigator.clipboard.writeText(msg);
+    marcarComoCopiado(`geral_${f.nome}`);
+    mostrarNotificacao('✅ Pedido Geral copiado para o WhatsApp!', 'sucesso');
+  };
+
+  // 💡 MENSAGEM DO WHATSAPP POR LOJA (Na Aba Fornecedores ou Modal)
+  const copiarMensagemWhatsapp = (lojaNome, lojaData, btnId) => {
+    if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de copiar os pedidos!");
+
+    const nomeFormatado = lojaNome.replace(/^\d+\s*-\s*/, '').trim().toUpperCase();
+    const placaBase = lojaData.placa.split('|')[0].trim() || 'SEM PLACA';
+    const comp = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
+
+    let msg = `*${nomeFormatado}*\n\n`;
+    lojaData.itens.forEach(i => { 
+        msg += `${i.qtd} ${String(i.unidade).toUpperCase()} - ${limparNomeParaWhatsapp(formatarNomeItem(i.nome))}\n`; 
+    });
+    msg += `\n${placaBase} - ${comp}`;
+    
+    navigator.clipboard.writeText(msg);
+    marcarComoCopiado(btnId);
+    mostrarNotificacao('✅ Lista copiada para o WhatsApp!', 'sucesso');
+  };
+
+  // 💡 NOVO: AGRUPAR PARA SEPARAÇÃO DE FORNECEDORES (TELA DE SELECIONAR)
+  const itensJaAgrupados = agrupamentos.flatMap(g => g.itens);
+
+  const alternarSelecaoLote = (nomeItem) => {
+    setItensSelecionados(prev => 
+      prev.includes(nomeItem) ? prev.filter(i => i !== nomeItem) : [...prev, nomeItem]
+    );
+  };
+
+  const criarGrupoFornecedor = () => {
+    if (!nomeFornecedorLote.trim()) return alert("Digite o nome do fornecedor para agrupar.");
+    if (itensSelecionados.length === 0) return alert("Selecione pelo menos um item.");
+    
+    const novoGrupo = {
+      id: Date.now(),
+      fornecedor: nomeFornecedorLote.toUpperCase().trim(),
+      itens: itensSelecionados,
+      status: 'pendente'
+    };
+    
+    setAgrupamentos(prev => [...prev, novoGrupo]);
+    setItensSelecionados([]);
+    setNomeFornecedorLote('');
+    mostrarNotificacao(`Itens separados para ${novoGrupo.fornecedor}`, 'sucesso');
+    setAbaAtiva('pedidos_fornecedor');
+    setGrupoExpandido(novoGrupo.id);
+  };
+
+  const removerGrupoFornecedor = (idGrupo) => {
+    if(window.confirm("Deseja desfazer este grupo? Os itens voltarão a ficar disponíveis para seleção.")) {
+       setAgrupamentos(prev => prev.filter(g => g.id !== idGrupo));
+    }
+  };
+
+  // 💡 MENSAGEM DO WHATSAPP (AGRUPADOS - TELA NOVA)
+  const copiarWhatsappAgrupadoLoja = (grupo) => {
+    if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de copiar os pedidos!");
+
+    let msg = ``;
+    const lojasMap = {};
+    const comp = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
+    
+    grupo.itens.forEach(nomeItem => {
+       const demandaItem = demandas.find(d => d.nome === nomeItem);
+       if(!demandaItem) return;
+       demandaItem.lojas.forEach(loja => {
+          if(!lojasMap[loja.nome_fantasia]) {
+             const lojaInfo = lojasBd.find(l => parseInt(l.codigo_loja) === loja.loja_id);
+             const placaBase = lojaInfo?.placa_caminhao ? lojaInfo.placa_caminhao.split('|')[0].trim() : 'SEM PLACA';
+             lojasMap[loja.nome_fantasia] = { placa: `${placaBase} - ${comp}`, itens: [] };
+          }
+          lojasMap[loja.nome_fantasia].itens.push(`${loja.qtd_pedida} ${String(demandaItem.unidade).toUpperCase()} - ${limparNomeParaWhatsapp(formatarNomeItem(nomeItem))}`);
+       });
+    });
+    
+    Object.entries(lojasMap).forEach(([nomeLoja, dados]) => {
+       msg += `*${nomeLoja.replace(/^\d+\s*-\s*/, '').trim().toUpperCase()}*\n\n`;
+       dados.itens.forEach(i => msg += `${i}\n`);
+       msg += `\n${dados.placa}\n\n`;
+    });
+    
+    navigator.clipboard.writeText(msg.trim());
+    marcarComoCopiado(`grupo_${grupo.id}`);
+    mostrarNotificacao('✅ Pedidos agrupados copiados para o WhatsApp!', 'sucesso');
+  };
+
+  // 💡 FINALIZAÇÃO DO LOTE COM OS 3 BOTÕES (À Vista, Boleto e Sem Preço)
+  const finalizarLoteFornecedor = (grupoId, tipoFechamento) => {
+    if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de enviar o pedido.");
+    
+    const grupo = agrupamentos.find(g => g.id === grupoId);
+    if (!grupo) return;
+
+    setCarregando(true);
+    const promessas = [];
+    
+    if (tipoFechamento === 'sem_preco') {
+        // Envia para o banco sem preço, MAS NÃO REMOVE DA TELA. Apenas pinta de Laranja.
+        grupo.itens.forEach(nomeItem => {
+            const demandaItem = demandas.find(d => d.nome === nomeItem);
+            if (!demandaItem) return;
+            demandaItem.lojas.forEach(loja => {
+                promessas.push(supabase.from('pedidos').update({
+                    fornecedor_compra: grupo.fornecedor,
+                    custo_unit: 'R$ 0,00',
+                    qtd_atendida: loja.qtd_pedida, 
+                    status_compra: 'atendido'
+                }).eq('id', loja.id_pedido));
+            });
+        });
+        
+        Promise.all(promessas).then(() => {
+            setAgrupamentos(prev => prev.map(g => g.id === grupoId ? {...g, status: 'enviado_sem_preco'} : g));
+            mostrarNotificacao(`📦 Pedido para ${grupo.fornecedor} enviado (Aguardando Preços).`, 'sucesso');
+            carregarDados(true);
+            setCarregando(false);
+        });
+
+    } else {
+        // FECHAMENTO DEFINITIVO COM PREÇO (Remove da tela e vai pro fornecedor real)
+        let isBoleto = tipoFechamento === 'boleto';
+        let tudoPreenchido = true;
+
+        grupo.itens.forEach(nomeItem => {
+            const demandaItem = demandas.find(d => d.nome === nomeItem);
+            const precoDigitado = precosAgrupados[`${grupoId}_${nomeItem}`];
+            if (!precoDigitado || precoDigitado === '0') tudoPreenchido = false;
+
+            let precoLimpo = precoDigitado ? precoDigitado.replace(/[^\d,.-]/g, '').trim() : '';
+            if (!precoLimpo.includes(',') && precoLimpo) precoLimpo += ',00';
+            const precoFinal = precoLimpo ? `R$ ${precoLimpo}` : 'R$ 0,00';
+
+            if (demandaItem) {
+               demandaItem.lojas.forEach(loja => {
+                   promessas.push(supabase.from('pedidos').update({
+                       fornecedor_compra: grupo.fornecedor,
+                       custo_unit: precoFinal,
+                       qtd_atendida: loja.qtd_pedida, 
+                       status_compra: isBoleto ? 'boleto' : 'atendido'
+                   }).eq('id', loja.id_pedido));
+               });
+            }
+        });
+        
+        if (!tudoPreenchido && !window.confirm("Alguns itens estão sem preço. Deseja finalizar mesmo assim?")) {
+           setCarregando(false);
+           return;
+        }
+
+        Promise.all(promessas).then(() => {
+            setAgrupamentos(prev => prev.filter(g => g.id !== grupoId));
+            mostrarNotificacao(`✅ Preços de ${grupo.fornecedor} lançados!`, 'sucesso');
+            carregarDados(true);
+            setCarregando(false);
+        });
+    }
   };
 
   const processarPDFResumo = async (modo = 'baixar') => {
@@ -487,77 +680,6 @@ export default function PlanilhaCompras() {
      } else {
        window.html2pdf().set(opt).from(elemento).save();
      }
-  };
-
-  const gerarPedidoGeral = (f, btnId) => {
-    const nomeLoja = lojaGeralSelecionada[f.nome];
-    if (!nomeLoja) return alert("⚠️ Selecione a loja titular da banca para o cabeçalho.");
-
-    const lojaData = f.lojas[nomeLoja];
-    const nomeFormatado = lojaData.nome.replace(/^\d+\s*-\s*/, '').trim().toUpperCase();
-    const partesPlaca = String(lojaData.placa || '').split('|');
-    const placaBase = partesPlaca[0] ? partesPlaca[0].trim() : 'SEM PLACA';
-    const complemento = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
-    
-    const mapaItensGerais = {};
-    Object.values(f.lojas).forEach(loja => {
-      loja.itens.forEach(item => {
-        const key = `${item.nome}_${tratarPrecoNum(item.valor_unit)}_${item.isBoleto}`;
-        if (!mapaItensGerais[key]) {
-          mapaItensGerais[key] = { ...item, qtd: 0, totalNum: 0, qtd_bonificada: 0 };
-        }
-        mapaItensGerais[key].qtd += item.qtd;
-        mapaItensGerais[key].qtd_bonificada += item.qtd_bonificada;
-        mapaItensGerais[key].totalNum += item.totalNum;
-      });
-    });
-
-    let msg = `*${nomeFormatado}*\n\n`;
-    let strNormais = '';
-    let strBonif = '';
-    
-    Object.values(mapaItensGerais).forEach(i => {
-       const qtdCobrada = i.qtd - i.qtd_bonificada;
-       let basePriceClean = String(i.valor_unit || '').includes('|') ? String(i.valor_unit).split('|')[1].trim() : String(i.valor_unit);
-
-       if (qtdCobrada > 0) {
-         strNormais += `${qtdCobrada} - ${formatarNomeItem(i.nome)} - ${basePriceClean} = ${formatarMoeda(i.totalNum)}${i.isBoleto ? ' (B)' : ''}\n`;
-       }
-       if (i.qtd_bonificada > 0) {
-         const basePriceNum = tratarPrecoNum(basePriceClean);
-         const valBonif = basePriceNum * i.qtd_bonificada;
-         strBonif += `${i.qtd_bonificada} - ${formatarNomeItem(i.nome)} - ${formatarMoeda(valBonif)}\n`;
-       }
-    });
-
-    msg += strNormais;
-
-    if (f.totalDescontoBonif > 0) {
-       msg += `\n*Bonificações:*\n${strBonif}`;
-       msg += `\nValor bruto = ${formatarMoeda(f.totalBruto)}\n`;
-    }
-
-    msg += `\n${placaBase} - ${complemento}`;
-    msg += `\n- TOTAL = ${formatarMoeda(f.totalGeral)}`;
-
-    navigator.clipboard.writeText(msg);
-    setCopiadoGeral(btnId);
-    setTimeout(() => setCopiadoGeral(null), 2000);
-  };
-
-  const copiarMensagemWhatsapp = (lojaNome, lojaData, btnId) => {
-    const nomeFormatado = lojaNome.replace(/^\d+\s*-\s*/, '').trim().toUpperCase();
-    const partesPlaca = String(lojaData.placa || '').split('|');
-    const placaBase = partesPlaca[0] ? partesPlaca[0].trim() : 'SEM PLACA';
-    const complemento = partesPlaca[1] ? partesPlaca[1].trim() : '';
-
-    let msg = `*${nomeFormatado}*\n\n`;
-    lojaData.itens.forEach(i => { msg += `${i.qtd} ${i.unidade} : ${formatarNomeItem(i.nome)}\n`; });
-    msg += `\n${placaBase} - ${complemento}`;
-    
-    navigator.clipboard.writeText(msg);
-    setCopiadoLoja(btnId);
-    setTimeout(() => setCopiadoLoja(null), 2000);
   };
 
   const renderListaLojasModal = () => (
@@ -598,183 +720,13 @@ export default function PlanilhaCompras() {
     </div>
   );
 
-  // 💡 LÓGICAS DO NOVO AGRUPAMENTO DE FORNECEDOR
-  const alternarSelecaoLote = (nomeItem) => {
-    setItensSelecionados(prev => 
-      prev.includes(nomeItem) ? prev.filter(i => i !== nomeItem) : [...prev, nomeItem]
-    );
-  };
-
-  const criarGrupoFornecedor = () => {
-    if (!nomeFornecedorLote.trim()) return alert("Digite o nome do fornecedor para agrupar.");
-    if (itensSelecionados.length === 0) return alert("Selecione pelo menos um item.");
-    
-    const novoGrupo = {
-      id: Date.now(),
-      fornecedor: nomeFornecedorLote.toUpperCase().trim(),
-      itens: itensSelecionados
-    };
-    
-    setAgrupamentos(prev => [...prev, novoGrupo]);
-    setItensSelecionados([]);
-    setNomeFornecedorLote('');
-    mostrarNotificacao(`Itens separados para ${novoGrupo.fornecedor}`, 'sucesso');
-    setAbaAtiva('pedidos_fornecedor');
-  };
-
-  const removerGrupoFornecedor = (idGrupo) => {
-    setAgrupamentos(prev => prev.filter(g => g.id !== idGrupo));
-  };
-
-  const copiarWhatsappAgrupado = (grupo) => {
-    let msg = `*PEDIDO: ${grupo.fornecedor.toUpperCase()}*\n\n`;
-    const lojasMap = {};
-    
-    grupo.itens.forEach(nomeItem => {
-       const demandaItem = demandas.find(d => d.nome === nomeItem);
-       if(!demandaItem) return;
-       demandaItem.lojas.forEach(loja => {
-          if(!lojasMap[loja.nome_fantasia]) {
-             const lojaInfo = lojasBd.find(l => parseInt(l.codigo_loja) === loja.loja_id);
-             const placaBase = lojaInfo?.placa_caminhao ? lojaInfo.placa_caminhao.split('|')[0].trim() : 'SEM PLACA';
-             const comp = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
-             lojasMap[loja.nome_fantasia] = { placa: `${placaBase} - ${comp}`, itens: [] };
-          }
-          lojasMap[loja.nome_fantasia].itens.push(`${loja.qtd_pedida} ${demandaItem.unidade} : ${formatarNomeItem(nomeItem)}`);
-       });
-    });
-    
-    Object.entries(lojasMap).forEach(([nomeLoja, dados]) => {
-       msg += `*${nomeLoja.replace(/^\d+\s*-\s*/, '').trim().toUpperCase()}*\n`;
-       dados.itens.forEach(i => msg += `${i}\n`);
-       msg += `\n${dados.placa}\n\n`;
-    });
-    
-    navigator.clipboard.writeText(msg);
-    mostrarNotificacao('✅ Lista formatada copiada para o WhatsApp!', 'sucesso');
-  };
-
-  const finalizarLoteFornecedor = (grupoId, isBoletoLote) => {
-    const grupo = agrupamentos.find(g => g.id === grupoId);
-    if (!grupo) return;
-
-    // 💡 TIRA O FORNECEDOR DA TELA NA HORA! (Sensação de rapidez)
-    setAgrupamentos(prev => prev.filter(g => g.id !== grupoId));
-    mostrarNotificacao(`⏳ Salvando pedido de ${grupo.fornecedor}...`, 'info');
-
-    const promessas = [];
-    
-    grupo.itens.forEach(nomeItem => {
-        const demandaItem = demandas.find(d => d.nome === nomeItem);
-        const precoDigitado = precosAgrupados[`${grupoId}_${nomeItem}`];
-        
-        if (!precoDigitado || !demandaItem) return;
-
-        let precoLimpo = precoDigitado.replace(/[^\d,.-]/g, '').trim();
-        if (!precoLimpo.includes(',') && precoLimpo) precoLimpo += ',00';
-        const precoFinal = precoLimpo ? `R$ ${precoLimpo}` : 'R$ 0,00';
-
-        demandaItem.lojas.forEach(loja => {
-            promessas.push(supabase.from('pedidos').update({
-                fornecedor_compra: grupo.fornecedor,
-                custo_unit: precoFinal,
-                qtd_atendida: loja.qtd_pedida,
-                status_compra: isBoletoLote ? 'boleto' : 'atendido'
-            }).eq('id', loja.id_pedido));
-        });
-    });
-    
-    // Executa as promessas no background e atualiza o radar
-    Promise.all(promessas).then(() => {
-        mostrarNotificacao(`✅ ${grupo.fornecedor} salvo com sucesso!`, 'sucesso');
-        carregarDados(true);
-    });
-  };
-
-  if (modoImpressaoResumo) {
-      return (
-          <div style={{ backgroundColor: '#525659', minHeight: '100vh', padding: '10px', fontFamily: 'Arial, sans-serif' }}>
-              
-              <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', backgroundColor: '#333', padding: '15px', borderRadius: '8px', marginBottom: '20px', position: 'sticky', top: '10px', zIndex: 1000, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
-                 <button onClick={() => setModoImpressaoResumo(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬅ VOLTAR</button>
-                 <div style={{ display: 'flex', gap: '10px', flex: '1 1 auto', flexWrap: 'wrap' }}>
-                   <button onClick={() => processarPDFResumo('preview')} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>👁️ VISUALIZAR PDF</button>
-                   <button onClick={() => processarPDFResumo('whatsapp')} style={{ background: '#25d366', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🟢 COMPARTILHAR WHATSAPP</button>
-                   <button onClick={() => processarPDFResumo('baixar')} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
-                 </div>
-              </div>
-
-              <div style={{ overflowX: 'auto', paddingBottom: '20px' }}>
-                  <div id="area-impressao-resumo" className="print-section" style={{ backgroundColor: 'white', color: 'black', width: '100%', maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
-                      
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid black', paddingBottom: '10px', marginBottom: '20px' }}>
-                          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '900', textTransform: 'uppercase' }}>RESUMO DE ITENS</h2>
-                          <div style={{ textAlign: 'right' }}>
-                              <span style={{ fontSize: '12px', fontWeight: 'bold', display: 'block' }}>DATA: {dataBr}</span>
-                          </div>
-                      </div>
-
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                          <thead>
-                              <tr style={{ backgroundColor: '#e5e7eb', borderBottom: '2px solid black' }}>
-                                  <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px', border: '1px solid black', width: '35%' }}>PRODUTO</th>
-                                  <th style={{ padding: '8px', textAlign: 'center', fontSize: '12px', border: '1px solid black', width: '15%' }}>PEDIDO LOJAS</th>
-                                  <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px', border: '1px solid black', width: '50%' }}>FORNECEDORES (Qtd entregue)</th>
-                              </tr>
-                          </thead>
-                          <tbody>
-                              {listaGeralItens.map((item, idx) => {
-                                  let corLinha = 'black';
-                                  if (item.isFaltaTotal) corLinha = '#64748b'; 
-                                  else if (item.total_comprado === 0) corLinha = '#ef4444'; 
-                                  else if (item.total_comprado < item.total_solicitado) corLinha = '#d97706'; 
-                                  else corLinha = '#166534'; 
-
-                                  return (
-                                      <tr key={idx}>
-                                          <td style={{ padding: '8px', border: '1px solid black', fontSize: '12px', fontWeight: 'bold', color: corLinha, textDecoration: item.isFaltaTotal ? 'line-through' : 'none' }}>
-                                              {formatarNomeItem(item.nome)}
-                                          </td>
-                                          <td style={{ padding: '8px', border: '1px solid black', fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}>
-                                              {item.total_solicitado} {item.unidade}
-                                          </td>
-                                          <td style={{ padding: '8px', border: '1px solid black', fontSize: '11px', color: '#333' }}>
-                                              {Object.keys(item.fornecedores_comprados).length === 0 ? (
-                                                  <span style={{ color: '#ef4444', fontWeight: 'bold' }}>PENDENTE / FALTA</span>
-                                              ) : (
-                                                  Object.entries(item.fornecedores_comprados).map(([forn, data]) => (
-                                                      <div key={forn}><b>{data.qtd}x</b> - {forn}</div>
-                                                  ))
-                                              )}
-                                          </td>
-                                      </tr>
-                                  );
-                              })}
-                          </tbody>
-                      </table>
-                  </div>
-              </div>
-              <style>{`
-                @media print {
-                  .no-print { display: none !important; }
-                  html, body { height: auto !important; overflow: visible !important; background: white; margin: 0; padding: 0; }
-                  #root, div { overflow: visible !important; height: auto !important; }
-                  .print-section { box-shadow: none !important; min-width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; }
-                  @page { margin: 10mm; size: portrait; } 
-                }
-              `}</style>
-          </div>
-      );
-  }
-
   if (carregando && demandas.length === 0 && pedidosFeitos.length === 0) {
-    return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Processando...</div>;
+    return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Carregando...</div>;
   }
 
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px', padding: '10px' }}>
       
-      {/* 💡 NOTIFICAÇÕES IN-APP SILENCIOSAS */}
       <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 99999, display: 'flex', flexDirection: 'column', gap: '10px', width: '90%', maxWidth: '400px' }}>
         {notificacoes.map(notif => (
           <div key={notif.id} style={{ background: notif.tipo === 'alerta' ? '#ef4444' : (notif.tipo === 'info' ? '#3b82f6' : '#22c55e'), color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px' }}>
@@ -849,6 +801,12 @@ export default function PlanilhaCompras() {
                   <span style={{ fontSize: '10px', color: item.isResto ? '#ef4444' : '#64748b', fontWeight: item.isResto ? 'bold' : 'normal', marginTop: '5px' }}>
                     {item.isResto ? 'RESTA COMPRAR' : `${item.lojas.length} Loja(s)`}
                   </span>
+                  {/* 💡 ALERTA VISUAL DE BONIFICAÇÃO DO CLIENTE NA CAIXINHA */}
+                  {item.qtd_bonificada_cliente > 0 && (
+                     <span style={{ fontSize: '10px', color: '#16a34a', background: '#dcfce7', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold', marginTop: '5px' }}>
+                       🎁 {item.qtd_bonificada_cliente} Bonif. Solicitada
+                     </span>
+                  )}
                 </div>
               ))
             )}
@@ -864,15 +822,21 @@ export default function PlanilhaCompras() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {demandas.filter(d => (d.nome || '').toLowerCase().includes(buscaSelecionar.toLowerCase())).map(item => (
-              <div key={item.nome} onClick={() => alternarSelecaoLote(item.nome)} style={{ display: 'flex', alignItems: 'center', gap: '15px', background: '#fff', padding: '15px', borderRadius: '12px', borderLeft: itensSelecionados.includes(item.nome) ? '5px solid #8b5cf6' : '5px solid #e2e8f0', cursor: 'pointer', transition: '0.2s', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
-                 <input type="checkbox" checked={itensSelecionados.includes(item.nome)} readOnly style={{ width: '20px', height: '20px', accentColor: '#8b5cf6', pointerEvents: 'none' }} />
+            {demandas.filter(d => (d.nome || '').toLowerCase().includes(buscaSelecionar.toLowerCase()) && !itensJaAgrupados.includes(d.nome)).map(item => {
+              const isSelecionado = itensSelecionados.includes(item.nome);
+              
+              return (
+              <div key={item.nome} onClick={() => alternarSelecaoLote(item.nome)} style={{ display: 'flex', alignItems: 'center', gap: '15px', background: '#fff', padding: '15px', borderRadius: '12px', borderLeft: isSelecionado ? '5px solid #8b5cf6' : '5px solid #e2e8f0', cursor: 'pointer', transition: '0.2s', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
+                 <input type="checkbox" checked={isSelecionado} readOnly style={{ width: '20px', height: '20px', accentColor: '#8b5cf6', pointerEvents: 'none' }} />
                  <div style={{ flex: 1 }}>
                     <strong style={{ display: 'block', fontSize: '14px', color: '#111' }}>{item.nome}</strong>
                     <small style={{ color: '#666', fontSize: '11px' }}>{item.demanda} {item.unidade} • {item.lojas.length} Loja(s)</small>
                  </div>
               </div>
-            ))}
+            )})}
+            {demandas.length > 0 && demandas.every(d => itensJaAgrupados.includes(d.nome)) && (
+               <div style={{ textAlign: 'center', padding: '40px', color: '#22c55e', backgroundColor: '#fff', borderRadius: '16px', fontWeight: 'bold' }}>Todos os itens já foram agrupados! Vá para a aba "Pedidos Agrupados".</div>
+            )}
           </div>
 
           {/* BARRA FLUTUANTE DE AÇÃO */}
@@ -897,51 +861,98 @@ export default function PlanilhaCompras() {
           {agrupamentos.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '20px' }}>Nenhum fornecedor agrupado. Vá na aba "Selecionar Forn." para criar.</div>
           ) : (
-            agrupamentos.map((grupo) => (
-              <div key={grupo.id} style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', borderTop: '5px solid #14b8a6' }}>
-                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                    <h3 style={{ margin: 0, color: '#111', fontSize: '18px' }}>🏢 {grupo.fornecedor}</h3>
-                    <button onClick={() => removerGrupoFornecedor(grupo.id)} style={{ background: '#fef2f2', color: '#ef4444', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>Desfazer</button>
+            agrupamentos.map((grupo) => {
+              const expandido = grupoExpandido === grupo.id;
+              
+              const lojasDoGrupo = {};
+              grupo.itens.forEach(nomeItem => {
+                 const dItem = demandas.find(d => d.nome === nomeItem);
+                 if(dItem) {
+                    dItem.lojas.forEach(l => {
+                       if(!lojasDoGrupo[l.nome_fantasia]) lojasDoGrupo[l.nome_fantasia] = { id: l.loja_id, itens: [] };
+                       lojasDoGrupo[l.nome_fantasia].itens.push({ nome: nomeItem, qtd: l.qtd_pedida, unidade: dItem.unidade });
+                    });
+                 }
+              });
+
+              // Verifica se já mandou pro fornecedor sem preço
+              const isEnviadoSemPreco = grupo.status === 'enviado_sem_preco';
+
+              return (
+              <div key={grupo.id} style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', borderTop: isEnviadoSemPreco ? '5px solid #f97316' : '5px solid #14b8a6' }}>
+                 
+                 <div onClick={() => setGrupoExpandido(expandido ? null : grupo.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+                    <h3 style={{ margin: 0, color: isEnviadoSemPreco ? '#f97316' : '#111', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      🏢 {grupo.fornecedor} 
+                      <span style={{background: '#f1f5f9', color: '#64748b', fontSize: '11px', padding: '3px 8px', borderRadius: '8px'}}>{grupo.itens.length} itens</span>
+                    </h3>
+                    <span style={{ color: '#ccc', transform: expandido ? 'rotate(90deg)' : 'none', transition: '0.2s', fontSize: '18px' }}>❯</span>
                  </div>
 
-                 {/* Botão de WhatsApp Rápido (Lojas separadas sem preço) */}
-                 <button onClick={() => copiarWhatsappAgrupado(grupo)} style={{ width: '100%', background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '15px', borderRadius: '12px', fontWeight: '900', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginBottom: '20px', cursor: 'pointer' }}>
-                   🟢 COPIAR PEDIDO PARA WHATSAPP
-                 </button>
+                 {expandido && (
+                   <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9' }}>
+                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
+                        <button onClick={() => removerGrupoFornecedor(grupo.id)} style={{ background: '#fef2f2', color: '#ef4444', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>❌ Desfazer Grupo</button>
+                        {isEnviadoSemPreco && <span style={{ fontSize: '11px', color: '#f97316', fontWeight: 'bold' }}>⚠️ Enviado sem preço (Aguardando)</span>}
+                     </div>
 
-                 <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
-                    <h4 style={{ margin: '0 0 15px 0', fontSize: '12px', color: '#64748b' }}>2. LANÇAR PREÇOS DO FORNECEDOR:</h4>
-                    {grupo.itens.map(nomeItem => {
-                       const demandaReal = demandas.find(d => d.nome === nomeItem);
-                       if (!demandaReal) return null;
-                       return (
-                         <div key={nomeItem} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '10px', marginBottom: '10px', borderBottom: '1px solid #e2e8f0' }}>
-                            <div style={{ flex: 1 }}>
-                               <strong style={{ display: 'block', fontSize: '13px', color: '#111' }}>{nomeItem}</strong>
-                               <small style={{ color: '#f97316', fontWeight: 'bold', fontSize: '10px' }}>Pediram: {demandaReal.demanda} {demandaReal.unidade}</small>
-                            </div>
-                            <div style={{ position: 'relative', width: '120px' }}>
-                               <span style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8', fontSize: '11px', fontWeight: 'bold' }}>R$</span>
-                               <input 
-                                 type="text" 
-                                 placeholder="0,00"
-                                 value={precosAgrupados[`${grupo.id}_${nomeItem}`] || ''}
-                                 onChange={(e) => setPrecosAgrupados({...precosAgrupados, [`${grupo.id}_${nomeItem}`]: e.target.value})}
-                                 style={{ width: '100%', padding: '10px 10px 10px 30px', borderRadius: '8px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold' }}
-                               />
-                            </div>
-                         </div>
-                       );
-                    })}
-                    
-                    <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-                      <button onClick={() => finalizarLoteFornecedor(grupo.id, false)} style={{ flex: 1, padding: '15px', background: '#111', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>FECHAR À VISTA</button>
-                      <button onClick={() => finalizarLoteFornecedor(grupo.id, true)} style={{ flex: 1, padding: '15px', background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>FECHAR NO BOLETO</button>
-                    </div>
-                 </div>
+                     <button onClick={() => copiarWhatsappAgrupadoLoja(grupo)} style={{ width: '100%', background: mensagensCopiadas.includes(`grupo_${grupo.id}`) ? '#dcfce7' : '#25d366', color: mensagensCopiadas.includes(`grupo_${grupo.id}`) ? '#166534' : '#fff', border: '1px solid #86efac', padding: '15px', borderRadius: '12px', fontWeight: '900', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginBottom: '20px', cursor: 'pointer' }}>
+                       {mensagensCopiadas.includes(`grupo_${grupo.id}`) ? '✅ PEDIDO COPIADO' : '🟢 COPIAR PEDIDOS PARA WHATSAPP'}
+                     </button>
+
+                     <div style={{ marginBottom: '20px' }}>
+                        <h4 style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#64748b' }}>📦 ITENS SEPARADOS POR LOJA:</h4>
+                        {Object.entries(lojasDoGrupo).map(([nomeLoja, dadosLoja]) => (
+                           <div key={nomeLoja} style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px dashed #e2e8f0', marginBottom: '8px' }}>
+                              <strong style={{ fontSize: '14px', color: '#111', display: 'block', marginBottom: '10px' }}>{nomeLoja.replace(/^\d+\s*-\s*/, '').trim().toUpperCase()}</strong>
+                              {dadosLoja.itens.map((i, idx) => (
+                                 <div key={idx} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', marginBottom: '5px', color: '#333' }}>
+                                    <span>{i.qtd} {String(i.unidade).toUpperCase()} - <b>{limparNomeParaWhatsapp(formatarNomeItem(i.nome))}</b></span>
+                                 </div>
+                              ))}
+                           </div>
+                        ))}
+                     </div>
+
+                     <div style={{ background: '#f1f5f9', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                        <h4 style={{ margin: '0 0 15px 0', fontSize: '12px', color: '#64748b' }}>💰 LANÇAR PREÇOS E FINALIZAR:</h4>
+                        {grupo.itens.map(nomeItem => {
+                           const demandaReal = demandas.find(d => d.nome === nomeItem);
+                           if (!demandaReal) return null;
+                           return (
+                             <div key={nomeItem} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '10px', marginBottom: '10px', borderBottom: '1px solid #e2e8f0' }}>
+                                <div style={{ flex: 1 }}>
+                                   <strong style={{ display: 'block', fontSize: '13px', color: '#111' }}>{nomeItem}</strong>
+                                   <small style={{ color: '#f97316', fontWeight: 'bold', fontSize: '10px' }}>Pediram: {demandaReal.demanda} {demandaReal.unidade}</small>
+                                </div>
+                                <div style={{ position: 'relative', width: '120px' }}>
+                                   <span style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8', fontSize: '11px', fontWeight: 'bold' }}>R$</span>
+                                   <input 
+                                     type="text" 
+                                     placeholder="0,00"
+                                     value={precosAgrupados[`${grupo.id}_${nomeItem}`] || ''}
+                                     onChange={(e) => setPrecosAgrupados({...precosAgrupados, [`${grupo.id}_${nomeItem}`]: e.target.value})}
+                                     style={{ width: '100%', padding: '10px 10px 10px 30px', borderRadius: '8px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold' }}
+                                   />
+                                </div>
+                             </div>
+                           );
+                        })}
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px' }}>
+                          {!isEnviadoSemPreco && (
+                            <button onClick={() => finalizarLoteFornecedor(grupo.id, 'sem_preco')} style={{ width: '100%', padding: '15px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>ENVIAR SEM PREÇO (SÓ WHATSAPP)</button>
+                          )}
+                          <div style={{ display: 'flex', gap: '10px' }}>
+                            <button onClick={() => finalizarLoteFornecedor(grupo.id, 'avista')} style={{ flex: 1, padding: '15px', background: '#111', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>FECHAR À VISTA</button>
+                            <button onClick={() => finalizarLoteFornecedor(grupo.id, 'boleto')} style={{ flex: 1, padding: '15px', background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>FECHAR NO BOLETO</button>
+                          </div>
+                        </div>
+                     </div>
+                   </div>
+                 )}
               </div>
-            ))
-          )}
+            )}))}
         </div>
       )}
 
@@ -984,19 +995,21 @@ export default function PlanilhaCompras() {
             fornecedoresBd.filter(f => (f.nome || '').toLowerCase().includes(buscaFornecedores.toLowerCase())).map((f, idx) => {
               const expandido = fornExpandido === f.nome;
               const temAlerta = f.precisaRefazer;
-              const recemEditado = f.nome === fornecedorDestaque;
               
               let estiloBorda = '6px solid #111';
               let iconeTopo = '';
               let corH3 = '#111';
 
+              // 💡 Verifica se todas as lojas do fornecedor já foram copiadas
+              const todasLojasCopiadas = Object.values(f.lojas).every(loja => mensagensCopiadas.includes(`loja_${f.nome}_${loja.nome}`));
+
               if (temAlerta) {
                   estiloBorda = '6px solid #ef4444';
                   iconeTopo = '⚠️ ALERTA';
                   corH3 = '#ef4444';
-              } else if (recemEditado) {
+              } else if (todasLojasCopiadas) {
                   estiloBorda = '6px solid #22c55e';
-                  iconeTopo = '🟢 NOVO PEDIDO';
+                  iconeTopo = '✅ ENVIADO';
                   corH3 = '#16a34a';
               }
 
@@ -1034,21 +1047,11 @@ export default function PlanilhaCompras() {
                         <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#111' }}>🛍️ PEDIDO GERAL DA BANCA</h4>
                         
                         <div style={{ display: 'flex', gap: '10px' }}>
-                          <select 
-                              value={lojaGeralSelecionada[f.nome] || ''}
-                              onChange={e => setLojaGeralSelecionada({...lojaGeralSelecionada, [f.nome]: e.target.value})}
-                              style={{ flex: 1, padding: '12px', borderRadius: '10px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold' }}
-                          >
-                              <option value="">Escolha a loja do cabeçalho...</option>
-                              {Object.keys(f.lojas).map((nomeLoja, i) => (
-                                  <option key={i} value={nomeLoja}>{nomeLoja.replace(/^\d+\s*-\s*/, '').trim().toUpperCase()}</option>
-                              ))}
-                          </select>
                           <button 
                               onClick={() => gerarPedidoGeral(f, `geral_${f.nome}`)} 
-                              style={{ background: copiadoGeral === `geral_${f.nome}` ? '#22c55e' : '#111', color: '#fff', border: 'none', padding: '0 20px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', transition: '0.2s' }}
+                              style={{ flex: 1, background: mensagensCopiadas.includes(`geral_${f.nome}`) ? '#22c55e' : '#111', color: '#fff', border: 'none', padding: '15px', borderRadius: '10px', fontWeight: '900', fontSize: '12px', cursor: 'pointer', transition: '0.2s' }}
                           >
-                              {copiadoGeral === `geral_${f.nome}` ? '✅ COPIADO!' : '📋 COPIAR GERAL'}
+                              {mensagensCopiadas.includes(`geral_${f.nome}`) ? '✅ GERAL COPIADO!' : '📋 COPIAR PEDIDO GERAL'}
                           </button>
                         </div>
                       </div>
@@ -1067,15 +1070,12 @@ export default function PlanilhaCompras() {
                                 {loja.itens.map((item, idxx) => (
                                   <div key={idxx} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ flex: 1 }}>
-                                      <span>{item.qtd} {item.unidade} : <b>{formatarNomeItem(item.nome)}</b></span>
+                                      <span>{item.qtd} {String(item.unidade).toUpperCase()} - <b>{limparNomeParaWhatsapp(formatarNomeItem(item.nome))}</b></span>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                       {item.qtd_bonificada > 0 && (
                                         <span style={{ fontSize: '9px', background: '#dcfce7', color: '#166534', padding: '2px 5px', borderRadius: '4px', fontWeight: 'bold' }}>🎁 {item.qtd_bonificada} Bonif.</span>
                                       )}
-                                      <span style={{ fontWeight: 'bold', color: item.isBoleto ? '#d97706' : '#333' }}>
-                                        {formatarMoeda(item.totalNum)} {item.isBoleto && '(B)'}
-                                      </span>
                                     </div>
                                   </div>
                                 ))}
@@ -1083,9 +1083,9 @@ export default function PlanilhaCompras() {
 
                               <button 
                                 onClick={() => copiarMensagemWhatsapp(loja.nome, loja, btnId)} 
-                                style={{ width: '100%', background: copiadoLoja === btnId ? '#dcfce7' : '#25d366', color: copiadoLoja === btnId ? '#166534' : '#fff', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', transition: '0.2s' }}
+                                style={{ width: '100%', background: mensagensCopiadas.includes(btnId) ? '#dcfce7' : '#25d366', color: mensagensCopiadas.includes(btnId) ? '#166534' : '#fff', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', transition: '0.2s' }}
                               >
-                                {copiadoLoja === btnId ? '✅ COPIADO PARA O WHATSAPP' : '🟢 COPIAR LISTA DA LOJA'}
+                                {mensagensCopiadas.includes(btnId) ? '✅ COPIADO PARA O WHATSAPP' : '🟢 COPIAR LISTA DA LOJA'}
                               </button>
                             </div>
                            );
@@ -1110,7 +1110,7 @@ export default function PlanilhaCompras() {
                 <span>🔍</span><input placeholder="Buscar produto..." value={buscaFornList} onChange={e => setBuscaFornList(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
               </div>
               <button onClick={() => setModoImpressaoResumo(true)} style={{ background: '#111', color: '#fff', border: 'none', padding: '0 20px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
-                  📥 GERAR PDF
+                 📥 GERAR PDF
               </button>
           </div>
 
@@ -1207,6 +1207,19 @@ export default function PlanilhaCompras() {
               </div>
               <button onClick={() => setItemModal(null)} style={{ background: '#f1f5f9', border: 'none', width: '35px', height: '35px', borderRadius: '50%', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
             </div>
+
+            {/* 💡 AVISO E BOTÃO DE BONIFICAÇÃO DO CLIENTE */}
+            {itemModal.qtd_bonificada_cliente > 0 && !dadosCompra.temBonificacao && (
+               <div style={{ background: '#fef3c7', border: '1px solid #fde68a', padding: '15px', borderRadius: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <strong style={{ color: '#d97706', fontSize: '12px', display: 'block' }}>⚠️ O cliente informou bonificação!</strong>
+                    <span style={{ fontSize: '11px', color: '#b45309' }}>Total de itens bonificados: <b>{itemModal.qtd_bonificada_cliente}</b></span>
+                  </div>
+                  <button onClick={aceitarBonificacaoCliente} style={{ background: '#f97316', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>
+                    ACEITAR BONIFICAÇÃO
+                  </button>
+               </div>
+            )}
 
             <div style={{ display: 'flex', gap: '10px', backgroundColor: '#f1f5f9', padding: '5px', borderRadius: '12px', marginBottom: '20px' }}>
               <button onClick={() => setAbaModal('completo')} style={{ flex: 1, padding: '12px', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', backgroundColor: abaModal === 'completo' ? '#fff' : 'transparent', color: abaModal === 'completo' ? '#111' : '#64748b' }}>
