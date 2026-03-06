@@ -16,7 +16,6 @@ export default function Listas() {
     return apenasNumeros ? parseInt(apenasNumeros, 10) : null;
   };
 
-  // 💡 FORMATADOR PARA PRIMEIRAS LETRAS MAIÚSCULAS
   const formatarNomeItem = (str) => {
     if (!str) return '';
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
@@ -30,7 +29,6 @@ export default function Listas() {
       
       const lojasDb = dLojas || [];
       
-      // 💡 GARANTE QUE A LOJA FRAZÃO (TESTE) EXISTE NO ARRAY
       const temFrazao = lojasDb.some(l => extrairNum(l.codigo_loja) === 1);
       if (!temFrazao) {
         lojasDb.unshift({ id: 99999, codigo_loja: '1', nome_fantasia: 'FRAZÃO (TESTE)' });
@@ -48,8 +46,8 @@ export default function Listas() {
     const mapa = {};
     pedidosDia.forEach(p => {
       const idLoja = extrairNum(p.loja_id);
-      // 💡 Pega apenas pedidos que não estão soltos no carrinho E ignora a loja 1 (Frazão Teste)
-      if (idLoja !== null && idLoja > 1 && p.liberado_edicao !== true) { 
+      // 💡 CORREÇÃO: Agora ele lê QUALQUER loja maior que ZERO (ou seja, pega a Frazão Código 1 também)
+      if (idLoja !== null && idLoja > 0 && p.liberado_edicao !== true) { 
         const nome = String(p.nome_produto || "Sem Nome").toUpperCase();
         if (!mapa[nome]) mapa[nome] = { nome, total: 0, unidade: p.unidade_medida || "UN", lojasQuePediram: new Set() };
         mapa[nome].total += Number(p.quantidade || 0);
@@ -60,11 +58,11 @@ export default function Listas() {
   };
 
   const listaConsolidada = obterSomaTotal();
-  // 💡 Ignora a Loja 1 (Frazão Teste) na contagem da barra de progresso
-  const idsQueEnviaram = pedidosDia.filter(p => p.liberado_edicao !== true).map(p => extrairNum(p.loja_id)).filter(id => id !== null && id > 1);
+  // Mantemos a barra de progresso ignorando a Frazão para não bugar a meta diária (Faltam X lojas)
+  const idsQueEnviaramProgresso = pedidosDia.filter(p => p.liberado_edicao !== true).map(p => extrairNum(p.loja_id)).filter(id => id !== null && id > 1);
 
   const totalLojasValidas = lojas.filter(l => extrairNum(l.codigo_loja) > 1).length;
-  const lojasQueEnviaramUnicas = new Set(idsQueEnviaram).size;
+  const lojasQueEnviaramUnicas = new Set(idsQueEnviaramProgresso).size;
   const lojasFaltantes = totalLojasValidas - lojasQueEnviaramUnicas;
 
   const copiarResumoGeral = () => {
@@ -103,7 +101,6 @@ export default function Listas() {
     }
   };
 
-  // 💡 NOVO: CANCELAR EDIÇÃO (TRAVAR LISTA NOVAMENTE)
   const cancelarEdicaoLoja = async () => {
     if(window.confirm(`Deseja CANCELAR a edição da loja ${modalAberto.nome_fantasia}?\n\nA lista será trancada novamente e o pedido voltará a valer como "Enviado".`)) {
       setCarregando(true);
@@ -193,7 +190,6 @@ export default function Listas() {
       <h3 style={{ marginLeft: '10px', color: '#333' }}>Status das Filiais</h3>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '15px' }}>
         
-        {/* 💡 RENDERIZA TODAS AS LOJAS COM CÓDIGO >= 1 (Isso inclui a Loja 1/Frazão para testes) */}
         {lojas.filter(l => extrairNum(l.codigo_loja) >= 1).map(loja => {
           const idDestaLoja = extrairNum(loja.codigo_loja);
           const pedidosDaLoja = pedidosDia.filter(p => extrairNum(p.loja_id) === idDestaLoja);
@@ -201,7 +197,7 @@ export default function Listas() {
           
           const solicitouRefazer = pedidosDaLoja.some(p => p.solicitou_refazer === true);
           const jaLiberada = pedidosDaLoja.some(p => p.liberado_edicao === true);
-          const isLojaTeste = idDestaLoja === 1; // Loja 1 é o bloco de teste
+          const isLojaTeste = idDestaLoja === 1;
           
           let bordaCor = enviou ? '#22c55e' : '#f1f5f9';
           let textoCor = enviou ? '#22c55e' : '#ef4444';
@@ -258,7 +254,6 @@ export default function Listas() {
                   <div style={{textAlign: 'center', padding: '10px', color: '#2563eb', fontWeight: 'bold', fontSize: '12px', backgroundColor: '#eff6ff', borderRadius: '12px'}}>
                     A loja está com a lista destrancada no aplicativo deles.
                   </div>
-                  {/* 💡 NOVO BOTÃO: CANCELA A EDIÇÃO E TRANCA A LISTA DENOVO */}
                   <button onClick={cancelarEdicaoLoja} style={{ width: '100%', padding: '15px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
                     🔒 CANCELAR EDIÇÃO (TRAVAR LISTA)
                   </button>
