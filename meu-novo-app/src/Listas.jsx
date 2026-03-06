@@ -28,7 +28,15 @@ export default function Listas() {
       const { data: dLojas } = await supabase.from('lojas').select('*').order('nome_fantasia', { ascending: true });
       const { data: dPedidos } = await supabase.from('pedidos').select('*').eq('data_pedido', hojeBanco);
       
-      setLojas(dLojas || []);
+      const lojasDb = dLojas || [];
+      
+      // 💡 GARANTE QUE A LOJA FRAZÃO (TESTE) EXISTE NO ARRAY
+      const temFrazao = lojasDb.some(l => extrairNum(l.codigo_loja) === 1);
+      if (!temFrazao) {
+        lojasDb.unshift({ id: 99999, codigo_loja: '1', nome_fantasia: 'FRAZÃO (TESTE)' });
+      }
+
+      setLojas(lojasDb);
       setPedidosDia(dPedidos || []);
     } catch (err) { console.error("Erro:", err); } 
     finally { setCarregando(false); }
@@ -40,7 +48,7 @@ export default function Listas() {
     const mapa = {};
     pedidosDia.forEach(p => {
       const idLoja = extrairNum(p.loja_id);
-      // Pega apenas pedidos que não estão soltos no carrinho (ou seja, se enviou, a gente soma)
+      // 💡 Pega apenas pedidos que não estão soltos no carrinho E ignora a loja 1 (Frazão Teste)
       if (idLoja !== null && idLoja > 1 && p.liberado_edicao !== true) { 
         const nome = String(p.nome_produto || "Sem Nome").toUpperCase();
         if (!mapa[nome]) mapa[nome] = { nome, total: 0, unidade: p.unidade_medida || "UN", lojasQuePediram: new Set() };
@@ -52,16 +60,16 @@ export default function Listas() {
   };
 
   const listaConsolidada = obterSomaTotal();
-  const idsQueEnviaram = pedidosDia.filter(p => p.liberado_edicao !== true).map(p => extrairNum(p.loja_id)).filter(id => id !== null);
+  // 💡 Ignora a Loja 1 (Frazão Teste) na contagem da barra de progresso
+  const idsQueEnviaram = pedidosDia.filter(p => p.liberado_edicao !== true).map(p => extrairNum(p.loja_id)).filter(id => id !== null && id > 1);
 
   const totalLojasValidas = lojas.filter(l => extrairNum(l.codigo_loja) > 1).length;
-  const lojasQueEnviaramUnicas = new Set(idsQueEnviaram.filter(id => id > 1)).size;
+  const lojasQueEnviaramUnicas = new Set(idsQueEnviaram).size;
   const lojasFaltantes = totalLojasValidas - lojasQueEnviaramUnicas;
 
   const copiarResumoGeral = () => {
     if (listaConsolidada.length === 0) return alert("Nenhum pedido recebido ainda.");
     const cabecalho = "*FRAZÃO FRUTAS & CIA - RESUMO GERAL* 📋\nData: " + dataAtual.toLocaleDateString('pt-BR');
-    // 💡 Nome formatado bonitinho
     const corpo = listaConsolidada.map(i => `- ${i.total} ${i.unidade} : ${formatarNomeItem(i.nome)} *(em ${i.qtdLojas} loja${i.qtdLojas > 1 ? 's' : ''})*`).join('\n');
     navigator.clipboard.writeText(`${cabecalho}\n\n${corpo}`);
     alert("✅ Resumo copiado!");
@@ -71,13 +79,11 @@ export default function Listas() {
     const pLoja = pedidosDia.filter(p => extrairNum(p.loja_id) === extrairNum(modalAberto.codigo_loja));
     const nomeOperador = pLoja.length > 0 ? pLoja[0].nome_usuario : 'Operador';
     const cabecalho = `*LOJA:* ${modalAberto.nome_fantasia}\n*RESPONSÁVEL:* ${nomeOperador}`;
-    // 💡 Nome formatado bonitinho
     const corpo = pLoja.map(i => `- ${i.quantidade} ${String(i.unidade || i.unidade_medida).toUpperCase()} : ${formatarNomeItem(String(i.nome || i.nome_produto))}`).join('\n');
     navigator.clipboard.writeText(`${cabecalho}\n\n${corpo}`);
     alert("✅ Lista copiada!");
   };
 
-  // 💡 V.I.R.T.U.S: Libera a lista para a filial voltar pro carrinho (MANTÉM OS DADOS)
   const liberarLojaParaRefazer = async () => {
     if(window.confirm(`Liberar a loja ${modalAberto.nome_fantasia} para editar a lista?\n\nOs itens voltarão para o carrinho do aplicativo deles sem apagar as quantidades.`)) {
       setCarregando(true);
@@ -88,6 +94,26 @@ export default function Listas() {
           .eq('loja_id', extrairNum(modalAberto.codigo_loja));
           
         alert("✅ Loja liberada! A lista voltou pro carrinho deles.");
+        setModalAberto(null);
+        carregarDados();
+      } catch (err) {
+        alert("Erro: " + err.message);
+        setCarregando(false);
+      }
+    }
+  };
+
+  // 💡 NOVO: CANCELAR EDIÇÃO (TRAVAR LISTA NOVAMENTE)
+  const cancelarEdicaoLoja = async () => {
+    if(window.confirm(`Deseja CANCELAR a edição da loja ${modalAberto.nome_fantasia}?\n\nA lista será trancada novamente e o pedido voltará a valer como "Enviado".`)) {
+      setCarregando(true);
+      try {
+        await supabase.from('pedidos')
+          .update({ liberado_edicao: false })
+          .eq('data_pedido', hojeBanco)
+          .eq('loja_id', extrairNum(modalAberto.codigo_loja));
+          
+        alert("🔒 Edição cancelada! A lista foi trancada e o pedido voltou ao normal.");
         setModalAberto(null);
         carregarDados();
       } catch (err) {
@@ -167,13 +193,15 @@ export default function Listas() {
       <h3 style={{ marginLeft: '10px', color: '#333' }}>Status das Filiais</h3>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '15px' }}>
         
-        {lojas.filter(l => extrairNum(l.codigo_loja) > 1).map(loja => {
+        {/* 💡 RENDERIZA TODAS AS LOJAS COM CÓDIGO >= 1 (Isso inclui a Loja 1/Frazão para testes) */}
+        {lojas.filter(l => extrairNum(l.codigo_loja) >= 1).map(loja => {
           const idDestaLoja = extrairNum(loja.codigo_loja);
           const pedidosDaLoja = pedidosDia.filter(p => extrairNum(p.loja_id) === idDestaLoja);
           const enviou = pedidosDaLoja.length > 0;
           
           const solicitouRefazer = pedidosDaLoja.some(p => p.solicitou_refazer === true);
           const jaLiberada = pedidosDaLoja.some(p => p.liberado_edicao === true);
+          const isLojaTeste = idDestaLoja === 1; // Loja 1 é o bloco de teste
           
           let bordaCor = enviou ? '#22c55e' : '#f1f5f9';
           let textoCor = enviou ? '#22c55e' : '#ef4444';
@@ -187,7 +215,8 @@ export default function Listas() {
           }
           
           return (
-            <div key={loja.id} onClick={() => enviou && setModalAberto(loja)} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '18px', border: `2px solid ${bordaCor}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: enviou ? 'pointer' : 'default', transition: 'all 0.2s', boxShadow: enviou ? '0 4px 15px rgba(0,0,0,0.05)' : 'none' }}>
+            <div key={loja.id || idDestaLoja} onClick={() => enviou && setModalAberto(loja)} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '18px', border: `2px solid ${bordaCor}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: enviou ? 'pointer' : 'default', transition: 'all 0.2s', boxShadow: enviou ? '0 4px 15px rgba(0,0,0,0.05)' : 'none', position: 'relative' }}>
+              {isLojaTeste && <div style={{position: 'absolute', top: '-10px', left: '15px', background: '#22c55e', color: '#fff', fontSize: '9px', fontWeight: 'bold', padding: '2px 8px', borderRadius: '6px'}}>🛠️ MODO TESTE</div>}
               <div>
                 <strong style={{fontSize: '15px'}}>{loja.nome_fantasia}</strong>
                 <span style={{display: 'block', fontSize: '11px', color: textoCor, fontWeight: 'bold', marginTop: '4px'}}>{textoStatus}</span>
@@ -225,9 +254,15 @@ export default function Listas() {
             <div style={{ padding: '20px', borderTop: '1px solid #eee', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               
               {lojaAbertaJaLiberada ? (
-                 <div style={{textAlign: 'center', padding: '10px', color: '#2563eb', fontWeight: 'bold', fontSize: '12px', backgroundColor: '#eff6ff', borderRadius: '12px'}}>
-                   A loja está com a lista destrancada no aplicativo deles.
-                 </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{textAlign: 'center', padding: '10px', color: '#2563eb', fontWeight: 'bold', fontSize: '12px', backgroundColor: '#eff6ff', borderRadius: '12px'}}>
+                    A loja está com a lista destrancada no aplicativo deles.
+                  </div>
+                  {/* 💡 NOVO BOTÃO: CANCELA A EDIÇÃO E TRANCA A LISTA DENOVO */}
+                  <button onClick={cancelarEdicaoLoja} style={{ width: '100%', padding: '15px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
+                    🔒 CANCELAR EDIÇÃO (TRAVAR LISTA)
+                  </button>
+                </div>
               ) : (
                 <>
                   {lojaAbertasolicitouRefazer && (
@@ -236,7 +271,6 @@ export default function Listas() {
                     </div>
                   )}
                   
-                  {/* 💡 O NOVO BOTÃO DE DEVOLVER PRO CARRINHO SEM APAGAR */}
                   <button onClick={liberarLojaParaRefazer} style={{ width: '100%', padding: '15px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
                     🔓 DEVOLVER PARA O CARRINHO (EDITAR)
                   </button>
