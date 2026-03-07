@@ -167,13 +167,37 @@ export default function Precificacao() {
   const [formModal, setFormModal] = useState({ preco: '', fornecedor: '', status: 'pendente', promocao: false, novidade: false, fotos_novas: [], unidade: 'UN', peso_caixa: '' });
   const [fazendoUpload, setFazendoUpload] = useState(false);
 
+  // Estados para o Painel de Configurações
+  const [configCardAberto, setConfigCardAberto] = useState(false);
+  const [configuracoes, setConfiguracoes] = useState({ 
+    nao_funciona: false, 
+    is_feriado: false, 
+    data_teste: '' 
+  });
+  const [testeAtivo, setTesteAtivo] = useState(false);
+
   useEffect(() => { 
     carregarDados(); 
+    carregarConfiguracoes();
     const radar = setInterval(() => {
       carregarDados(true);
     }, 10000);
     return () => clearInterval(radar);
   }, []);
+
+  async function carregarConfiguracoes() {
+    try {
+      const { data, error } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
+      if (data && !error) {
+        setConfiguracoes({
+          nao_funciona: data.nao_funciona || false,
+          is_feriado: data.is_feriado || false,
+          data_teste: data.data_teste || ''
+        });
+        if (data.data_teste) setTesteAtivo(true);
+      }
+    } catch (e) { console.error(e); }
+  }
 
   async function carregarDados(silencioso = false) {
     if (!silencioso) setCarregando(true);
@@ -209,10 +233,31 @@ export default function Precificacao() {
     finally { if (!silencioso) setCarregando(false); }
   }
 
+  // Funções de Controle de Configuração
+  const atualizarConfigBD = async (novosDados) => {
+    try {
+      await supabase.from('configuracoes').update(novosDados).eq('id', 1);
+      setConfiguracoes(prev => ({ ...prev, ...novosDados }));
+    } catch (e) { alert("Erro ao salvar configuração."); }
+  };
+
+  const aplicarTeste = async () => {
+    if (!configuracoes.data_teste) return alert("Escolha uma data.");
+    await atualizarConfigBD({ data_teste: configuracoes.data_teste });
+    setTesteAtivo(true);
+    alert("Teste aplicado! Data simulada: " + configuracoes.data_teste);
+  };
+
+  const finalizarTeste = async () => {
+    await atualizarConfigBD({ data_teste: null });
+    setConfiguracoes(prev => ({ ...prev, data_teste: '' }));
+    setTesteAtivo(false);
+    alert("Teste finalizado. Voltando para data atual.");
+  };
+
   const isZerado = (preco) => !preco || preco === '0' || preco === '0,00' || String(preco).trim() === 'R$ 0,00' || String(preco).trim() === 'R$0,00';
 
   const listas = {
-    // Pendentes agora são apenas os que não tem status ou estão com o status explicitamente "pendente"
     pendentes: produtos.filter(p => !p.status_cotacao || p.status_cotacao === 'pendente'),
     prontos: produtos.filter(p => p.status_cotacao === 'ativo' && !isZerado(p.preco)),
     mantidos: produtos.filter(p => p.status_cotacao === 'mantido'),
@@ -222,7 +267,6 @@ export default function Precificacao() {
 
   const qtdPendentes = listas.pendentes.length;
 
-  // 💡 BOTÃO REVISAR: Puxa APENAS os recém cadastrados (em branco) para Pendentes
   const revisarItensOcultos = async () => {
     setCarregando(true);
     try {
@@ -231,15 +275,11 @@ export default function Precificacao() {
 
       let loteUpdates = [];
       const novaLista = todos.map(p => {
-        
-        // 💡 REGRA V.I.R.T.U.S: Só resgata quem NÃO tem status (recém criados no banco)
         if (!p.status_cotacao || String(p.status_cotacao).trim() === '') {
           const objAtualizado = { ...p, status_cotacao: 'pendente', preco: 'R$ 0,00' };
           loteUpdates.push(objAtualizado);
           return objAtualizado;
         }
-        
-        // Se já tem status (falta, mantido, sem_preco, ativo, pendente), ignora. Fica onde está!
         return p;
       });
 
@@ -323,7 +363,7 @@ export default function Precificacao() {
     setProdModal(produto);
     setFormModal({
       preco: produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '',
-      fornecedor: produto.fornecedor || '', // Mantido no modal se quiser usar
+      fornecedor: produto.fornecedor || '', 
       status: produto.status_cotacao || 'pendente',
       promocao: produto.promocao || false,
       novidade: produto.novidade || false,
@@ -383,11 +423,6 @@ export default function Precificacao() {
     if (statusCalc === 'pendente' && precoFinal !== 'R$ 0,00') statusCalc = 'ativo';
 
     const fotosAtuais = prodModal.foto_url ? String(prodModal.foto_url).split(',') : [];
-    const qtdFotos = fotosAtuais.length + formModal.fotos_novas.length;
-    if ((formModal.promocao || formModal.novidade) && qtdFotos === 0) {
-      return alert("⚠️ Adicione pelo menos uma foto para marcar como Promoção ou Novidade.");
-    }
-
     const payload = {
       preco: precoFinal,
       peso_caixa: formModal.peso_caixa,
@@ -432,15 +467,40 @@ export default function Precificacao() {
             <h2 style={{ margin: 0, fontSize: '24px', fontWeight: '900' }}>💲 PRECIFICAÇÃO</h2>
             <p style={{ margin: '5px 0 0 0', color: '#94a3b8', fontSize: '13px' }}>Faltam <strong style={{color: '#ef4444', fontSize: '16px'}}>{qtdPendentes}</strong> itens.</p>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <button onClick={revisarItensOcultos} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', boxShadow: '0 4px 10px rgba(59,130,246,0.3)' }}>
-              🔄 REVISAR ITENS NOVOS
-            </button>
-            <button onClick={zerarCotacao} style={{ background: '#333', color: '#ef4444', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
-              🗑️ ZERAR COTAÇÃO
-            </button>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <button onClick={() => setConfigCardAberto(!configCardAberto)} style={{ background: '#333', border: 'none', padding: '10px', borderRadius: '10px', cursor: 'pointer', fontSize: '20px' }}>⚙️</button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button onClick={revisarItensOcultos} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', boxShadow: '0 4px 10px rgba(59,130,246,0.3)' }}>
+                🔄 REVISAR ITENS NOVOS
+              </button>
+              <button onClick={zerarCotacao} style={{ background: '#333', color: '#ef4444', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
+                🗑️ ZERAR COTAÇÃO
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* Card de Configurações Acoplado */}
+        {configCardAberto && (
+          <div style={{ background: '#222', padding: '20px', borderRadius: '15px', border: '1px solid #444', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                <button onClick={() => atualizarConfigBD({ nao_funciona: !configuracoes.nao_funciona })} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: configuracoes.nao_funciona ? '#ef4444' : '#444', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>
+                  {configuracoes.nao_funciona ? '🚫 LOJA FECHADA' : '✅ LOJA ABERTA'}
+                </button>
+                <button onClick={() => atualizarConfigBD({ is_feriado: !configuracoes.is_feriado })} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: configuracoes.is_feriado ? '#eab308' : '#444', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>
+                  {configuracoes.is_feriado ? '🚩 É FERIADO' : '🏳️ DIA NORMAL'}
+                </button>
+             </div>
+             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#333', padding: '10px', borderRadius: '10px' }}>
+                <input type="date" value={configuracoes.data_teste} onChange={(e) => setConfiguracoes({...configuracoes, data_teste: e.target.value})} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: '#444', color: '#fff' }} />
+                {!testeAtivo ? (
+                  <button onClick={aplicarTeste} style={{ padding: '10px 15px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>APLICAR TESTE</button>
+                ) : (
+                  <button onClick={finalizarTeste} style={{ padding: '10px 15px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>FINALIZAR TESTE</button>
+                )}
+             </div>
+          </div>
+        )}
 
         <button onClick={finalizarCotacao} style={{ width: '100%', backgroundColor: '#22c55e', color: 'white', border: 'none', padding: '18px', borderRadius: '16px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 4px 15px rgba(34,197,94,0.3)' }}>
           🚀 FINALIZAR COTAÇÃO E ABRIR LOJA
