@@ -115,32 +115,54 @@ export default function Precificacao() {
     await supabase.from('configuracoes').update({ [campo]: valor }).eq('id', 1);
   };
 
+ // ... (Dentro do componente Precificacao)
+
   const zerarCotacao = async () => {
-    if (!window.confirm("🚨 LIMPEZA GERAL V.I.R.T.U.S\n\nIsso irá:\n1. Zerar preços e promoções.\n2. APAGAR os pedidos de hoje.\n3. Preservar as FOTOS.\n\nConfirmar?")) return;
+    if (!window.confirm("⚠️ ATENÇÃO: Deseja ZERAR a cotação e LIMPAR os pedidos? (As fotos serão mantidas)")) return;
     
     setCarregando(true);
+    const dataAlvo = configGlobal.data_teste || new Date().toLocaleDateString('en-CA');
+
     // 1. Fecha a loja
     await supabase.from('configuracoes').update({ precos_liberados: false }).eq('id', 1);
 
-    // 2. Apaga pedidos (O fechamento já foi feito)
-    await supabase.from('pedidos').delete().neq('id', 0); // Apaga tudo
+    // 2. Apaga APENAS os pedidos da data que você está mexendo (Preserva histórico)
+    await supabase.from('pedidos').delete().eq('data_pedido', dataAlvo);
 
-    // 3. Reseta produtos (Preservando foto_url pois ela não está no payload de reset)
-    const payloadGeral = produtos.map(p => ({
-        id: p.id,
-        status_cotacao: p.status_cotacao === 'mantido' ? 'pendente' : 'pendente',
-        preco: 'R$ 0,00',
-        promocao: false,
-        novidade: false
+    // 3. Reseta Preços (Mantendo fotos)
+    const resetPayload = produtos.map(p => ({
+      id: p.id,
+      preco: 'R$ 0,00',
+      status_cotacao: 'pendente',
+      promocao: false,
+      novidade: false
+      // Repare que não enviamos foto_url aqui, logo o Supabase mantém a que existe
     }));
 
-    for (let i = 0; i < payloadGeral.length; i += 50) {
-      await supabase.from('produtos').upsert(payloadGeral.slice(i, i + 50));
+    for (let i = 0; i < resetPayload.length; i += 50) {
+      await supabase.from('produtos').upsert(resetPayload.slice(i, i + 50));
     }
 
-    alert("✅ Sistema Zerado! Pedidos limpos e produtos prontos para nova cotação.");
+    setCarregando(false);
+    alert("✅ Cotação limpa para o dia " + dataAlvo);
     carregarDados();
   };
+
+  const finalizarCotacao = async () => {
+    setCarregando(true);
+    // Libera os preços no banco
+    const { error } = await supabase.from('configuracoes').update({ precos_liberados: true }).eq('id', 1);
+    
+    if (!error) {
+      alert("🚀 LOJA ABERTA COM SUCESSO!");
+      setCarregando(false);
+    } else {
+      alert("Erro ao abrir loja: " + error.message);
+      setCarregando(false);
+    }
+  };
+
+  // ... (Resto do HTML com os botões de controle que fizemos antes)
 
   const finalizarCotacao = async () => {
     setCarregando(true);
