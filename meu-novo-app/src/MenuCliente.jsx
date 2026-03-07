@@ -14,326 +14,364 @@ const LIMITES_HORARIO = {
 };
 
 export default function MenuCliente({ usuario, tema }) {
-  const isEscuro = tema === 'escuro';
-  const lastScrollY = useRef(0);
 
-  // --- CONFIGURAÇÃO DE DESIGN ---
+  const isEscuro = tema === 'escuro';
+
   const configDesign = {
+    geral: { fontePadrao: "'Inter', sans-serif" },
     cores: {
       fundoGeral: isEscuro ? '#0f172a' : '#f8fafc',
-      fundoCards: isEscuro ? '#1e293b' : '#ffffff',
-      primaria: '#f97316',
+      fundoCards: isEscuro ? '#1e293b' : '#ffffff',  
+      primaria: '#f97316',      
       textoForte: isEscuro ? '#f8fafc' : '#111111',
       textoSuave: isEscuro ? '#94a3b8' : '#64748b',
       borda: isEscuro ? '#334155' : '#e2e8f0',
       inputFundo: isEscuro ? '#0f172a' : '#f1f5f9',
-      sucesso: '#22c55e',
-      alerta: '#ef4444',
-      promocao: '#eab308'
+      promocao: '#eab308',      
+      novidade: '#a855f7',      
+      sucesso: '#22c55e',      
+      alerta: '#ef4444'         
     },
-    cards: { 
-      raioBorda: '16px', 
+    cards: {
+      raioBorda: '16px',
       sombra: isEscuro ? '0 4px 12px rgba(0,0,0,0.5)' : '0 4px 12px rgba(0,0,0,0.03)',
-      alturaImgDestaque: '220px',
-      alturaImgPequena: '85px'
-    }
+      alturaImgDestaque: '220px', 
+      alturaImgPequena: '85px'    
+    },
+    animacoes: { transicaoSuave: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }
   };
 
-  // --- ESTADOS DE DADOS ---
-  const [hoje, setHoje] = useState(new Date().toLocaleDateString('en-CA'));
-  const [produtos, setProdutos] = useState([]);
-  const [categoriaAtiva, setCategoriaAtiva] = useState('DESTAQUES');
-  const [buscaMenu, setBuscaMenu] = useState('');
-  const [carrinho, setCarrinho] = useState(() => JSON.parse(localStorage.getItem('carrinho_virtus') || '[]'));
-  const [banners, setBanners] = useState({ topo: '', logo: '', tematico: '' });
-  const [precosLiberados, setPrecosLiberados] = useState(false);
-  const [listaEnviadaHoje, setListaEnviadaHoje] = useState(null);
-  
-  // --- ESTADOS DE UI & ANIMAÇÃO ---
-  const [showFixedSearch, setShowFixedSearch] = useState(true);
-  const [modoVisualizacao, setModoVisualizacao] = useState(false);
-  const [modalCarrinhoAberto, setModalCarrinhoAberto] = useState(false);
-  const [modalRevisaoAberto, setModalRevisaoAberto] = useState(false);
-  const [produtoExpandido, setProdutoExpandido] = useState(null);
-  const [quantidade, setQuantidade] = useState(1);
-  const [enviandoPedido, setEnviandoPedido] = useState(false);
-  
-  // --- ESTADOS DE TRAVA E TESTE ---
-  const [tempoRestante, setTempoRestante] = useState(null);
-  const [bloqueioAtivo, setBloqueioAtivo] = useState(false);
-  const [isFeriadoMarcado, setIsFeriadoMarcado] = useState(false);
-  const [notificou30min, setNotificou30min] = useState(false);
+  // --- ESTADOS ---
+  const [hoje, setHoje] = useState(new Date().toLocaleDateString('en-CA')); 
+  const horaAtual = new Date().getHours();
+  const saudacaoStr = horaAtual < 12 ? 'Bom dia' : horaAtual < 18 ? 'Boa tarde' : 'Boa noite';
+  const primeiroNome = (usuario?.nome || 'Cliente').split(' ')[0];
+  const nomeLojaLimpo = (usuario?.loja || 'Matriz').replace(/^\d+\s*-\s*/, '').trim();
+  const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
 
-  const codLoja = usuario?.codigo_loja || 1;
-  const nomeLojaLimpo = (usuario?.loja || 'Loja').replace(/^\d+\s*-\s*/, '').trim();
-
-  // --- CATEGORIAS NA ORDEM EXATA ---
   const categoriasDinamicas = [
     'DESTAQUES', 'TODOS', '🍎 Frutas', '🥬 Verduras & Fungos', '🥕 Legumes', 
     '🥔 Raízes, Tubérculos & Grãos', '🍱 Bandejados', '🛒 Avulsos', 
     '🌿 Folhagens', '📦 Caixaria', '🧄 BRADISBA', '🥥 POTY COCOS', '🧅 MEGA', '⭐ LISTA PADRÃO'
   ];
 
-  // --- FUNÇÃO DE NORMALIZAÇÃO (IGNORA ACENTOS E ESPAÇOS) ---
-  const normalizar = (t) => t?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, "") || "";
+  const [produtos, setProdutos] = useState([]);
+  const [categoriaAtiva, setCategoriaAtiva] = useState('DESTAQUES');
+  const [precosLiberados, setPrecosLiberados] = useState(false);
+  const [buscaMenu, setBuscaMenu] = useState('');
+  const [carrinho, setCarrinho] = useState(() => {
+    try {
+      const salvo = localStorage.getItem('carrinho_virtus');
+      return salvo ? JSON.parse(salvo).filter(item => item?.id && item?.nome) : [];
+    } catch (e) { return []; }
+  });
 
-  // --- LÓGICA DE SCROLL (BARRA DE BUSCA) ---
-  useEffect(() => {
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY;
-      if (currentScrollY > lastScrollY.current && currentScrollY > 100) setShowFixedSearch(false);
-      else setShowFixedSearch(true);
-      lastScrollY.current = currentScrollY;
-    };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+  const [produtoExpandido, setProdutoExpandido] = useState(null);
+  const [quantidade, setQuantidade] = useState(1);
+  const [qtdBonificada, setQtdBonificada] = useState(0); 
+  const [temBonificacao, setTemBonificacao] = useState(false);
+  const [modalCarrinhoAberto, setModalCarrinhoAberto] = useState(false);
+  const [modalRevisaoAberto, setModalRevisaoAberto] = useState(false);
+  const [enviandoPedido, setEnviandoPedido] = useState(false);
+  const [listaEnviadaHoje, setListaEnviadaHoje] = useState(null);
+  const [modoVisualizacao, setModoVisualizacao] = useState(false); 
+  const [itemEditandoId, setItemEditandoId] = useState(null);
+  const [navState, setNavState] = useState({ show: true, shrink: false });
+  const ultimoScroll = useRef(0);
+  const [banners, setBanners] = useState({ topo: '', logo: '', tematico: '' });
+  const [notificacoes, setNotificacoes] = useState([]);
+  const [permissaoPush, setPermissaoPush] = useState('default');
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [historicoNotificacoes, setHistoricoNotificacoes] = useState(() => {
+    try {
+      const salvo = localStorage.getItem('historico_notif_virtus');
+      return salvo ? JSON.parse(salvo) : [];
+    } catch (e) { return []; }
+  });
 
-  // --- SINCRONIZAÇÃO COMPLETA (V.I.R.T.U.S) ---
-  const sincronizar = useCallback(async () => {
-    const { data: config } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
-    if (!config) return;
+  const [modalConfiguracoesAberto, setModalConfiguracoesAberto] = useState(false);
+  const [modalSenhaAberto, setModalSenhaAberto] = useState(false);
+  const [dadosSenha, setDadosSenha] = useState({ antiga: '', nova: '', confirma: '' });
+  const [mostrarSenha, setMostrarSenha] = useState(false);
+  const [erroSenha, setErroSenha] = useState('');
+  const [carregandoSenha, setCarregandoSenha] = useState(false);
 
-    const dataEfetiva = config.data_teste || new Date().toLocaleDateString('en-CA');
-    setHoje(dataEfetiva);
-    setPrecosLiberados(config.precos_liberados);
-    setIsFeriadoMarcado(config.is_feriado);
+  // --- NOVOS ESTADOS V.I.R.T.U.S ---
+  const [tempoRestante, setTempoRestante] = useState(null);
+  const [bloqueioAtivo, setBloqueioAtivo] = useState(false);
+  const [notificou30min, setNotificou30min] = useState(false);
+  const [isFeriadoMarcado, setIsFeriadoMarcado] = useState(false);
 
-    // Lógica de Trava de Horário
-    const agora = new Date();
-    const diaSemana = new Date(dataEfetiva + "T12:00:00").getDay();
-    let limiteStr = config.is_feriado ? LIMITES_HORARIO.feriado : LIMITES_HORARIO[diaSemana];
+  const produtosCarregadosRef = useRef(false);
+  const dataUltimoCarregamento = useRef(0);
+  const enviandoRef = useRef(false);
 
-    if (config.nao_funciona || limiteStr === null) {
-      setBloqueioAtivo(true);
-      setTempoRestante("SISTEMA FECHADO");
-    } else {
-      const [h, m] = limiteStr.split(':').map(Number);
-      const dataLimite = new Date();
-      dataLimite.setHours(h, m, 0);
-      const diffMs = dataLimite - agora;
+  // --- LÓGICA DE MONITORAMENTO DE HORÁRIO E DATA ---
+  const sincronizarSistema = useCallback(async () => {
+    try {
+      const { data: config } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
+      if (!config) return;
 
-      if (dataEfetiva === new Date().toLocaleDateString('en-CA') && diffMs <= 0) {
+      const dataEfetiva = config.data_teste || new Date().toLocaleDateString('en-CA');
+      setHoje(dataEfetiva);
+      setPrecosLiberados(config.precos_liberados);
+      setIsFeriadoMarcado(config.is_feriado);
+
+      const agora = new Date();
+      const diaSemana = new Date(dataEfetiva + "T12:00:00").getDay();
+      let limiteStr = config.is_feriado ? LIMITES_HORARIO.feriado : LIMITES_HORARIO[diaSemana];
+
+      if (config.nao_funciona || limiteStr === null) {
         setBloqueioAtivo(true);
-        setTempoRestante("PRAZO ENCERRADO");
+        setTempoRestante(config.nao_funciona ? "LOJA FECHADA" : "NÃO HÁ ENVIOS HOJE");
       } else {
-        setBloqueioAtivo(false);
-        if (diffMs > 0 && diffMs < 21600000) { // Menos de 6h
-          const dMin = Math.floor(diffMs / 60000);
-          setTempoRestante(`${Math.floor(dMin/60)}h ${dMin%60}min`);
-          
-          if (dMin <= 30 && !notificou30min) {
-            if ("Notification" in window && Notification.permission === "granted") {
-                new Notification("V.I.R.T.U.S: PRAZO ENCERRANDO", { body: `Faltam apenas 30 minutos para o fim dos pedidos!` });
-            }
-            setNotificou30min(true);
-          }
-        } else { setTempoRestante(null); }
-      }
-    }
+        const [h, m] = limiteStr.split(':').map(Number);
+        const dataLimite = new Date();
+        dataLimite.setHours(h, m, 0);
 
-    // Carregar Banners, Produtos e Pedido do Dia
-    const { data: bData } = await supabase.from('banners').select('*');
-    if (bData) {
-      const bMap = {}; bData.forEach(b => bMap[b.posicao] = b.imagem_url);
-      setBanners({ topo: bMap.topo || '', logo: bMap.logo || '', tematico: bMap.tematico || '' });
-    }
-    const { data: pData } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
-    setProdutos(pData || []);
-    const { data: pedData } = await supabase.from('pedidos').select('*').eq('data_pedido', dataEfetiva).eq('loja_id', codLoja);
-    setListaEnviadaHoje(pedData?.length > 0 ? pedData : null);
-  }, [codLoja, notificou30min]);
+        const diffMs = dataLimite - agora;
+        const diffMin = Math.floor(diffMs / 60000);
+
+        if (dataEfetiva === new Date().toLocaleDateString('en-CA') && diffMs <= 0) {
+          setBloqueioAtivo(true);
+          setTempoRestante("PRAZO ENCERRADO");
+        } else {
+          setBloqueioAtivo(false);
+          if (diffMs > 0 && diffMs < 18000000) { // Menos de 5h para o fim
+            setTempoRestante(`${Math.floor(diffMin/60)}h ${diffMin%60}min`);
+            if (diffMin <= 30 && !notificou30min) {
+              mostrarNotificacao(`⚠️ Faltam 30 minutos! Envie sua lista até as ${limiteStr}.`, 'alerta', 'PRAZO ENCERRANDO');
+              setNotificou30min(true);
+            }
+          } else { setTempoRestante(null); }
+        }
+      }
+
+      // Alerta de Feriado (Sempre que abrir no dia marcado como feriado)
+      if (config.is_feriado && agora.getHours() < 13) {
+         mostrarNotificacao(`🚩 Horário de Feriado: Pedidos até as ${LIMITES_HORARIO.feriado}.`, 'info');
+      }
+    } catch (e) { console.error(e); }
+  }, [notificou30min]);
 
   useEffect(() => {
-    sincronizar();
-    const t = setInterval(sincronizar, 30000);
-    return () => clearInterval(t);
-  }, [sincronizar]);
+    sincronizarSistema();
+    const radar = setInterval(sincronizarSistema, 30000);
+    return () => clearInterval(radar);
+  }, [sincronizarSistema]);
 
-  useEffect(() => { localStorage.setItem('carrinho_virtus', JSON.stringify(carrinho)); }, [carrinho]);
-
-  // --- WHATSAPP & REVISÃO ---
+  // --- FUNÇÃO WHATSAPP ---
   const copiarParaWhatsapp = () => {
     if (!listaEnviadaHoje) return;
-    let txt = `*PEDIDO: ${nomeLojaLimpo}*\n*DATA:* ${new Date(hoje).toLocaleDateString('pt-BR')}\n---\n`;
-    listaEnviadaHoje.forEach(i => txt += `• *${i.quantidade}x* ${i.nome_produto} (${i.unidade_medida})\n`);
-    txt += `---\n_V.I.R.T.U.S System_`;
-    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(txt)}`, '_blank');
+    let texto = `*PEDIDO: ${nomeLojaLimpo}*\n*DATA:* ${new Date(hoje).toLocaleDateString('pt-BR')}\n`;
+    texto += `----------------------------\n`;
+    listaEnviadaHoje.forEach(item => {
+      texto += `• *${item.quantidade}x* ${item.nome_produto} (${item.unidade_medida})`;
+      if (item.qtd_bonificada > 0) texto += ` _+ ${item.qtd_bonificada} Bonif._`;
+      texto += `\n`;
+    });
+    texto += `----------------------------\n_Enviado via V.I.R.T.U.S System_`;
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(texto)}`, '_blank');
   };
 
-  const abrirRevisao = () => {
-    const itensPadrao = produtos.filter(p => p.lista_padrao && p.status_cotacao !== 'falta');
-    const esquecidos = itensPadrao.filter(p => !carrinho.some(c => c.id === p.id));
-    if (esquecidos.length > 0) {
-      const nomes = esquecidos.map(i => `- ${i.nome}`).join('\n');
-      if (!window.confirm(`⚠️ ITENS DA LISTA PADRÃO ESQUECIDOS:\n\n${nomes}\n\nDeseja enviar assim mesmo?`)) {
-        setCategoriaAtiva('⭐ LISTA PADRÃO');
-        setModalCarrinhoAberto(false);
-        return;
+  // --- RESTO DAS FUNÇÕES ORIGINAIS (Instalação, Scroll, Preços, Dados) ---
+  useEffect(() => {
+    document.body.style.backgroundColor = configDesign.cores.fundoGeral;
+    const handleInstall = (e) => { e.preventDefault(); setDeferredPrompt(e); };
+    window.addEventListener('beforeinstallprompt', handleInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleInstall);
+  }, [configDesign.cores.fundoGeral]);
+
+  const carregarDados = useCallback(async (silencioso = false) => {
+    if (enviandoRef.current) return;
+    try {
+      const { data: bData } = await supabase.from('banners').select('*');
+      if (bData) {
+        const bMap = {}; bData.forEach(b => bMap[b.posicao] = b.imagem_url);
+        setBanners({ topo: bMap.topo || '', logo: bMap.logo || '', tematico: bMap.tematico || '' });
       }
+      const { data: pData } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
+      if (pData) setProdutos(pData);
+      if (codLoja) {
+        const { data: ped } = await supabase.from('pedidos').select('*').eq('data_pedido', hoje).eq('loja_id', codLoja);
+        setListaEnviadaHoje(ped?.length > 0 ? ped : null);
+      }
+    } catch (e) { console.error(e); }
+  }, [codLoja, hoje]);
+
+  useEffect(() => { carregarDados(); }, [carregarDados]);
+
+  const formatarMoeda = (v) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatarQtdUnidade = (qtd, und) => `${qtd} ${und || 'UN'}`;
+  
+  const tratarInfosDeVenda = (p) => {
+    const preco = parseFloat(String(p.preco || '0').replace('R$ ', '').replace(',', '.'));
+    const peso = parseFloat(p.peso_caixa) || 0;
+    if (p.unidade_medida === 'KG' && peso > 0) {
+      return { isCaixa: true, precoBase: preco * peso, textoPreco: `${formatarMoeda(preco * peso)} / CX`, textoSecundario: `(${peso}kg - ${p.preco}/kg)`, unidadeFinal: 'CX' };
     }
-    setModalRevisaoAberto(true);
+    return { isCaixa: false, precoBase: preco, textoPreco: `${p.preco} / ${p.unidade_medida}`, textoSecundario: '', unidadeFinal: p.unidade_medida };
   };
 
-  // --- COMPONENTE SEARCH BAR ---
-  const SearchBar = ({ fixa = false }) => (
-    <div style={{
-      padding: fixa ? '12px 20px' : '0 20px 10px 20px',
-      position: fixa ? 'fixed' : 'relative',
-      top: fixa ? 0 : 'auto', left: 0, right: 0, zIndex: 1100,
-      opacity: fixa ? (showFixedSearch ? 1 : 0) : 1,
-      transform: fixa ? (showFixedSearch ? 'translateY(0)' : 'translateY(-20px)') : 'none',
-      transition: 'opacity 0.3s ease, transform 0.3s ease',
-      display: fixa && categoriaAtiva === 'DESTAQUES' ? 'none' : 'block'
-    }}>
-      <div style={{ 
-        background: fixa ? configDesign.cores.fundoCards : configDesign.cores.inputFundo, 
-        borderRadius: fixa ? '30px' : '12px', 
-        padding: '12px 18px', display: 'flex', gap: '10px',
-        boxShadow: fixa ? '0 8px 20px rgba(0,0,0,0.1)' : 'none',
-        border: fixa ? `1px solid ${configDesign.cores.borda}` : 'none'
-      }}>
-        <span>🔍</span>
-        <input 
-          placeholder="O que você procura?" 
-          value={buscaMenu} 
-          onChange={e => setBuscaMenu(e.target.value)} 
-          style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', color: configDesign.cores.textoForte }} 
-        />
-      </div>
-    </div>
-  );
+  const abrirProduto = (p) => {
+    setProdutoExpandido(p);
+    const ex = carrinho.find(i => i.id === p.id);
+    setQuantidade(ex?.quantidade || 1);
+    setQtdBonificada(ex?.qtd_bonificada || 0);
+    setTemBonificacao(!!ex?.qtd_bonificada);
+  };
 
-  // --- RENDERIZAÇÃO ---
-  if (!precosLiberados && !listaEnviadaHoje) {
+  const salvarNoCarrinho = () => {
+    const infos = tratarInfosDeVenda(produtoExpandido);
+    const novoItem = { 
+      ...produtoExpandido, 
+      quantidade: parseInt(quantidade), 
+      qtd_bonificada: temBonificacao ? parseInt(qtdBonificada) : 0, 
+      valorUnit: infos.precoBase, 
+      total: infos.precoBase * (parseInt(quantidade) - (temBonificacao ? parseInt(qtdBonificada) : 0)),
+      unidade_medida: infos.unidadeFinal
+    };
+    setCarrinho(prev => [...prev.filter(i => i.id !== produtoExpandido.id), novoItem]);
+    setProdutoExpandido(null);
+  };
+
+  const confirmarEnvio = async () => {
+    setEnviandoPedido(true);
+    try {
+      const dados = carrinho.map(i => ({
+        loja_id: codLoja, nome_usuario: usuario?.nome, nome_produto: i.nome,
+        quantidade: i.quantidade, qtd_bonificada: i.qtd_bonificada, unidade_medida: i.unidade_medida,
+        data_pedido: hoje, status_compra: 'pendente'
+      }));
+      await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
+      await supabase.from('pedidos').insert(dados);
+      setListaEnviadaHoje(dados);
+      setCarrinho([]);
+      setModalRevisaoAberto(false);
+      mostrarNotificacao("🚀 LISTA ENVIADA COM SUCESSO!", 'sucesso');
+    } catch (e) { alert(e.message); }
+    finally { setEnviandoPedido(false); }
+  };
+
+  const mostrarNotificacao = (mensagem, tipo = 'info') => {
+    const id = Date.now();
+    setNotificacoes(prev => [...prev, { id, mensagem, tipo }]);
+    setTimeout(() => setNotificacoes(prev => prev.filter(n => n.id !== id)), 5000);
+  };
+
+  // --- RENDERIZAÇÃO: PEDIDO ENVIADO (MODIFICADO COM WHATSAPP) ---
+  if (listaEnviadaHoje && !modoVisualizacao) {
+    const edicaoLiberada = listaEnviadaHoje.some(item => item.liberado_edicao === true);
     return (
-      <div style={{ padding: '100px 20px', textAlign: 'center', background: configDesign.cores.fundoGeral, height: '100vh', fontFamily:'sans-serif' }}>
-        <div style={{fontSize:'60px'}}>⏳</div>
-        <h2 style={{color:configDesign.cores.textoForte}}>Aguardando Cotação...</h2>
-        <p style={{color:configDesign.cores.textoSuave}}>{new Date(hoje).toLocaleDateString('pt-BR')}</p>
+      <div style={{ padding: '20px', fontFamily: configDesign.geral.fontePadrao, textAlign: 'center', backgroundColor: configDesign.cores.fundoGeral, minHeight: '100vh' }}>
+        <div style={{ background: edicaoLiberada ? configDesign.cores.sucesso : configDesign.cores.textoForte, color: '#fff', padding: '40px 30px', borderRadius: '30px', marginTop: '20px' }}>
+          <div style={{fontSize: '50px'}}>{edicaoLiberada ? '🔓' : '✅'}</div>
+          <h2 style={{ margin: 0 }}>{edicaoLiberada ? 'EDIÇÃO LIBERADA' : 'PEDIDO ENVIADO!'}</h2>
+        </div>
+        <div style={{ textAlign: 'left', marginTop: '25px', background: configDesign.cores.fundoCards, padding: '20px', borderRadius: '20px', border: `1px solid ${configDesign.cores.borda}` }}>
+          {listaEnviadaHoje.map((item, i) => (
+            <div key={i} style={{ padding: '12px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', color: configDesign.cores.textoForte }}>
+              <span><b>{item.quantidade}x</b> {item.nome_produto}</span>
+              <small>{item.unidade_medida}</small>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <button onClick={copiarParaWhatsapp} style={{ background: '#25D366', color: '#fff', border: 'none', padding: '18px', borderRadius: '15px', fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+            💬 COPIAR PARA WHATSAPP
+          </button>
+          <button onClick={() => carregarDados()} style={{ background: configDesign.cores.inputFundo, border: `1px solid ${configDesign.cores.borda}`, padding: '18px', borderRadius: '15px', color: configDesign.cores.textoForte, fontWeight: 'bold' }}>🔄 ATUALIZAR STATUS</button>
+          <button onClick={() => setModoVisualizacao(true)} style={{ background: 'transparent', border: 'none', padding: '20px', color: configDesign.cores.textoSuave, fontWeight: '900', textDecoration: 'underline' }}>VOLTAR AO INÍCIO</button>
+        </div>
       </div>
     );
   }
 
+  // --- RENDERIZAÇÃO: CATÁLOGO (COM ALERTA DE HORÁRIO) ---
   return (
-    <div style={{ width: '100%', minHeight: '100vh', backgroundColor: configDesign.cores.fundoGeral, fontFamily: 'sans-serif', paddingBottom: '100px' }}>
+    <div style={{ width: '100%', minHeight: '100vh', backgroundColor: configDesign.cores.fundoGeral, fontFamily: configDesign.geral.fontePadrao, paddingBottom: '100px' }}>
       
-      <SearchBar fixa={true} />
-
-      {/* HEADER DE TRAVAS */}
+      {/* ALERTA DE TEMPO V.I.R.T.U.S */}
       {tempoRestante && !bloqueioAtivo && (
-        <div style={{ background: configDesign.cores.sucesso, color: '#fff', padding: '8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold' }}>⏳ TEMPO PARA ENVIO: {tempoRestante}</div>
+        <div style={{ background: configDesign.cores.sucesso, color: '#fff', padding: '10px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold' }}>
+          ⏳ TEMPO RESTANTE PARA ENVIO: {tempoRestante}
+        </div>
       )}
       {isFeriadoMarcado && (
-        <div style={{ background: '#fef3c7', color: '#92400e', padding: '8px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold' }}>🚩 FERIADO: Limite às 13:00</div>
-      )}
-
-      {/* TELA DE PEDIDO ENVIADO */}
-      {listaEnviadaHoje && !modoVisualizacao ? (
-        <div style={{ padding: '20px', textAlign: 'center' }}>
-          <div style={{ background: configDesign.cores.textoForte, color: '#fff', padding: '40px 20px', borderRadius: '25px' }}>
-            <h2 style={{margin:0}}>✅ PEDIDO ENVIADO!</h2>
-            <p>Data: {new Date(hoje).toLocaleDateString('pt-BR')}</p>
-          </div>
-          <button onClick={copiarParaWhatsapp} style={{ width: '100%', marginTop: '20px', padding: '20px', background: '#25D366', color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900' }}>💬 WHATSAPP</button>
-          <button onClick={() => setModoVisualizacao(true)} style={{ color: configDesign.cores.textoSuave, textDecoration: 'underline', border: 'none', background: 'none', marginTop: '20px' }}>VISUALIZAR CATÁLOGO</button>
-        </div>
-      ) : (
-        <>
-          {/* BANNERS EM DESTAQUES */}
-          {categoriaAtiva === 'DESTAQUES' && (
-            <div>
-              <div style={{ width: '100%', height: '180px', backgroundImage: `url(${banners.topo})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
-              <div style={{ padding: '0 20px', marginTop: '-40px' }}>
-                <div style={{ width: '80px', height: '80px', borderRadius: '50%', border: `4px solid ${configDesign.cores.fundoGeral}`, backgroundImage: `url(${banners.logo})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', backgroundColor: '#fff' }} />
-              </div>
-              <div style={{ width: '100%', height: '140px', marginTop: '20px', backgroundImage: `url(${banners.tematico})`, backgroundSize: 'cover' }} />
-              <div style={{ marginTop: '20px' }}><SearchBar fixa={false} /></div>
-            </div>
-          )}
-
-          {/* MENU CATEGORIAS STICKY */}
-          <div style={{ position: 'sticky', top: categoriaAtiva === 'DESTAQUES' ? 0 : '70px', zIndex: 1000, background: configDesign.cores.fundoGeral, padding: '15px 0' }}>
-            <div style={{ display: 'flex', overflowX: 'auto', gap: '20px', padding: '0 20px', scrollbarWidth: 'none' }}>
-              {categoriasDinamicas.map(cat => (
-                <button key={cat} onClick={() => setCategoriaAtiva(cat)} style={{ background: 'none', border: 'none', color: categoriaAtiva === cat ? configDesign.cores.primaria : configDesign.cores.textoSuave, fontWeight: '900', borderBottom: categoriaAtiva === cat ? `3px solid ${configDesign.cores.primaria}` : 'none', whiteSpace: 'nowrap', paddingBottom: '5px', fontSize: '13px' }}>{cat}</button>
-              ))}
-            </div>
-          </div>
-
-          {/* LISTAGEM DE PRODUTOS */}
-          <div style={{ padding: '20px', display: 'grid', gridTemplateColumns: categoriaAtiva === 'DESTAQUES' ? '1fr' : '1fr 1fr', gap: '15px' }}>
-            {produtos.filter(p => {
-                const busca = normalizar(buscaMenu);
-                const nome = normalizar(p.nome);
-                if (busca && !nome.includes(busca)) return false;
-                if (categoriaAtiva === 'TODOS') return true;
-                if (categoriaAtiva === 'DESTAQUES') return p.promocao || p.novidade;
-                if (categoriaAtiva === '⭐ LISTA PADRÃO') return p.lista_padrao === true;
-                return normalizar(p.categoria || "").includes(normalizar(categoriaAtiva));
-            }).map(p => {
-              const itemNoCart = carrinho.find(c => c.id === p.id);
-              return (
-                <div key={p.id} onClick={() => setProdutoExpandido(p)} style={{ background: configDesign.cores.fundoCards, borderRadius: '16px', padding: '12px', boxShadow: configDesign.cards.sombra, position: 'relative', border: itemNoCart ? `2px solid ${configDesign.cores.primaria}` : 'none', cursor: 'pointer' }}>
-                   {itemNoCart && <div style={{position:'absolute', top:'-10px', right:'-10px', background:configDesign.cores.primaria, color:'#fff', width:'25px', height:'25px', borderRadius:'50%', display:'flex', justifyContent:'center', alignItems:'center', fontWeight:'bold', fontSize:'12px'}}>{itemNoCart.quantidade}</div>}
-                   <div style={{ height: categoriaAtiva === 'DESTAQUES' ? configDesign.cards.alturaImgDestaque : configDesign.cards.alturaImgPequena, borderRadius: '12px', backgroundImage: `url(${p.foto_url?.split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: configDesign.cores.inputFundo }} />
-                   <h4 style={{ color: configDesign.cores.textoForte, fontSize: '13px', margin: '10px 0 5px 0' }}>{p.nome} {p.lista_padrao && '⭐'}</h4>
-                   <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end'}}>
-                      <span style={{ color: configDesign.cores.primaria, fontWeight: '900', fontSize: '16px' }}>{p.preco}</span>
-                      <small style={{color:configDesign.cores.textoSuave, fontSize:'10px'}}>{p.unidade_medida}</small>
-                   </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {/* MODAL DETALHES (CLICÁVEL) */}
-      {produtoExpandido && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 5000, display: 'flex', alignItems: 'flex-end' }}>
-          <div style={{ background: configDesign.cores.fundoCards, width: '100%', padding: '30px', borderRadius: '30px 30px 0 0' }}>
-            <button onClick={() => setProdutoExpandido(null)} style={{ float:'right', background:'none', border:'none', fontSize:'24px', color:configDesign.cores.textoForte }}>✕</button>
-            <h2 style={{color: configDesign.cores.textoForte}}>{produtoExpandido.nome}</h2>
-            <p style={{color: configDesign.cores.primaria, fontSize: '24px', fontWeight: '900'}}>{produtoExpandido.preco}</p>
-            <div style={{display:'flex', gap:'15px', alignItems:'center', margin:'20px 0'}}>
-                <button onClick={() => setQuantidade(Math.max(1, quantidade - 1))} style={{flex:1, padding:'15px', borderRadius:'12px', border:'none', background:configDesign.cores.inputFundo, color:configDesign.cores.textoForte, fontWeight:'bold'}}>-</button>
-                <span style={{fontSize:'20px', fontWeight:'bold', width:'40px', textAlign:'center'}}>{quantidade}</span>
-                <button onClick={() => setQuantidade(quantidade + 1)} style={{flex:1, padding:'15px', borderRadius:'12px', border:'none', background:configDesign.cores.inputFundo, color:configDesign.cores.textoForte, fontWeight:'bold'}}>+</button>
-            </div>
-            <button onClick={() => {
-                const novoCarrinho = [...carrinho.filter(c => c.id !== produtoExpandido.id), {...produtoExpandido, quantidade}];
-                setCarrinho(novoCarrinho);
-                setProdutoExpandido(null);
-                setQuantidade(1);
-            }} style={{ width: '100%', padding: '20px', background: configDesign.cores.textoForte, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900' }}>ADICIONAR AO PEDIDO</button>
-          </div>
+        <div style={{ background: '#fef3c7', color: '#92400e', padding: '10px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold' }}>
+          🚩 ATENÇÃO: Horário de Feriado (Limite até as 13:00)
         </div>
       )}
 
-      {/* BOTÃO CARRINHO FLUTUANTE */}
+      {/* HEADER ORIGINAL */}
+      <div style={{ padding: '25px 20px', backgroundColor: configDesign.cores.fundoCards, borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: '22px', color: configDesign.cores.textoForte, fontWeight: '900' }}>{saudacaoStr}, {primeiroNome}!</h2>
+          <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: configDesign.cores.primaria, fontWeight: '900' }}>📍 {nomeLojaLimpo}</p>
+        </div>
+        <button onClick={() => setModalConfiguracoesAberto(true)} style={{ background: configDesign.cores.inputFundo, border: 'none', width: '40px', height: '40px', borderRadius: '12px' }}>⚙️</button>
+      </div>
+
+      {/* BANNERS E PRODUTOS (IGUAL AO ORIGINAL) */}
+      {categoriaAtiva === 'DESTAQUES' && (
+        <div style={{ width: '100%', height: '180px', backgroundImage: `url(${banners.topo})`, backgroundSize: 'cover' }} />
+      )}
+
+      {/* MENU CATEGORIAS */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 100, backgroundColor: configDesign.cores.fundoGeral, padding: '15px 0' }}>
+        <div style={{ display: 'flex', overflowX: 'auto', gap: '20px', padding: '0 20px', scrollbarWidth: 'none' }}>
+          {categoriasDinamicas.map(cat => (
+            <button key={cat} onClick={() => setCategoriaAtiva(cat)} style={{ background: 'none', border: 'none', color: categoriaAtiva === cat ? configDesign.cores.primaria : configDesign.cores.textoSuave, fontWeight: '900', borderBottom: categoriaAtiva === cat ? `3px solid ${configDesign.cores.primaria}` : 'none', whiteSpace: 'nowrap', paddingBottom: '5px' }}>{cat}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* LISTA DE PRODUTOS */}
+      <div style={{ padding: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+        {produtos.filter(p => categoriaAtiva === 'TODOS' || p.promocao || p.categoria?.toUpperCase() === categoriaAtiva.replace(/[^a-zA-Z]/g, '').toUpperCase()).map(p => {
+          const itemNoCart = carrinho.find(i => i.id === p.id);
+          const infos = tratarInfosDeVenda(p);
+          return (
+            <div key={p.id} onClick={() => abrirProduto(p)} style={{ background: configDesign.cores.fundoCards, borderRadius: '16px', padding: '12px', boxShadow: configDesign.cards.sombra, position: 'relative', border: itemNoCart ? `2px solid ${configDesign.cores.primaria}` : 'none' }}>
+              <div style={{ height: '100px', borderRadius: '12px', backgroundImage: `url(${p.foto_url?.split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+              <h4 style={{ color: configDesign.cores.textoForte, fontSize: '12px', margin: '10px 0 5px 0', height: '30px', overflow: 'hidden' }}>{p.nome}</h4>
+              <span style={{ color: configDesign.cores.primaria, fontWeight: '900', fontSize: '15px' }}>{infos.textoPreco}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* BOTÃO CARRINHO */}
       {carrinho.length > 0 && !bloqueioAtivo && (
-        <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', background: configDesign.cores.textoForte, color: '#fff', border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 4000 }}>
-          🛒 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.primaria, fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: '2px solid #000' }}>{carrinho.length}</span>
+        <button onClick={abrirRevisao} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', background: configDesign.cores.textoForte, color: '#fff', border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500 }}>
+          🛒 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.primaria, fontSize: '12px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: '2px solid #000' }}>{carrinho.length}</span>
         </button>
       )}
 
-      {/* MODAL REVISÃO (COM ALERTA DE LISTA PADRÃO) */}
+      {/* BLOQUEIO DE ENVIO (NO MODAL DE REVISÃO) */}
       {modalRevisaoAberto && (
-        <div style={{ position: 'fixed', inset: 0, background: configDesign.cores.fundoGeral, zIndex: 6000, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, textAlign: 'center' }}><h3 style={{ margin: 0, color: configDesign.cores.textoForte }}>Confirmação do Pedido</h3></div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
-            {carrinho.map(i => (
-              <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px 0', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
-                <span style={{color: configDesign.cores.textoForte}}><b>{i.quantidade}x</b> {i.nome}</span>
-                <span style={{color: configDesign.cores.textoSuave}}>{i.preco}</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ padding: '20px', background: configDesign.cores.fundoCards }}>
-            <button onClick={confirmarEnvio} disabled={enviandoPedido} style={{ width: '100%', padding: '20px', background: configDesign.cores.sucesso, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900' }}>{enviandoPedido ? 'ENVIANDO...' : 'CONFIRMAR E ENVIAR'}</button>
-            <button onClick={() => setModalRevisaoAberto(false)} style={{ width: '100%', marginTop: '10px', background: 'none', border: 'none', color: configDesign.cores.textoSuave }}>Voltar ao carrinho</button>
-          </div>
+        <div style={{ position: 'fixed', inset: 0, background: configDesign.cores.fundoGeral, zIndex: 3000, display: 'flex', flexDirection: 'column' }}>
+           <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, textAlign: 'center' }}>
+             <h3 style={{ margin: 0, color: configDesign.cores.textoForte }}>Confirmação do Pedido</h3>
+           </div>
+           <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+             {carrinho.map(item => (
+               <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px 0', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
+                 <span style={{color: configDesign.cores.textoForte}}><b>{item.quantidade}x</b> {item.nome}</span>
+                 <span style={{color: configDesign.cores.textoSuave}}>{formatarMoeda(item.total)}</span>
+               </div>
+             ))}
+           </div>
+           <div style={{ padding: '20px', background: configDesign.cores.fundoCards }}>
+             {bloqueioAtivo ? (
+               <div style={{ background: '#fee2e2', color: '#ef4444', padding: '15px', borderRadius: '12px', textAlign: 'center', fontWeight: 'bold' }}>🕒 Horário limite excedido.</div>
+             ) : (
+               <button onClick={confirmarEnvio} disabled={enviandoPedido} style={{ width: '100%', padding: '20px', background: configDesign.cores.sucesso, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900' }}>
+                 {enviandoPedido ? 'ENVIANDO...' : 'CONFIRMAR E ENVIAR'}
+               </button>
+             )}
+             <button onClick={() => setModalRevisaoAberto(false)} style={{ width: '100%', marginTop: '10px', background: 'none', border: 'none', color: configDesign.cores.textoSuave }}>Voltar ao carrinho</button>
+           </div>
         </div>
       )}
     </div>
