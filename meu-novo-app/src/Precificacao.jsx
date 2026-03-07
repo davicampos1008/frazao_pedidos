@@ -75,6 +75,9 @@ export default function Precificacao() {
   const [abaAtiva, setAbaAtiva] = useState('pendentes');
   const [carregando, setCarregando] = useState(true);
   const [configGlobal, setConfigGlobal] = useState({ is_feriado: false, nao_funciona: false, data_teste: '' });
+  
+  // Estado para saber se o teste está "rodando" (data salva no banco)
+  const [testeAtivo, setTesteAtivo] = useState(false);
 
   useEffect(() => { 
     carregarDados(); 
@@ -83,7 +86,15 @@ export default function Precificacao() {
 
   const carregarConfig = async () => {
     const { data } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
-    if (data) setConfigGlobal({ is_feriado: data.is_feriado, nao_funciona: data.nao_funciona, data_teste: data.data_teste || '' });
+    if (data) {
+      setConfigGlobal({ 
+        is_feriado: data.is_feriado, 
+        nao_funciona: data.nao_funciona, 
+        data_teste: data.data_teste || '' 
+      });
+      // Se existe uma data_teste preenchida no banco, o botão deve estar em modo "Finalizar"
+      setTesteAtivo(!!data.data_teste);
+    }
   };
 
   const carregarDados = async () => {
@@ -93,12 +104,41 @@ export default function Precificacao() {
     setCarregando(false);
   };
 
-  const aplicarConfiguracoes = async () => {
+  const gerenciarTeste = async () => {
     setCarregando(true);
-    const { error } = await supabase.from('configuracoes').update(configGlobal).eq('id', 1);
+    
+    if (!testeAtivo) {
+      // MODO: APLICAR TESTE
+      if (!configGlobal.data_teste) {
+        alert("Escolha uma data para o teste.");
+        setCarregando(false);
+        return;
+      }
+      const { error } = await supabase.from('configuracoes').update({
+        data_teste: configGlobal.data_teste,
+        is_feriado: configGlobal.is_feriado,
+        nao_funciona: configGlobal.nao_funciona
+      }).eq('id', 1);
+      
+      if (!error) {
+        setTesteAtivo(true);
+        alert(`🛠️ MODO TESTE ATIVADO: A loja agora opera como se fosse dia ${configGlobal.data_teste}`);
+      }
+    } else {
+      // MODO: FINALIZAR TESTE
+      const { error } = await supabase.from('configuracoes').update({
+        data_teste: null, // Limpa a data de teste no banco
+        is_feriado: false,
+        nao_funciona: false
+      }).eq('id', 1);
+      
+      if (!error) {
+        setTesteAtivo(false);
+        setConfigGlobal(prev => ({ ...prev, data_teste: '', is_feriado: false, nao_funciona: false }));
+        alert("✅ TESTE FINALIZADO: A loja voltou ao horário e data real.");
+      }
+    }
     setCarregando(false);
-    if (!error) alert("✅ Configurações de teste aplicadas com sucesso!");
-    else alert("❌ Erro ao salvar configurações.");
   };
 
   const zerarCotacao = async () => {
@@ -129,14 +169,41 @@ export default function Precificacao() {
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', padding: '10px' }}>
       <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '24px', marginBottom: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}>
         <h3 style={{ margin: '0 0 15px 0', fontSize: '14px', color: '#64748b' }}>⚙️ PAINEL DE CONTROLE</h3>
+        
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '15px' }}>
           <button onClick={() => setConfigGlobal({...configGlobal, is_feriado: !configGlobal.is_feriado})} style={{ padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', background: configGlobal.is_feriado ? '#fef3c7' : '#f1f5f9' }}>{configGlobal.is_feriado ? '🚩 FERIADO' : '🏳️ NORMAL'}</button>
           <button onClick={() => setConfigGlobal({...configGlobal, nao_funciona: !configGlobal.nao_funciona})} style={{ padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', background: configGlobal.nao_funciona ? '#fee2e2' : '#f1f5f9' }}>{configGlobal.nao_funciona ? '🚫 FECHADA' : '✅ ABERTA'}</button>
         </div>
+
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <input type="date" value={configGlobal.data_teste} onChange={(e) => setConfigGlobal({...configGlobal, data_teste: e.target.value})} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1' }} />
-          <button onClick={aplicarConfiguracoes} style={{ padding: '10px 20px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold' }}>APLICAR TESTE</button>
+          <input 
+            type="date" 
+            disabled={testeAtivo} // Trava o input enquanto o teste roda
+            value={configGlobal.data_teste} 
+            onChange={(e) => setConfigGlobal({...configGlobal, data_teste: e.target.value})} 
+            style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', opacity: testeAtivo ? 0.6 : 1 }} 
+          />
+          <button 
+            onClick={gerenciarTeste} 
+            disabled={carregando}
+            style={{ 
+              padding: '10px 20px', 
+              background: testeAtivo ? '#ef4444' : '#3b82f6', 
+              color: '#fff', 
+              border: 'none', 
+              borderRadius: '10px', 
+              fontWeight: 'bold',
+              minWidth: '150px'
+            }}
+          >
+            {carregando ? '...' : (testeAtivo ? '⏹️ FINALIZAR TESTE' : '🧪 APLICAR TESTE')}
+          </button>
         </div>
+        {testeAtivo && (
+          <p style={{ margin: '10px 0 0 0', fontSize: '12px', color: '#ef4444', fontWeight: 'bold', textAlign: 'center' }}>
+            ⚠️ O sistema está simulando o dia {configGlobal.data_teste}
+          </p>
+        )}
       </div>
 
       <div style={{ backgroundColor: '#111', padding: '25px', borderRadius: '24px', color: 'white', marginBottom: '20px' }}>
