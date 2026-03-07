@@ -20,7 +20,7 @@ export default function MenuCliente({ usuario, tema }) {
       promocao: '#eab308',      
       novidade: '#a855f7',      
       sucesso: '#22c55e',       
-      alerta: '#ef4444'         
+      alerta: '#ef4444'          
     },
     cards: {
       raioBorda: '16px',
@@ -40,6 +40,65 @@ export default function MenuCliente({ usuario, tema }) {
   const nomeLojaLimpo = (usuario?.loja || 'Matriz').replace(/^\d+\s*-\s*/, '').trim();
   
   const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
+
+  // --- LÓGICA DE TRAVA DE HORÁRIO ---
+  const [statusLoja, setStatusLoja] = useState({ aberta: true, mensagem: '', tempoRestante: null });
+  const notificacoesEnviadas = useRef({ trinta: false, dez: false });
+
+  const verificarHorario = useCallback(() => {
+    const agora = new Date();
+    const diaSemana = agora.getDay(); // 0: Domingo, 1: Segunda... 6: Sábado
+    const hora = agora.getHours();
+    const minuto = agora.getMinutes();
+    const totalMinutosAtual = (hora * 60) + minuto;
+
+    // Definição de limites (em minutos do dia)
+    let limiteMinutos = 18 * 60; // Padrão 18h
+    let isFeriado = false; // Implementar lógica de feriado se necessário via banco
+
+    if (diaSemana === 6) { // Sábado
+      setStatusLoja({ aberta: false, mensagem: "LOJA INATIVA AOS SÁBADOS", tempoRestante: null });
+      return;
+    }
+
+    if (diaSemana === 0 || isFeriado) { // Domingo ou Feriado
+      limiteMinutos = 13 * 60;
+    } else if (diaSemana === 3) { // Quarta
+      limiteMinutos = 14 * 60;
+    }
+
+    const minutosRestantes = limiteMinutos - totalMinutosAtual;
+
+    if (minutosRestantes <= 0) {
+      setStatusLoja({ aberta: false, mensagem: "PRAZO FINALIZADO. CONTACTE O SUPORTE.", tempoRestante: 0 });
+    } else {
+      setStatusLoja({ aberta: true, mensagem: "", tempoRestante: minutosRestantes });
+      
+      // Alertas Externos (Push/Notification)
+      if (minutosRestantes === 30 && !notificacoesEnviadas.current.trinta) {
+        mostrarNotificacao("⚠️ AVISO: Faltam 30 minutos para o fechamento do pedido!", "alerta");
+        notificacoesEnviadas.current.trinta = true;
+      }
+      if (minutosRestantes === 10 && !notificacoesEnviadas.current.dez) {
+        mostrarNotificacao("🚨 URGENTE: Apenas 10 minutos restantes para enviar sua lista!", "alerta");
+        notificacoesEnviadas.current.dez = true;
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    verificarHorario();
+    const timerHorario = setInterval(verificarHorario, 30000); // Checa a cada 30s
+    return () => clearInterval(timerHorario);
+  }, [verificarHorario]);
+
+  const formatarContagem = (minutos) => {
+    if (!minutos) return "";
+    const h = Math.floor(minutos / 60);
+    const m = minutos % 60;
+    return h > 0 ? `${h}h e ${m}min restantes` : `${m}min restantes`;
+  };
+  // -----------------------------------
 
   const categoriasDinamicas = [
     'DESTAQUES', 'TODOS', '🍎 Frutas', '🥬 Verduras & Fungos', '🥕 Legumes', 
@@ -337,7 +396,7 @@ export default function MenuCliente({ usuario, tema }) {
         const novaQtd = Math.max(1, (Number(item.quantidade) || 0) + delta);
         const bonif = Number(item.qtd_bonificada) || 0;
         const cobrada = Math.max(0, novaQtd - bonif);
-        return { ...item, quantidade: novaQtd, total: cobrada * (Number(item.valorUnit) || 0) };
+        return { ...item, quantity: novaQtd, total: cobrada * (Number(item.valorUnit) || 0) };
       }
       return item;
     }));
@@ -478,6 +537,19 @@ export default function MenuCliente({ usuario, tema }) {
     } catch (err) { setErroSenha(err.message); } finally { setCarregandoSenha(false); }
   };
 
+  // --- TELA DE TRAVA DE HORÁRIO ---
+  if (!statusLoja.aberta) {
+    return (
+      <div style={{ padding: '20px', fontFamily: configDesign.geral.fontePadrao, textAlign: 'center', backgroundColor: configDesign.cores.fundoGeral, minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+        <div style={{ background: configDesign.cores.alerta, color: '#fff', padding: '40px 30px', borderRadius: '30px', maxWidth: '400px' }}>
+          <div style={{fontSize: '60px', marginBottom: '20px'}}>🚫</div>
+          <h2 style={{ margin: 0, lineHeight: '1.2' }}>{statusLoja.mensagem}</h2>
+        </div>
+        <button onClick={() => window.location.reload()} style={{ marginTop: '30px', background: 'transparent', border: `1px solid ${configDesign.cores.borda}`, padding: '15px 30px', borderRadius: '15px', color: configDesign.cores.textoSuave, fontWeight: 'bold' }}>Tentar novamente</button>
+      </div>
+    );
+  }
+
   if (listaEnviadaHoje && !modoVisualizacao) {
     const aguardandoLiberacao = listaEnviadaHoje.some(item => item.solicitou_refazer === true);
     const edicaoLiberada = listaEnviadaHoje.some(item => item.liberado_edicao === true);
@@ -518,7 +590,10 @@ export default function MenuCliente({ usuario, tema }) {
       <div style={{ padding: '25px 20px 15px 20px', backgroundColor: configDesign.cores.fundoCards, borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '22px', color: configDesign.cores.textoForte, fontWeight: '900' }}>{saudacaoStr}, {primeiroNome}!</h2>
-          <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: configDesign.cores.primaria, fontWeight: '900', textTransform: 'uppercase' }}>📍 {nomeLojaLimpo}</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: configDesign.cores.primaria, fontWeight: '900', textTransform: 'uppercase' }}>📍 {nomeLojaLimpo}</p>
+            {statusLoja.tempoRestante && <span style={{ fontSize: '11px', color: configDesign.cores.alerta, fontWeight: 'bold', background: isEscuro ? '#450a0a' : '#fef2f2', padding: '2px 8px', borderRadius: '20px', marginTop: '2px' }}>⏱️ {formatarContagem(statusLoja.tempoRestante)}</span>}
+          </div>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           <button onClick={() => setModalConfiguracoesAberto(true)} style={{ background: configDesign.cores.inputFundo, border: 'none', width: '40px', height: '40px', borderRadius: '12px', fontSize: '20px' }}>⚙️</button>
