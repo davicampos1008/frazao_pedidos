@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
 // ============================================================================
-// COMPONENTE: LINHA DO PRODUTO (V.I.R.T.U.S OTIMIZADO)
+// COMPONENTE: LINHA DO PRODUTO (V.I.R.T.U.S)
 // ============================================================================
 const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) => {
   const [preco, setPreco] = useState(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
@@ -49,26 +49,20 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
   return (
     <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '12px 15px', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', borderLeft: `5px solid ${corBorda}` }}>
       <div onClick={() => abrirModal(produto)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '80%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ width: '35px', height: '35px', borderRadius: '6px', backgroundImage: `url(${produto.foto_url?.split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#f1f5f9' }} />
-          <div style={{ overflow: 'hidden' }}>
-            <strong style={{ display: 'block', fontSize: '14px', color: '#111', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{produto.nome}</strong>
-            <div style={{ display: 'flex', gap: '5px', marginTop: '2px' }}>
-              <span style={{fontSize: '9px', background: '#f1f5f9', color: '#64748b', padding: '2px 4px', borderRadius: '4px', fontWeight: 'bold'}}>{produto.unidade_medida || 'UN'}</span>
-            </div>
-          </div>
+          <strong style={{ fontSize: '14px', color: '#111' }}>{produto.nome}</strong>
         </div>
         <div style={{ fontSize: '12px' }}>{statusAviso}</div>
       </div>
       <div style={{ display: 'flex', gap: '10px' }}>
         <div style={{ position: 'relative', flex: 1 }}>
           <span style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8', fontWeight: 'bold', fontSize: '11px' }}>R$</span>
-          <input type="text" value={preco} onChange={e => setPreco(e.target.value)} onBlur={() => dispararAutoSave(preco, pesoCaixa)} onKeyDown={e => e.key === 'Enter' && e.target.blur()} placeholder="0,00" style={{ width: '100%', padding: '10px 10px 10px 30px', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: '900', fontSize: '14px', backgroundColor: '#f8fafc' }} />
+          <input type="text" value={preco} onChange={e => setPreco(e.target.value)} onBlur={() => dispararAutoSave(preco, pesoCaixa)} placeholder="0,00" style={{ width: '100%', padding: '10px 10px 10px 30px', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: '900', fontSize: '14px' }} />
         </div>
         {(produto.unidade_medida === 'KG' || produto.unidade_medida === 'CX') && (
-          <div style={{ position: 'relative', width: '100px' }}>
-            <input type="text" value={pesoCaixa} onChange={e => setPesoCaixa(e.target.value)} onBlur={() => dispararAutoSave(preco, pesoCaixa)} onKeyDown={e => e.key === 'Enter' && e.target.blur()} placeholder="Peso" style={{ width: '100%', padding: '10px 30px 10px 10px', borderRadius: '8px', border: '1px solid #eab308', fontWeight: 'bold', backgroundColor: '#fefce8' }} />
-            <span style={{ position: 'absolute', right: '10px', top: '10px', color: '#ca8a04', fontWeight: 'bold', fontSize: '11px' }}>Kg</span>
+          <div style={{ position: 'relative', width: '90px' }}>
+            <input type="text" value={pesoCaixa} onChange={e => setPesoCaixa(e.target.value)} onBlur={() => dispararAutoSave(preco, pesoCaixa)} placeholder="Kg" style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #eab308', fontWeight: 'bold' }} />
           </div>
         )}
       </div>
@@ -79,7 +73,6 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
 export default function Precificacao() {
   const [produtos, setProdutos] = useState([]);
   const [abaAtiva, setAbaAtiva] = useState('pendentes');
-  const [busca, setBusca] = useState('');
   const [carregando, setCarregando] = useState(true);
   const [configGlobal, setConfigGlobal] = useState({ is_feriado: false, nao_funciona: false, data_teste: '' });
 
@@ -93,97 +86,76 @@ export default function Precificacao() {
     if (data) setConfigGlobal({ is_feriado: data.is_feriado, nao_funciona: data.nao_funciona, data_teste: data.data_teste || '' });
   };
 
-  const carregarDados = async (silencioso = false) => {
-    if (!silencioso) setCarregando(true);
+  const carregarDados = async () => {
+    setCarregando(true);
     const { data } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
     if (data) setProdutos(data);
     setCarregando(false);
   };
 
-  const atualizarConfig = async (campo, valor) => {
-    setConfigGlobal(prev => ({ ...prev, [campo]: valor }));
-    await supabase.from('configuracoes').update({ [campo]: valor }).eq('id', 1);
+  const aplicarConfiguracoes = async () => {
+    setCarregando(true);
+    const { error } = await supabase.from('configuracoes').update(configGlobal).eq('id', 1);
+    setCarregando(false);
+    if (!error) alert("✅ Configurações de teste aplicadas com sucesso!");
+    else alert("❌ Erro ao salvar configurações.");
   };
 
   const zerarCotacao = async () => {
-    if (!window.confirm("🚨 ZERAR TUDO?\nIsso apagará PREÇOS e LISTAS DE PEDIDOS da data selecionada. Fotos serão mantidas.")) return;
+    if (!window.confirm("🚨 ZERAR COTAÇÃO?\nIsso apagará PREÇOS e LISTAS DE PEDIDOS da data selecionada. Fotos mantidas.")) return;
     setCarregando(true);
-    
     const dataAlvo = configGlobal.data_teste || new Date().toLocaleDateString('en-CA');
     await supabase.from('configuracoes').update({ precos_liberados: false }).eq('id', 1);
     await supabase.from('pedidos').delete().eq('data_pedido', dataAlvo);
-
-    const loteReset = produtos.map(p => ({
-      id: p.id,
-      preco: 'R$ 0,00',
-      status_cotacao: 'pendente',
-      promocao: false,
-      novidade: false
-    }));
-
-    for (let i = 0; i < loteReset.length; i += 50) {
-      await supabase.from('produtos').upsert(loteReset.slice(i, i + 50));
-    }
-    
-    alert("✅ Cotação Zerada para " + dataAlvo);
+    const lote = produtos.map(p => ({ id: p.id, preco: 'R$ 0,00', status_cotacao: 'pendente', promocao: false, novidade: false }));
+    for (let i = 0; i < lote.length; i += 50) await supabase.from('produtos').upsert(lote.slice(i, i + 50));
+    setCarregando(false);
+    alert("✅ Cotação Zerada.");
     carregarDados();
   };
 
   const finalizarCotacao = async () => {
-    setCarregando(true);
     await supabase.from('configuracoes').update({ precos_liberados: true }).eq('id', 1);
-    setCarregando(false);
     alert("🚀 LOJA ABERTA!");
   };
 
-  const handleAtualizarLista = (id, payload) => setProdutos(prev => prev.map(p => p.id === id ? { ...p, ...payload } : p));
-
   const listas = {
     pendentes: produtos.filter(p => p.status_cotacao === 'pendente'),
-    prontos: produtos.filter(p => p.status_cotacao === 'ativo' && p.preco !== 'R$ 0,00'),
-    mantidos: produtos.filter(p => p.status_cotacao === 'mantido'),
-    sem_preco: produtos.filter(p => p.status_cotacao === 'sem_preco'),
-    falta: produtos.filter(p => p.status_cotacao === 'falta')
+    prontos: produtos.filter(p => p.status_cotacao === 'ativo'),
+    outros: produtos.filter(p => !['pendente', 'ativo'].includes(p.status_cotacao))
   };
-
-  if (carregando) return <div style={{padding:'50px', textAlign:'center'}}>🔄 Sincronizando V.I.R.T.U.S...</div>;
 
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', padding: '10px' }}>
-      
-      {/* PAINEL DE CONTROLE */}
-      <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '24px', marginBottom: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
-        <h3 style={{ margin: '0 0 15px 0', fontSize: '14px', color: '#64748b' }}>⚙️ CONTROLE GLOBAL</h3>
+      <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '24px', marginBottom: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}>
+        <h3 style={{ margin: '0 0 15px 0', fontSize: '14px', color: '#64748b' }}>⚙️ PAINEL DE CONTROLE</h3>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '15px' }}>
-          <button onClick={() => atualizarConfig('is_feriado', !configGlobal.is_feriado)} style={{ padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', background: configGlobal.is_feriado ? '#fef3c7' : '#f1f5f9' }}>{configGlobal.is_feriado ? '🚩 FERIADO: ATIVO' : '🏳️ FERIADO: NÃO'}</button>
-          <button onClick={() => atualizarConfig('nao_funciona', !configGlobal.nao_funciona)} style={{ padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', background: configGlobal.nao_funciona ? '#fee2e2' : '#f1f5f9' }}>{configGlobal.nao_funciona ? '🚫 LOJA: FECHADA' : '✅ LOJA: ABERTA'}</button>
+          <button onClick={() => setConfigGlobal({...configGlobal, is_feriado: !configGlobal.is_feriado})} style={{ padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', background: configGlobal.is_feriado ? '#fef3c7' : '#f1f5f9' }}>{configGlobal.is_feriado ? '🚩 FERIADO' : '🏳️ NORMAL'}</button>
+          <button onClick={() => setConfigGlobal({...configGlobal, nao_funciona: !configGlobal.nao_funciona})} style={{ padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', background: configGlobal.nao_funciona ? '#fee2e2' : '#f1f5f9' }}>{configGlobal.nao_funciona ? '🚫 FECHADA' : '✅ ABERTA'}</button>
         </div>
-        <div style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '15px', display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: '11px', fontWeight: '900', color: '#94a3b8' }}>🧪 DATA DE TESTE (SIMULAÇÃO)</label>
-            <input type="date" value={configGlobal.data_teste} onChange={(e) => atualizarConfig('data_teste', e.target.value)} style={{ width: '100%', border: '1px solid #cbd5e1', padding: '8px', borderRadius: '8px' }} />
-          </div>
-          {configGlobal.data_teste && <button onClick={() => atualizarConfig('data_teste', '')} style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '10px', borderRadius: '8px' }}>SAIR</button>}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <input type="date" value={configGlobal.data_teste} onChange={(e) => setConfigGlobal({...configGlobal, data_teste: e.target.value})} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1' }} />
+          <button onClick={aplicarConfiguracoes} style={{ padding: '10px 20px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold' }}>APLICAR TESTE</button>
         </div>
       </div>
 
       <div style={{ backgroundColor: '#111', padding: '25px', borderRadius: '24px', color: 'white', marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-          <h2 style={{ margin: 0, fontWeight: '900' }}>💲 PRECIFICAÇÃO</h2>
+          <h2 style={{ margin: 0 }}>💲 PRECIFICAÇÃO</h2>
           <button onClick={zerarCotacao} style={{ background: '#333', color: '#ef4444', border: 'none', padding: '10px', borderRadius: '10px', fontWeight: 'bold' }}>🗑️ ZERAR</button>
         </div>
-        <button onClick={finalizarCotacao} style={{ width: '100%', backgroundColor: '#22c55e', color: 'white', border: 'none', padding: '18px', borderRadius: '16px', fontWeight: '900' }}>🚀 FINALIZAR E ABRIR LOJA</button>
+        <button onClick={finalizarCotacao} style={{ width: '100%', backgroundColor: '#22c55e', color: 'white', border: 'none', padding: '18px', borderRadius: '16px', fontWeight: '900' }}>🚀 ABRIR LOJA</button>
       </div>
 
-      <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', overflowX: 'auto' }}>
+      <div style={{ display: 'flex', gap: '5px', marginBottom: '15px' }}>
         {Object.keys(listas).map(k => (
-          <button key={k} onClick={() => setAbaAtiva(k)} style={{ flexShrink: 0, padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', backgroundColor: abaAtiva === k ? '#3b82f6' : '#fff', color: abaAtiva === k ? '#fff' : '#64748b' }}>{k.toUpperCase()} ({listas[k].length})</button>
+          <button key={k} onClick={() => setAbaAtiva(k)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', backgroundColor: abaAtiva === k ? '#3b82f6' : '#fff', color: abaAtiva === k ? '#fff' : '#64748b' }}>{k.toUpperCase()} ({listas[k].length})</button>
         ))}
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {listas[abaAtiva].filter(p => p.nome.toLowerCase().includes(busca.toLowerCase())).map(p => (
-           <LinhaProduto key={p.id} produto={p} corBorda="#3b82f6" abrirModal={() => {}} aoSalvar={handleAtualizarLista} />
+        {listas[abaAtiva].map(p => (
+           <LinhaProduto key={p.id} produto={p} corBorda="#3b82f6" abrirModal={() => {}} aoSalvar={(id, pay) => setProdutos(prev => prev.map(item => item.id === id ? {...item, ...pay} : item))} />
         ))}
       </div>
     </div>
