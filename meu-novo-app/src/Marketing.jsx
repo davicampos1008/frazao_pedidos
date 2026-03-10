@@ -68,7 +68,7 @@ export default function Marketing() {
     <div style={{ width: '100%', maxWidth: '800px', margin: '0 auto', fontFamily: configDesign.geral.fontePadrao, paddingBottom: '100px' }}>
       
       <div style={{ backgroundColor: '#111', padding: '20px', borderRadius: configDesign.geral.raioBordaGlobal, color: 'white', marginBottom: '20px', boxShadow: configDesign.geral.sombraSuave }}>
-        <h2 style={{ margin: 0, fontWeight: '900' }}>🖼️ MARKETING & BANNERS</h2>
+        <h2 style={{ margin: 0, fontWeight: '900' }}>🖼️ BANNERS E MÍDIA</h2>
         <p style={{ margin: '5px 0 0 0', color: '#94a3b8', fontSize: '12px' }}>Gerencie a vitrine do aplicativo do cliente. Eles atualizam em tempo real.</p>
       </div>
 

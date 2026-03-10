@@ -37,7 +37,6 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
 
     let statusCalculado = produto.status_cotacao;
 
-    // Lógica inteligente de status (Não depende mais do fornecedor)
     if (acaoForcada) {
       statusCalculado = acaoForcada;
     } else {
@@ -58,10 +57,8 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
       payload.preco_anterior = payload.preco;
     }
 
-    // 1º Atualiza a UI na hora
     aoSalvar(produto.id, payload);
 
-    // 2º Bate no banco de dados
     const { error } = await supabase.from('produtos').update(payload).eq('id', produto.id);
     if (!error) {
       setStatusAviso('✅');
@@ -90,10 +87,13 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
     }
   };
 
+  // 💡 Lógica para mostrar no input se é CX, SC, PCT...
+  const matchPeso = String(pesoCaixa).match(/^([A-Z]+)\s+(.+)$/);
+  const siglaMedidaVisual = matchPeso ? matchPeso[1] : 'CX';
+  const pesoVisual = matchPeso ? matchPeso[2] : pesoCaixa;
+
   return (
     <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '12px 15px', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', borderLeft: `5px solid ${corBorda}` }}>
-      
-      {/* CABEÇALHO DO ITEM */}
       <div onClick={() => abrirModal(produto)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '80%' }}>
           <div style={{ width: '35px', height: '35px', borderRadius: '6px', backgroundImage: `url(${produto.foto_url?.split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#f1f5f9' }} />
@@ -109,7 +109,6 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
         <div style={{ fontSize: '12px' }}>{statusAviso}</div>
       </div>
 
-      {/* INPUTS DIRETOS OTIMIZADOS */}
       <div style={{ display: 'flex', gap: '10px' }}>
         <div style={{ position: 'relative', flex: 1 }}>
           <span style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8', fontWeight: 'bold', fontSize: '11px' }}>R$</span>
@@ -124,13 +123,12 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
           />
         </div>
 
-        {/* 💡 SÓ APARECE O PESO DA CAIXA SE O ITEM FOR VENDIDO EM KG */}
         {produto.unidade_medida === 'KG' && (
           <div style={{ position: 'relative', width: '100px' }}>
             <input 
               type="text" 
-              value={pesoCaixa} 
-              onChange={e => setPesoCaixa(e.target.value)} 
+              value={pesoVisual} 
+              onChange={e => setPesoCaixa(`${siglaMedidaVisual} ${e.target.value}`)} 
               onBlur={handleBlur}
               onKeyDown={e => e.key === 'Enter' && e.target.blur()}
               placeholder="Ex: 20"
@@ -141,7 +139,6 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
         )}
       </div>
 
-      {/* BOTÕES RÁPIDOS */}
       <div style={{ display: 'flex', gap: '5px', borderTop: '1px dashed #f1f5f9', paddingTop: '10px' }}>
         <button onClick={() => acaoRapida('mantido')} style={{ flex: 1, padding: '8px', background: '#fefce8', color: '#eab308', border: '1px solid #fef08a', borderRadius: '6px', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer' }}>🔒 MANTER</button>
         <button onClick={() => acaoRapida('sem_preco')} style={{ flex: 1, padding: '8px', background: '#fff7ed', color: '#f97316', border: '1px solid #fed7aa', borderRadius: '6px', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer' }}>⏸️ S/ PREÇO</button>
@@ -162,12 +159,16 @@ export default function Precificacao() {
   const [busca, setBusca] = useState('');
   const [carregando, setCarregando] = useState(true);
   
+  const categoriasPossiveis = ['TODOS', 'Frutas', 'Verduras & Fungos', 'Legumes', 'Raízes, Tubérculos & Grãos', 'Bandejados', 'Avulsos', 'Folhagens', 'Caixaria', 'BRADISBA', 'POTY COCOS', 'MEGA', 'Outros'];
+  const [categoriaFiltro, setCategoriaFiltro] = useState('TODOS');
+
   const [modalAberto, setModalAberto] = useState(false);
   const [prodModal, setProdModal] = useState(null);
-  const [formModal, setFormModal] = useState({ preco: '', fornecedor: '', status: 'pendente', promocao: false, novidade: false, fotos_novas: [], unidade: 'UN', peso_caixa: '' });
+  
+  // 💡 ESTADO DO MODAL ATUALIZADO PARA SUPORTAR O TIPO DA MEDIDA FINAL
+  const [formModal, setFormModal] = useState({ preco: '', fornecedor: '', status: 'pendente', promocao: false, novidade: false, fotos_novas: [], unidade: 'UN', peso_caixa: '', tipo_medida_kg: 'CX' });
   const [fazendoUpload, setFazendoUpload] = useState(false);
 
-  // Estados para o Painel de Configurações
   const [configCardAberto, setConfigCardAberto] = useState(false);
   const [configuracoes, setConfiguracoes] = useState({ 
     nao_funciona: false, 
@@ -202,7 +203,7 @@ export default function Precificacao() {
   async function carregarDados(silencioso = false) {
     if (!silencioso) setCarregando(true);
     try {
-      const { data: prodData } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
+      const { data: prodData } = await supabase.from('produtos').select('*').eq('status', true).order('nome', { ascending: true });
       
       if (prodData) {
         const produtosProntos = prodData.map(p => {
@@ -210,10 +211,9 @@ export default function Precificacao() {
           let novoPreco = p.preco;
           let atualizou = false;
 
-          // Se for produto virgem de cadastro (sem status), conserta
           if (!novoStatus || String(novoStatus).trim() === '') {
-             novoStatus = 'pendente';
-             atualizou = true;
+              novoStatus = 'pendente';
+              atualizou = true;
           }
 
           if (!novoPreco || novoPreco === '0' || String(novoPreco).trim() === '') {
@@ -233,7 +233,6 @@ export default function Precificacao() {
     finally { if (!silencioso) setCarregando(false); }
   }
 
-  // Funções de Controle de Configuração
   const atualizarConfigBD = async (novosDados) => {
     try {
       await supabase.from('configuracoes').update(novosDados).eq('id', 1);
@@ -242,17 +241,21 @@ export default function Precificacao() {
   };
 
   const aplicarTeste = async () => {
-    if (!configuracoes.data_teste) return alert("Escolha uma data.");
-    await atualizarConfigBD({ data_teste: configuracoes.data_teste });
+    if (!configuracoes.data_teste) return alert("Escolha uma data no calendário primeiro.");
+    const partesData = configuracoes.data_teste.split('-'); 
+    const dataSelecionada = new Date(partesData[0], partesData[1] - 1, partesData[2]); 
+    const diaDaSemanaConvertido = dataSelecionada.getDay();
+
+    await atualizarConfigBD({ data_teste: configuracoes.data_teste, dia_semana_teste: diaDaSemanaConvertido });
     setTesteAtivo(true);
-    alert("Teste aplicado! Data simulada: " + configuracoes.data_teste);
+    alert("Teste aplicado! O app do cliente agora vai usar este dia como regra.");
   };
 
   const finalizarTeste = async () => {
-    await atualizarConfigBD({ data_teste: null });
+    await atualizarConfigBD({ data_teste: null, dia_semana_teste: null });
     setConfiguracoes(prev => ({ ...prev, data_teste: '' }));
     setTesteAtivo(false);
-    alert("Teste finalizado. Voltando para data atual.");
+    alert("Teste finalizado. O sistema voltou ao dia de hoje.");
   };
 
   const isZerado = (preco) => !preco || preco === '0' || preco === '0,00' || String(preco).trim() === 'R$ 0,00' || String(preco).trim() === 'R$0,00';
@@ -268,31 +271,30 @@ export default function Precificacao() {
   const qtdPendentes = listas.pendentes.length;
 
   const revisarItensOcultos = async () => {
+    if(!window.confirm("Isso vai resgatar TODOS os produtos marcados como 🔴 VERMELHO e jogar de volta para ⏳ PENDENTES (R$ 0,00) para você cotar. Confirma?")) return;
+    
     setCarregando(true);
     try {
-      const { data: todos } = await supabase.from('produtos').select('*');
-      if (!todos) return;
-
-      let loteUpdates = [];
-      const novaLista = todos.map(p => {
-        if (!p.status_cotacao || String(p.status_cotacao).trim() === '') {
-          const objAtualizado = { ...p, status_cotacao: 'pendente', preco: 'R$ 0,00' };
-          loteUpdates.push(objAtualizado);
-          return objAtualizado;
-        }
-        return p;
-      });
-
-      if (loteUpdates.length > 0) {
-        for (let i = 0; i < loteUpdates.length; i += 50) {
-          const lote = loteUpdates.slice(i, i + 50);
-          await supabase.from('produtos').upsert(lote);
-        }
-        alert(`✅ REVISÃO CONCLUÍDA!\nResgatamos ${loteUpdates.length} produtos novos recém-cadastrados. Eles foram movidos para a aba PENDENTES.`);
-        setProdutos(novaLista);
-      } else {
-        alert("✔️ Nenhum produto novo aguardando revisão. Tudo nos conformes.");
+      const itensEmFalta = produtos.filter(p => p.status_cotacao === 'vermelho');
+      
+      if (itensEmFalta.length === 0) {
+          alert("✔️ Não há nenhum produto marcado como VERMELHO para revisar.");
+          return;
       }
+
+      let loteUpdates = itensEmFalta.map(p => ({
+         id: p.id,
+         status_cotacao: 'pendente',
+         preco: 'R$ 0,00'
+      }));
+
+      for (let i = 0; i < loteUpdates.length; i += 50) {
+        const lote = loteUpdates.slice(i, i + 50);
+        await supabase.from('produtos').upsert(lote);
+      }
+      
+      alert(`✅ REVISÃO CONCLUÍDA!\n${loteUpdates.length} produtos retornaram para PENDENTES.`);
+      carregarDados();
       setAbaAtiva('pendentes');
     } catch (err) {
       alert("Erro na revisão: " + err.message);
@@ -361,6 +363,17 @@ export default function Precificacao() {
 
   const abrirEdicaoCompleta = (produto) => {
     setProdModal(produto);
+
+    // 💡 DESMEMBRANDO O PESO DA CAIXA SE ELE JÁ VIER COM SIGLA DO BANCO ("SC 20", "CX 15")
+    let pesoPuro = produto.peso_caixa || '';
+    let tipoMedida = 'CX';
+
+    const matchPeso = String(pesoPuro).match(/^([A-Z]+)\s+(.+)$/);
+    if (matchPeso) {
+        tipoMedida = matchPeso[1];
+        pesoPuro = matchPeso[2];
+    }
+
     setFormModal({
       preco: produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '',
       fornecedor: produto.fornecedor || '', 
@@ -369,7 +382,8 @@ export default function Precificacao() {
       novidade: produto.novidade || false,
       fotos_novas: [],
       unidade: produto.unidade_medida || 'UN',
-      peso_caixa: produto.peso_caixa || ''
+      peso_caixa: pesoPuro,
+      tipo_medida_kg: tipoMedida // 💡 NOVO ESTADO
     });
     setModalAberto(true);
   };
@@ -422,10 +436,16 @@ export default function Precificacao() {
     let statusCalc = formModal.status;
     if (statusCalc === 'pendente' && precoFinal !== 'R$ 0,00') statusCalc = 'ativo';
 
+    // 💡 JUNTA A SIGLA COM O PESO ANTES DE SALVAR (Ex: "SC 20", "CX 15")
+    let pesoCaixaFinal = formModal.peso_caixa;
+    if (formModal.unidade === 'KG' && formModal.peso_caixa) {
+        pesoCaixaFinal = `${formModal.tipo_medida_kg} ${formModal.peso_caixa}`;
+    }
+
     const fotosAtuais = prodModal.foto_url ? String(prodModal.foto_url).split(',') : [];
     const payload = {
       preco: precoFinal,
-      peso_caixa: formModal.peso_caixa,
+      peso_caixa: pesoCaixaFinal, // 💡 SALVA O PESO JUNTO COM A SIGLA
       status_cotacao: statusCalc,
       promocao: formModal.promocao,
       novidade: formModal.novidade,
@@ -456,6 +476,13 @@ export default function Precificacao() {
     { id: 'falta', nomeStr: 'FALTA', cor: '#ef4444', icone: '🚫', itens: listas.falta },
   ];
 
+  const listaDaAbaAtual = listas[abaAtiva] || [];
+  const produtosRenderizados = listaDaAbaAtual.filter(p => {
+      const bateuBusca = p.nome.toLowerCase().includes(busca.toLowerCase());
+      if (categoriaFiltro === 'TODOS') return bateuBusca;
+      return bateuBusca && (p.categoria === categoriaFiltro);
+  });
+
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px', padding: '10px' }}>
       
@@ -471,7 +498,7 @@ export default function Precificacao() {
             <button onClick={() => setConfigCardAberto(!configCardAberto)} style={{ background: '#333', border: 'none', padding: '10px', borderRadius: '10px', cursor: 'pointer', fontSize: '20px' }}>⚙️</button>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <button onClick={revisarItensOcultos} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', boxShadow: '0 4px 10px rgba(59,130,246,0.3)' }}>
-                🔄 REVISAR ITENS NOVOS
+                🔄 RESGATAR FALTAS
               </button>
               <button onClick={zerarCotacao} style={{ background: '#333', color: '#ef4444', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
                 🗑️ ZERAR COTAÇÃO
@@ -484,19 +511,19 @@ export default function Precificacao() {
         {configCardAberto && (
           <div style={{ background: '#222', padding: '20px', borderRadius: '15px', border: '1px solid #444', display: 'flex', flexDirection: 'column', gap: '15px' }}>
              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                <button onClick={() => atualizarConfigBD({ nao_funciona: !configuracoes.nao_funciona })} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: configuracoes.nao_funciona ? '#ef4444' : '#444', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>
+                <button onClick={() => atualizarConfigBD({ nao_funciona: !configuracoes.nao_funciona })} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: configuracoes.nao_funciona ? '#ef4444' : '#22c55e', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>
                   {configuracoes.nao_funciona ? '🚫 LOJA FECHADA' : '✅ LOJA ABERTA'}
                 </button>
-                <button onClick={() => atualizarConfigBD({ is_feriado: !configuracoes.is_feriado })} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: configuracoes.is_feriado ? '#eab308' : '#444', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>
+                <button onClick={() => atualizarConfigBD({ is_feriado: !configuracoes.is_feriado })} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: configuracoes.is_feriado ? '#eab308' : '#3b82f6', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>
                   {configuracoes.is_feriado ? '🚩 É FERIADO' : '🏳️ DIA NORMAL'}
                 </button>
              </div>
              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#333', padding: '10px', borderRadius: '10px' }}>
-                <input type="date" value={configuracoes.data_teste} onChange={(e) => setConfiguracoes({...configuracoes, data_teste: e.target.value})} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: '#444', color: '#fff' }} />
+                <input type="date" value={configuracoes.data_teste} onChange={(e) => setConfiguracoes({...configuracoes, data_teste: e.target.value})} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: '#444', color: '#fff', outline: 'none' }} />
                 {!testeAtivo ? (
-                  <button onClick={aplicarTeste} style={{ padding: '10px 15px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>APLICAR TESTE</button>
+                  <button onClick={aplicarTeste} style={{ padding: '10px 15px', background: '#eab308', color: '#111', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>TESTAR DATA</button>
                 ) : (
-                  <button onClick={finalizarTeste} style={{ padding: '10px 15px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>FINALIZAR TESTE</button>
+                  <button onClick={finalizarTeste} style={{ padding: '10px 15px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>PARAR TESTE</button>
                 )}
              </div>
           </div>
@@ -508,7 +535,7 @@ export default function Precificacao() {
 
       </div>
 
-      {/* 📑 ABAS DE NAVEGAÇÃO COM CORES DEFINIDAS */}
+      {/* 📑 ABAS DE STATUS (PENDENTES, PRONTOS...) */}
       <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', overflowX: 'auto', paddingBottom: '5px', scrollbarWidth: 'none' }}>
         {CONFIG_ABAS.map(aba => (
           <button 
@@ -527,13 +554,36 @@ export default function Precificacao() {
         ))}
       </div>
 
+      {/* 💡 BARRA ROLÁVEL DE CATEGORIAS (FILTRO SUPERIOR) */}
+      <div style={{ display: 'flex', overflowX: 'auto', gap: '10px', paddingBottom: '15px', marginBottom: '10px', scrollbarWidth: 'none' }}>
+         {categoriasPossiveis.map(cat => (
+            <button 
+               key={cat} 
+               onClick={() => setCategoriaFiltro(cat)} 
+               style={{ 
+                  padding: '8px 16px', 
+                  borderRadius: '20px', 
+                  border: 'none', 
+                  backgroundColor: categoriaFiltro === cat ? '#111' : '#e2e8f0', 
+                  color: categoriaFiltro === cat ? '#fff' : '#475569', 
+                  fontWeight: 'bold', 
+                  fontSize: '11px', 
+                  cursor: 'pointer', 
+                  whiteSpace: 'nowrap' 
+               }}
+            >
+               {cat}
+            </button>
+         ))}
+      </div>
+
       <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '12px', display: 'flex', gap: '10px', marginBottom: '15px', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
         <span>🔍</span><input placeholder="Buscar item..." value={busca} onChange={e => setBusca(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
       </div>
 
       {/* 📝 LISTA RENDERIZADA */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {listas[abaAtiva].filter(p => p.nome.toLowerCase().includes(busca.toLowerCase())).map(p => (
+        {produtosRenderizados.map(p => (
            <LinhaProduto 
              key={p.id} 
              produto={p} 
@@ -542,8 +592,8 @@ export default function Precificacao() {
              aoSalvar={handleAtualizarLista} 
            />
         ))}
-        {listas[abaAtiva].length === 0 && (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '16px' }}>Nenhum item nesta aba.</div>
+        {produtosRenderizados.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '16px' }}>Nenhum item atende aos filtros atuais.</div>
         )}
       </div>
 
@@ -604,16 +654,35 @@ export default function Precificacao() {
                 </select>
               </div>
 
+              {/* 💡 MUDANÇA: SELECIONAR A SIGLA SE FOR VENDIDO EM KG */}
               {formModal.unidade === 'KG' && (
-                <div style={{ width: '100px' }}>
-                  <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>CAIXA (Kg)</label>
-                  <input 
-                    type="text" value={formModal.peso_caixa} 
-                    placeholder="Ex: 20"
-                    onChange={e => setFormModal({...formModal, peso_caixa: e.target.value})} 
-                    disabled={formModal.status === 'falta' || formModal.status === 'sem_preco'}
-                    style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '2px solid #fef08a', background: '#fefce8', color: '#ca8a04', outline: 'none', fontSize: '14px', fontWeight: 'bold', boxSizing: 'border-box' }} 
-                  />
+                <div style={{ display: 'flex', gap: '5px' }}>
+                  <div style={{ width: '70px' }}>
+                     <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>TIPO</label>
+                     <select 
+                        value={formModal.tipo_medida_kg} 
+                        onChange={e => setFormModal({...formModal, tipo_medida_kg: e.target.value})}
+                        disabled={formModal.status === 'falta' || formModal.status === 'sem_preco'}
+                        style={{ width: '100%', padding: '15px 5px', borderRadius: '10px', border: '2px solid #fef08a', background: '#fefce8', color: '#ca8a04', outline: 'none', fontSize: '12px', fontWeight: 'bold', boxSizing: 'border-box', cursor: 'pointer' }}
+                     >
+                        <option value="CX">CX</option>
+                        <option value="SC">SC</option>
+                        <option value="PCT">PCT</option>
+                        <option value="BDJ">BDJ</option>
+                        <option value="MÇ">MÇ</option>
+                     </select>
+                  </div>
+                  
+                  <div style={{ width: '80px' }}>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>PESO (Kg)</label>
+                    <input 
+                      type="text" value={formModal.peso_caixa} 
+                      placeholder="Ex: 20"
+                      onChange={e => setFormModal({...formModal, peso_caixa: e.target.value})} 
+                      disabled={formModal.status === 'falta' || formModal.status === 'sem_preco'}
+                      style={{ width: '100%', padding: '15px 10px', borderRadius: '10px', border: '2px solid #fef08a', background: '#fefce8', color: '#ca8a04', outline: 'none', fontSize: '14px', fontWeight: 'bold', boxSizing: 'border-box' }} 
+                    />
+                  </div>
                 </div>
               )}
             </div>

@@ -232,9 +232,9 @@ function App() {
                 <button onClick={() => navegarPara('produtos')} style={s.btnNav}>🍎 GESTÃO DE PRODUTOS</button>
                 <button onClick={() => navegarPara('precificacao')} style={s.btnNav}>💲 COTAÇÃO DIÁRIA</button>
                 <button onClick={() => navegarPara('marketing')} style={s.btnNav}>🖼️ BANNERS E MÍDIA</button>
-                <button onClick={() => navegarPara('listas')} style={s.btnNav}>📋 CONFERIR LISTAS</button>
-                <button onClick={() => navegarPara('compras')} style={s.btnNav}>🛒 PLANILHA DE COMPRAS</button>
-                <button onClick={() => navegarPara('fechamento')} style={s.btnNav}>🧾 FECHAMENTO DE LOJAS</button>
+                <button onClick={() => navegarPara('listas')} style={s.btnNav}>📋 PAINEL DE CONFERÊNCIA</button>
+                <button onClick={() => navegarPara('compras')} style={s.btnNav}>🛒 MESA DE COMPRAS</button>
+                <button onClick={() => navegarPara('fechamento')} style={s.btnNav}>🧾 GESTÃO DE FECHAMENTOS</button>
               </>
             )}
           </div>
@@ -287,7 +287,7 @@ function App() {
         {telaAtiva === 'produtos' && <Produtos />}
         {telaAtiva === 'precificacao' && <Precificacao setTelaAtiva={setTelaAtiva} />}
         {telaAtiva === 'marketing' && <Marketing />}
-        {telaAtiva === 'listas' && <Listas/>} 
+        {telaAtiva === 'listas' && <Listas usuario={usuarioLogado} />}
         {telaAtiva === 'cliente' && usuarioLogado && <MenuCliente usuario={usuarioLogado} tema={tema} />}
         {telaAtiva === 'compras' && <PlanilhaCompras />}
         {telaAtiva === 'fechamento' && <FechamentoLojas isEscuro={isEscuro} />}
