@@ -8,6 +8,7 @@ export default function PlanilhaCompras() {
     return new Date(data.getTime() - tzOffset).toISOString().split('T')[0];
   };
 
+  // 💡 NOVO: Controle de Data persistente no cache (não reseta ao atualizar a página)
   const [dataFiltro, setDataFiltro] = useState(() => {
     return localStorage.getItem('virtus_data_filtro') || obterDataLocal();
   });
@@ -76,6 +77,7 @@ export default function PlanilhaCompras() {
     }
   }, []);
 
+  // 💡 NOVO: Salva a data sempre que ela for alterada
   useEffect(() => {
     localStorage.setItem('virtus_data_filtro', dataFiltro);
   }, [dataFiltro]);
@@ -318,7 +320,7 @@ export default function PlanilhaCompras() {
   useEffect(() => { carregarDados(); }, [carregarDados]);
 
   const resetarPedidosDoDia = async () => {
-    if (!window.confirm("🚨 ATENÇÃO: Isso vai ZERAR todos os pedidos, boletos e faltas da data atual.\n\nTudo voltará para a aba de PENDENTES.\n\nDeseja realmente recomeçar?")) return;
+    if (!window.confirm(`🚨 ATENÇÃO: Isso vai ZERAR todos os pedidos, boletos e faltas da data ${dataBr}.\n\nTudo voltará para a aba de PENDENTES.\n\nDeseja realmente recomeçar?`)) return;
     setCarregando(true);
     try {
       await supabase.from('pedidos').update({ status_compra: 'pendente', fornecedor_compra: '', custo_unit: '', qtd_atendida: 0 }).eq('data_pedido', dataFiltro);
@@ -379,11 +381,6 @@ export default function PlanilhaCompras() {
      mostrarNotificacao('✅ Bonificações preenchidas conforme pedido das lojas.', 'sucesso');
   };
 
-  const gerarCustoUnitarioFinal = (precoBaseFinal, qtdBonificada) => {
-     if (qtdBonificada > 0) return `BONIFICAÇÃO | ${precoBaseFinal}`;
-     return precoBaseFinal;
-  };
-
   const finalizarPedidoCompleto = () => {
     if (!dadosCompra.isFaltaGeral && !dadosCompra.fornecedor) return alert("⚠️ Preencha o fornecedor.");
 
@@ -408,15 +405,13 @@ export default function PlanilhaCompras() {
         const bonificada = Number(loja.qtd_bonificada) || 0;
 
         if (qtdRestanteParaDistribuir >= loja.qtd_pedida) {
-          const custoFormatado = gerarCustoUnitarioFinal(precoFinal, bonificada);
           promessas.push(supabase.from('pedidos').update({
-            fornecedor_compra: dadosCompra.fornecedor.toUpperCase(), custo_unit: custoFormatado, qtd_atendida: loja.qtd_pedida, qtd_bonificada: bonificada, status_compra: statusGeral
+            fornecedor_compra: dadosCompra.fornecedor.toUpperCase(), custo_unit: precoFinal, qtd_atendida: loja.qtd_pedida, qtd_bonificada: bonificada, status_compra: statusGeral
           }).eq('id', loja.id_pedido));
           qtdRestanteParaDistribuir -= loja.qtd_pedida;
         } else if (qtdRestanteParaDistribuir > 0) {
-          const custoFormatado = gerarCustoUnitarioFinal(precoFinal, bonificada);
           promessas.push(supabase.from('pedidos').update({
-            fornecedor_compra: dadosCompra.fornecedor.toUpperCase(), custo_unit: custoFormatado, qtd_atendida: qtdRestanteParaDistribuir, qtd_bonificada: bonificada, quantidade: qtdRestanteParaDistribuir, status_compra: statusGeral
+            fornecedor_compra: dadosCompra.fornecedor.toUpperCase(), custo_unit: precoFinal, qtd_atendida: qtdRestanteParaDistribuir, qtd_bonificada: bonificada, quantidade: qtdRestanteParaDistribuir, status_compra: statusGeral
           }).eq('id', loja.id_pedido));
 
           const resto = loja.qtd_pedida - qtdRestanteParaDistribuir;
@@ -457,9 +452,8 @@ export default function PlanilhaCompras() {
       const bonificada = Number(loja.qtd_bonificada) || 0;
       
       if (receber > 0) {
-        const custoFormatado = gerarCustoUnitarioFinal(precoFinal, bonificada);
         promessas.push(supabase.from('pedidos').update({
-          fornecedor_compra: dadosCompra.fornecedor.toUpperCase(), custo_unit: custoFormatado, qtd_atendida: receber, qtd_bonificada: bonificada, quantidade: receber, status_compra: loja.isBoleto ? 'boleto' : 'atendido'
+          fornecedor_compra: dadosCompra.fornecedor.toUpperCase(), custo_unit: precoFinal, qtd_atendida: receber, qtd_bonificada: bonificada, quantidade: receber, status_compra: loja.isBoleto ? 'boleto' : 'atendido'
         }).eq('id', loja.id_pedido));
 
         if (receber < loja.qtd_pedida) {
@@ -511,33 +505,26 @@ export default function PlanilhaCompras() {
 
     Object.values(f.lojas).forEach(loja => {
       loja.itens.forEach(item => {
-        const key = `${item.nomeItem}`;
+        const key = `${item.nome}`;
         if (!mapaItensGerais[key]) {
           mapaItensGerais[key] = { ...item, qtd: 0, qtd_bonificada: 0 };
         }
         mapaItensGerais[key].qtd += item.qtd;
-        mapaItensGerais[key].qtd_bonificada += item.qtdBonificada || 0;
+        mapaItensGerais[key].qtd_bonificada += item.qtd_bonificada || 0;
       });
     });
 
     let msg = `*${nomeLoja.replace(/^\d+\s*-\s*/, '').trim().toUpperCase()}*\n\n`;
-    let descontos = [];
     
     Object.values(mapaItensGerais).forEach(i => {
-       const nomeWhats = getNomeExibicaoWhatsApp(f.nome, i.nomeItem, i.unidade);
-       const precoNum = tratarPrecoNum(i.valUnit);
+       const nomeWhats = getNomeExibicaoWhatsApp(f.nome, i.nome, i.unidade);
+       const precoNum = tratarPrecoNum(i.valor_unit);
        const totalLinha = (i.qtd - (i.qtd_bonificada || 0)) * precoNum;
 
-       msg += `${i.qtd} ${String(i.unidade).toUpperCase()} - ${nomeWhats} - ${i.valUnit} (Total: ${formatarMoeda(totalLinha)})\n`;
-       
-       if (i.qtd_bonificada > 0) {
-           descontos.push(`${i.qtd_bonificada} ${String(i.unidade).toUpperCase()} - ${nomeWhats}`);
-       }
+       msg += `${i.qtd} ${String(i.unidade).toUpperCase()} - ${nomeWhats} - ${i.valor_unit} (Total: ${formatarMoeda(totalLinha)})`;
+       if (i.qtd_bonificada > 0) msg += ` (🎁 +${i.qtd_bonificada})`;
+       msg += `\n`;
     });
-
-    if (descontos.length > 0) {
-        msg += `\nDescontos:\n${descontos.join('\n')}\n`;
-    }
 
     msg += `\n${placaBase} - ${comp} - TOTAL: ${formatarMoeda(f.totalGeral)}`;
 
@@ -554,56 +541,17 @@ export default function PlanilhaCompras() {
     const comp = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
 
     let msg = `*${nomeFormatado}*\n\n`;
-    let descontos = [];
-
     lojaData.itens.forEach(i => { 
-        const nomeWhats = getNomeExibicaoWhatsApp(fNome, i.nomeItem, i.unidade);
-        msg += `${i.qtd} ${String(i.unidade).toUpperCase()} - ${nomeWhats}\n`;
-        if (i.qtdBonificada > 0) {
-            descontos.push(`${i.qtdBonificada} ${String(i.unidade).toUpperCase()} - ${nomeWhats}`);
-        }
+        const nomeWhats = getNomeExibicaoWhatsApp(fNome, i.nome, i.unidade);
+        msg += `${i.qtd} ${String(i.unidade).toUpperCase()} - ${nomeWhats}`;
+        if (i.qtd_bonificada > 0) msg += ` (🎁 +${i.qtd_bonificada})`;
+        msg += `\n`;
     });
-
-    if (descontos.length > 0) {
-        msg += `\nDescontos:\n${descontos.join('\n')}\n`;
-    }
-
     msg += `\n${placaBase} - ${comp}`;
     
     navigator.clipboard.writeText(msg);
     marcarComoCopiado(btnId);
     mostrarNotificacao('✅ Lista copiada para o WhatsApp!', 'sucesso');
-  };
-
-  const alternarSelecaoLote = (nomeItem) => {
-    setItensSelecionados(prev => 
-      prev.includes(nomeItem) ? prev.filter(i => i !== nomeItem) : [...prev, nomeItem]
-    );
-  };
-
-  const criarGrupoFornecedor = () => {
-    if (!nomeFornecedorLote.trim()) return alert("Digite o nome do fornecedor para agrupar.");
-    if (itensSelecionados.length === 0) return alert("Selecione pelo menos um item.");
-    
-    const novoGrupo = {
-      id: Date.now(),
-      fornecedor: nomeFornecedorLote.toUpperCase().trim(),
-      itens: itensSelecionados,
-      status: 'pendente'
-    };
-    
-    setAgrupamentos(prev => [...prev, novoGrupo]);
-    setItensSelecionados([]);
-    setNomeFornecedorLote('');
-    mostrarNotificacao(`Itens separados para ${novoGrupo.fornecedor}`, 'sucesso');
-    setAbaAtiva('pedidos_fornecedor');
-    setGrupoExpandido(novoGrupo.id);
-  };
-
-  const removerGrupoFornecedor = (idGrupo) => {
-    if(window.confirm("Deseja desfazer este grupo? Os itens voltarão a ficar disponíveis para seleção.")) {
-       setAgrupamentos(prev => prev.filter(g => g.id !== idGrupo));
-    }
   };
 
   const finalizarLoteFornecedor = (grupoId, tipoFechamento) => {
@@ -652,16 +600,11 @@ export default function PlanilhaCompras() {
 
             if (demandaItem) {
                demandaItem.lojas.forEach(loja => {
-                   let custoFormatado = precoFinal;
-                   if ((loja.qtd_bonificada_cliente || 0) > 0) {
-                      custoFormatado = `BONIFICAÇÃO | ${precoFinal}`;
-                   }
-
                    promessas.push(supabase.from('pedidos').update({
                        fornecedor_compra: grupo.fornecedor,
-                       custo_unit: custoFormatado,
+                       custo_unit: precoFinal,
                        qtd_atendida: loja.qtd_pedida, 
-                       qtd_bonificada: loja.qtd_bonificada_cliente || 0, 
+                       qtd_bonificada: loja.qtd_bonificada_cliente || 0,
                        status_compra: isBoleto ? 'boleto' : 'atendido'
                    }).eq('id', loja.id_pedido));
                });
@@ -705,7 +648,7 @@ export default function PlanilhaCompras() {
   const processarPDFResumo = async (modo = 'baixar') => {
      const elemento = document.getElementById('area-impressao-resumo');
      if (!elemento) return;
-     const nomeArquivo = `Resumo_Compras_${dataFiltro.split('-').reverse().join('-')}.pdf`;
+     const nomeArquivo = `Resumo_Compras_${dataBr.replace(/\//g, '-')}.pdf`;
      const opt = { margin: [10, 10, 15, 10], filename: nomeArquivo, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true, logging: false }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
 
      if (!window.html2pdf) return alert("Aguarde, carregando biblioteca PDF...");
@@ -764,6 +707,37 @@ export default function PlanilhaCompras() {
     </div>
   );
 
+  const alternarSelecaoLote = (nomeItem) => {
+    setItensSelecionados(prev => 
+      prev.includes(nomeItem) ? prev.filter(i => i !== nomeItem) : [...prev, nomeItem]
+    );
+  };
+
+  const criarGrupoFornecedor = () => {
+    if (!nomeFornecedorLote.trim()) return alert("Digite o nome do fornecedor para agrupar.");
+    if (itensSelecionados.length === 0) return alert("Selecione pelo menos um item.");
+    
+    const novoGrupo = {
+      id: Date.now(),
+      fornecedor: nomeFornecedorLote.toUpperCase().trim(),
+      itens: itensSelecionados,
+      status: 'pendente'
+    };
+    
+    setAgrupamentos(prev => [...prev, novoGrupo]);
+    setItensSelecionados([]);
+    setNomeFornecedorLote('');
+    mostrarNotificacao(`Itens separados para ${novoGrupo.fornecedor}`, 'sucesso');
+    setAbaAtiva('pedidos_fornecedor');
+    setGrupoExpandido(novoGrupo.id);
+  };
+
+  const removerGrupoFornecedor = (idGrupo) => {
+    if(window.confirm("Deseja desfazer este grupo? Os itens voltarão a ficar disponíveis para seleção.")) {
+       setAgrupamentos(prev => prev.filter(g => g.id !== idGrupo));
+    }
+  };
+
   if (carregando && demandas.length === 0 && pedidosFeitos.length === 0) {
     return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Carregando...</div>;
   }
@@ -787,37 +761,37 @@ export default function PlanilhaCompras() {
       </div>
 
       <div style={{ backgroundColor: '#111', padding: '25px', borderRadius: '24px', color: 'white', marginBottom: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '22px', fontWeight: '900' }}>🛒 MESA DE COMPRAS</h2>
             
-            {/* 💡 CALENDÁRIO COM LAYOUT FLEXÍVEL PARA CELULAR */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
+            {/* 💡 AQUI FICA O SELETOR COM O NOVO BOTÃO DE VOLTAR PARA HOJE */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
               <span style={{ color: '#94a3b8', fontSize: '13px' }}>Data:</span>
               <input 
                 type="date" 
                 value={dataFiltro} 
                 onChange={(e) => setDataFiltro(e.target.value)}
-                style={{ background: '#222', color: '#fff', border: '1px solid #444', borderRadius: '6px', padding: '6px 8px', fontSize: '13px', outline: 'none', cursor: 'pointer', flex: '1 1 auto', minWidth: '130px' }}
+                style={{ background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '6px', padding: '4px 8px', fontSize: '13px', outline: 'none', cursor: 'pointer' }}
               />
               {dataFiltro !== obterDataLocal() && (
                 <button 
                   onClick={() => setDataFiltro(obterDataLocal())} 
-                  style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', padding: '8px 12px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', flex: '0 0 auto' }}
+                  style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
                 >
-                  HOJE
+                  🗓️ VOLTAR PARA HOJE
                 </button>
               )}
             </div>
+
           </div>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-end', width: window.innerWidth <= 600 ? '100%' : 'auto' }}>
-            <button onClick={resetarPedidosDoDia} style={{ width: window.innerWidth <= 600 ? '100%' : 'auto', background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '11px', boxShadow: '0 4px 15px rgba(239,68,68,0.4)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-end' }}>
+            <button onClick={resetarPedidosDoDia} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '11px', boxShadow: '0 4px 15px rgba(239,68,68,0.4)' }}>
               🚨 ZERAR TUDO
             </button>
-            <div style={{ display: 'flex', backgroundColor: '#333', borderRadius: '10px', padding: '4px', width: window.innerWidth <= 600 ? '100%' : 'auto' }}>
-              <button onClick={() => setLocalCompra('ceasa')} style={{ flex: 1, border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: localCompra === 'ceasa' ? '#f97316' : 'transparent', color: localCompra === 'ceasa' ? '#fff' : '#999' }}>CEASA</button>
-              <button onClick={() => setLocalCompra('ceilandia')} style={{ flex: 1, border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: localCompra === 'ceilandia' ? '#f97316' : 'transparent', color: localCompra === 'ceilandia' ? '#fff' : '#999' }}>CEILÂNDIA</button>
+            <div style={{ display: 'flex', backgroundColor: '#333', borderRadius: '10px', padding: '4px' }}>
+              <button onClick={() => setLocalCompra('ceasa')} style={{ border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: localCompra === 'ceasa' ? '#f97316' : 'transparent', color: localCompra === 'ceasa' ? '#fff' : '#999' }}>CEASA</button>
+              <button onClick={() => setLocalCompra('ceilandia')} style={{ border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: localCompra === 'ceilandia' ? '#f97316' : 'transparent', color: localCompra === 'ceilandia' ? '#fff' : '#999' }}>CEILÂNDIA</button>
             </div>
           </div>
         </div>
@@ -1332,7 +1306,7 @@ export default function PlanilhaCompras() {
              <div id="area-impressao-resumo" style={{ background: '#fff', padding: '30px', width: '210mm', minHeight: '297mm', margin: '0 auto', color: '#000', fontFamily: 'sans-serif', boxSizing: 'border-box' }}>
                 <div style={{ textAlign: 'center', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '20px' }}>
                    <h1 style={{ margin: 0, fontSize: '24px', textTransform: 'uppercase' }}>RESUMO DE COMPRAS DO DIA</h1>
-                   <p style={{ margin: '5px 0 0 0', fontSize: '14px' }}>Data: {dataBr} - Gerado por: {usuario?.nome || 'Operador'}</p>
+                   <p style={{ margin: '5px 0 0 0', fontSize: '14px' }}>Data: {dataBr} - Gerado pelo VIRTUS</p>
                 </div>
                 
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
@@ -1474,7 +1448,6 @@ export default function PlanilhaCompras() {
           </div>
         </div>
       )}
-
     </div>
   );
 }
