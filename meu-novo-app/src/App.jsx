@@ -11,6 +11,8 @@ import Marketing from './Marketing';
 import Listas from './Listas';
 import PlanilhaCompras from './PlanilhaCompras';
 import FechamentoLojas from './FechamentoLojas';
+import FechamentoCliente from './FechamentoCliente';
+import PainelNotasFiscais from './PainelNotasFiscais';
 
 function App() {
   const [tema, setTema] = useState(() => localStorage.getItem('temaVIRTUS') || 'claro');
@@ -60,10 +62,13 @@ function App() {
       setUsuarioLogado(dadosUsuario);
       
       const ultimaTela = sessionStorage.getItem('telaAtivaVIRTUS');
-      const telaInicial = ultimaTela || (dadosUsuario.perfil === 'admin' ? 'inicio' : 'cliente');
+      let telaPadrao = 'cliente';
+      if (dadosUsuario.perfil === 'admin') telaPadrao = 'inicio';
+      else if (dadosUsuario.perfil === 'faturista') telaPadrao = 'notas_fiscais';
+
+      const telaInicial = ultimaTela || telaPadrao;
       setTelaAtiva(telaInicial);
       
-      // Inicializa o primeiro estado do histórico
       if (!window.history.state || window.history.state.tela !== telaInicial) {
          window.history.replaceState({ tela: telaInicial }, '', '');
       }
@@ -78,16 +83,13 @@ function App() {
     };
     window.addEventListener('beforeinstallprompt', escutarInstalacao);
     
-    // 💡 LÓGICA DE VOLTAR TELA REAL DO CELULAR
     const lidarComVoltar = (e) => {
-      // Se tivermos um estado salvo no histórico (ex: navegou de Início -> Clientes)
       if (e.state && e.state.tela) {
         setTelaAtiva(e.state.tela);
         sessionStorage.setItem('telaAtivaVIRTUS', e.state.tela);
       } else {
-        // Se voltar demais e acabar os estados do App, deixa fechar nativamente
-        const telaBase = usuarioLogado?.perfil === 'admin' ? 'inicio' : 'cliente';
-        if (telaAtiva !== 'inicio' && telaAtiva !== 'cliente') {
+        const telaBase = usuarioLogado?.perfil === 'admin' ? 'inicio' : (usuarioLogado?.perfil === 'faturista' ? 'notas_fiscais' : 'cliente');
+        if (telaAtiva !== 'inicio' && telaAtiva !== 'cliente' && telaAtiva !== 'notas_fiscais') {
            setTelaAtiva(telaBase);
            sessionStorage.setItem('telaAtivaVIRTUS', telaBase);
            window.history.replaceState({ tela: telaBase }, '', '');
@@ -127,7 +129,7 @@ function App() {
     
     localStorage.setItem('usuarioVIRTUS', JSON.stringify(data));
     setUsuarioLogado(data);
-    const telaIr = data.perfil === 'admin' ? 'inicio' : 'cliente';
+    const telaIr = data.perfil === 'admin' ? 'inicio' : (data.perfil === 'faturista' ? 'notas_fiscais' : 'cliente');
     setTelaAtiva(telaIr);
     sessionStorage.setItem('telaAtivaVIRTUS', telaIr);
     window.history.replaceState({ tela: telaIr }, '', '');
@@ -149,7 +151,6 @@ function App() {
       if (!confirma) return; 
     }
     
-    // Adiciona a nova tela no histórico real do navegador/celular
     if (telaAtiva !== telaDestino) {
         window.history.pushState({ tela: telaDestino }, '', '');
     }
@@ -199,6 +200,7 @@ function App() {
 
   const renderBadgePerfil = (perfil) => {
     if (perfil === 'admin') return <span style={{ backgroundColor: '#111', color: '#fff', padding: '5px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '900', letterSpacing: '1px' }}>🛡️ ADMINISTRADOR</span>;
+    if (perfil === 'faturista') return <span style={{ backgroundColor: '#8b5cf6', color: '#fff', padding: '5px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '900', letterSpacing: '1px' }}>🧾 SETOR FISCAL</span>;
     return <span style={{ backgroundColor: isEscuro ? '#334155' : '#f1f5f9', color: isEscuro ? '#cbd5e1' : '#64748b', padding: '5px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '900', letterSpacing: '1px' }}>👤 OPERADOR</span>;
   };
 
@@ -209,18 +211,29 @@ function App() {
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: config.identidade.corFundoApp, overflow: 'hidden', fontFamily: config.identidade.fontePrincipal, transition: 'background-color 0.3s' }}>
       
-      {/* BOTÃO MENU LATERAL */}
       <button onClick={() => setMenuAberto(!menuAberto)} style={{ position: 'fixed', top: '20px', left: '20px', zIndex: 10000, backgroundColor: config.identidade.corDestaque, color: 'white', border: 'none', width: '50px', height: '50px', borderRadius: '12px', fontSize: '28px', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.2)' }}>
         {menuAberto ? '✕' : '⋮'}
       </button>
 
-      {/* MENU LATERAL */}
       {menuAberto && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '280px', height: '100%', backgroundColor: config.identidade.corMenuLateral, color: 'white', padding: '80px 20px 30px 20px', zIndex: 9999, display: 'flex', flexDirection: 'column', boxSizing: 'border-box', boxShadow: '10px 0 40px rgba(0,0,0,0.6)', transition: 'background-color 0.3s' }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', overflowY: 'auto', paddingRight: '10px', paddingBottom: '80px' }}>
             <p style={{ fontSize: '10px', color: '#666', fontWeight: '900', letterSpacing: '1px' }}>NAVEGAÇÃO</p>
-            <button onClick={() => navegarPara('inicio')} style={s.btnNav}>🏠 INÍCIO</button>
-            <button onClick={() => navegarPara('cliente')} style={s.btnNav}>📱 APP COMPRAS</button>
+            
+            {usuarioLogado.perfil !== 'faturista' && (
+              <>
+                <button onClick={() => navegarPara('inicio')} style={s.btnNav}>🏠 INÍCIO</button>
+                <button onClick={() => navegarPara('cliente')} style={s.btnNav}>📱 APP COMPRAS</button>
+              </>
+            )}
+
+            {usuarioLogado.perfil === 'cliente' && (
+               <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>📄 MEU FECHAMENTO</button>
+            )}
+
+            {usuarioLogado.perfil === 'faturista' && (
+               <button onClick={() => navegarPara('notas_fiscais')} style={s.btnNav}>🧾 PAINEL NOTAS FISCAIS</button>
+            )}
             
             {usuarioLogado.perfil === 'admin' && (
               <>
@@ -235,12 +248,14 @@ function App() {
                 <button onClick={() => navegarPara('listas')} style={s.btnNav}>📋 PAINEL DE CONFERÊNCIA</button>
                 <button onClick={() => navegarPara('compras')} style={s.btnNav}>🛒 MESA DE COMPRAS</button>
                 <button onClick={() => navegarPara('fechamento')} style={s.btnNav}>🧾 GESTÃO DE FECHAMENTOS</button>
+                <button onClick={() => navegarPara('notas_fiscais')} style={s.btnNav}>🧾 PAINEL NOTAS FISCAIS</button> 
+                {/* 💡 AGORA O ADMIN PODE VER A TELA DO CLIENTE (TESTE) */}
+                <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>📄 VISÃO CLIENTE (FECHAMENTO)</button>
               </>
             )}
           </div>
           
           <div style={{ paddingTop: '20px', borderTop: '1px solid #333', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-            {/* 💡 BOTÃO TEMA NO MENU LATERAL */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: isEscuro ? '#1e1e1e' : '#333', padding: '10px 15px', borderRadius: '12px' }}>
               <span style={{ fontSize: '12px', fontWeight: 'bold' }}>TEMA</span>
               <button onClick={() => setTema(isEscuro ? 'claro' : 'escuro')} style={{ background: isEscuro ? '#333' : '#f8fafc', color: isEscuro ? '#fff' : '#111', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -253,7 +268,6 @@ function App() {
         </div>
       )}
 
-      {/* ÁREA DE ROLAGEM */}
       <div style={{ width: '100%', height: '100%', paddingTop: '100px', paddingBottom: '150px', paddingLeft: '15px', paddingRight: '15px', overflowY: 'auto', boxSizing: 'border-box', zIndex: 1 }}>
         
         {telaAtiva === 'inicio' && (
@@ -273,7 +287,11 @@ function App() {
             <hr style={{ width: '50px', border: `2px solid ${config.identidade.corDestaque}`, borderRadius: '10px', margin: '15px 0' }} />
             <p style={{ color: config.identidade.corTextoSecundario, fontWeight: 'bold', margin: 0, marginBottom: '20px' }}>Frazão Frutas & CIA</p>
             
-            <button onClick={() => navegarPara('cliente')} style={{ backgroundColor: isEscuro ? '#f97316' : '#111', color: 'white', border: 'none', padding: '15px 30px', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '13px', width: '100%', maxWidth: '300px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)' }}>📱 ABRIR APP DE PEDIDOS</button>
+            <button onClick={() => navegarPara('cliente')} style={{ backgroundColor: isEscuro ? '#f97316' : '#111', color: 'white', border: 'none', padding: '15px 30px', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '13px', width: '100%', maxWidth: '300px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)', marginBottom: '10px' }}>📱 ABRIR APP DE PEDIDOS</button>
+
+            {usuarioLogado.perfil === 'cliente' && (
+               <button onClick={() => navegarPara('fechamento_cliente')} style={{ backgroundColor: isEscuro ? '#334155' : '#e2e8f0', color: config.identidade.corTexto, border: 'none', padding: '15px 30px', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '13px', width: '100%', maxWidth: '300px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}>📄 VER MEU FECHAMENTO</button>
+            )}
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
               {!isStandalone && <button onClick={instalarApp} style={{ background: config.identidade.corDestaque, color: '#fff', border: 'none', padding: '12px 20px', borderRadius: '12px', fontSize: '11px', fontWeight: '900', cursor: 'pointer' }}>📥 INSTALAR APP NO CELULAR</button>}
@@ -289,8 +307,12 @@ function App() {
         {telaAtiva === 'marketing' && <Marketing />}
         {telaAtiva === 'listas' && <Listas usuario={usuarioLogado} />}
         {telaAtiva === 'cliente' && usuarioLogado && <MenuCliente usuario={usuarioLogado} tema={tema} />}
-        {telaAtiva === 'compras' && <PlanilhaCompras />}
+ {telaAtiva === 'compras' && <PlanilhaCompras navegarPara={navegarPara} setTelaAtiva={setTelaAtiva} />}
         {telaAtiva === 'fechamento' && <FechamentoLojas isEscuro={isEscuro} />}
+        
+        {/* 💡 RENDERIZAÇÃO DAS TELAS AQUI */}
+        {telaAtiva === 'fechamento_cliente' && <FechamentoCliente isEscuro={isEscuro} usuario={usuarioLogado} />}
+        {telaAtiva === 'notas_fiscais' && <PainelNotasFiscais isEscuro={isEscuro} />}
       </div>
 
       {modalConfiguracoesAberto && (
