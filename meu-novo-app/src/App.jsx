@@ -13,6 +13,7 @@ import PlanilhaCompras from './PlanilhaCompras';
 import FechamentoLojas from './FechamentoLojas';
 import FechamentoCliente from './FechamentoCliente';
 import PainelNotasFiscais from './PainelNotasFiscais';
+import ConferenciaMadrugada from './ConferenciaMadrugada'; // 💡 IMPORT NOVO
 
 function App() {
   const [tema, setTema] = useState(() => localStorage.getItem('temaVIRTUS') || 'claro');
@@ -247,8 +248,11 @@ function App() {
                 <button onClick={() => navegarPara('marketing')} style={s.btnNav}>🖼️ BANNERS E MÍDIA</button>
                 <button onClick={() => navegarPara('listas')} style={s.btnNav}>📋 PAINEL DE CONFERÊNCIA</button>
                 <button onClick={() => navegarPara('compras')} style={s.btnNav}>🛒 MESA DE COMPRAS</button>
+                
+                {/* 💡 BOTÃO DA CONFERÊNCIA DE MADRUGADA ADICIONADO AQUI */}
+                <button onClick={() => navegarPara('madrugada')} style={{...s.btnNav, color: '#22c55e'}}>🔦 MADRUGADA (GALPÃO)</button>
+                
                 <button onClick={() => navegarPara('fechamento')} style={s.btnNav}>🧾 GESTÃO DE FECHAMENTOS</button>
-                {/* 💡 AQUI FOI ADICIONADO O BOTÃO NO MENU DO ADMIN */}
                 <button onClick={() => navegarPara('notas_fiscais')} style={s.btnNav}>🧾 PAINEL NOTAS FISCAIS</button> 
                 <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>📄 VISÃO CLIENTE (FECHAMENTO)</button>
               </>
@@ -308,9 +312,11 @@ function App() {
         {telaAtiva === 'listas' && <Listas usuario={usuarioLogado} />}
         {telaAtiva === 'cliente' && usuarioLogado && <MenuCliente usuario={usuarioLogado} tema={tema} />}
         {telaAtiva === 'compras' && <PlanilhaCompras navegarPara={navegarPara} setTelaAtiva={setTelaAtiva} />}
-        {telaAtiva === 'fechamento' && <FechamentoLojas isEscuro={isEscuro} />}
         
-        {/* 💡 RENDERIZAÇÃO DAS TELAS AQUI */}
+        {/* 💡 RENDERIZAÇÃO DA TELA DE MADRUGADA */}
+        {telaAtiva === 'madrugada' && <ConferenciaMadrugada />} 
+        
+        {telaAtiva === 'fechamento' && <FechamentoLojas isEscuro={isEscuro} />}
         {telaAtiva === 'fechamento_cliente' && <FechamentoCliente isEscuro={isEscuro} usuario={usuarioLogado} />}
         {telaAtiva === 'notas_fiscais' && <PainelNotasFiscais isEscuro={isEscuro} />}
       </div>
