@@ -361,7 +361,6 @@ export default function FechamentoLojas({ isEscuro }) {
     } catch (err) { console.error(err); } finally { setCarregando(false); }
   }
 
-  // 💡 FUNÇÃO PARA APLICAR VALOR MÉDIA (VENDA) SEM ALTERAR CUSTO
   const aplicarPrecoMedia = async () => {
     if(!itemMediaSelecionado || !valorMediaInput) return alert("Selecione o item e o valor.");
     
@@ -563,6 +562,7 @@ export default function FechamentoLojas({ isEscuro }) {
     alert(`PIX Copiado: ${chave}\nFornecedor: ${fNome}`);
   };
 
+  // 💡 ATUALIZADO: Configuração Exata do PDF para ignorar as quebras incorretas e usar o CSS.
   const processarPDF = async (modo = 'baixar', lojaObj = null) => {
     const elemento = document.getElementById('area-impressao');
     if (!elemento) return;
@@ -573,12 +573,12 @@ export default function FechamentoLojas({ isEscuro }) {
     }
 
     const opt = {
-      margin:       [10, 10, 15, 10], 
+      margin:       0, 
       filename:     nomeArquivo,
       image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true, logging: false },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }, 
-      pagebreak:    { mode: 'css', after: '.print-break' }
+      html2canvas:  { scale: 1, useCORS: true, logging: false, windowWidth: 2480 },
+      jsPDF:        { unit: 'px', format: [2480, 3508], orientation: 'portrait' }, 
+      pagebreak:    { mode: ['css', 'legacy'] } // 💡 Força o JS a respeitar o CSS
     };
 
     if (!window.html2pdf) {
@@ -623,83 +623,118 @@ export default function FechamentoLojas({ isEscuro }) {
 
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif', color: themeText }}>🔄 Processando...</div>;
 
+  // 💡 NOVA LÓGICA DA TABELA: Calcula dinamicamente o tamanho das fontes para caber 100% na folha
   const renderTabelaDupla = (itensLoja, isMotorista) => {
-    const half = Math.ceil(itensLoja.length / 2);
+    const usarDuasColunas = isMotorista && itensLoja.length > 15;
+    const numRows = usarDuasColunas ? Math.ceil(itensLoja.length / 2) : itensLoja.length;
+    
+    // Cálculo Dinâmico para preencher a tela inteira
+    const maxRows = Math.max(numRows, 15);
+    const availableHeight = 2500; // Espaço vertical livre estimado
+    const baseRowHeight = availableHeight / maxRows;
+    const fontSize = Math.max(16, Math.min(50, baseRowHeight * 0.40)); // 💡 O mínimo é 16 para caber listas gigantescas
+    const padding = Math.max(4, Math.min(20, baseRowHeight * 0.15));
+
+    const thStyle = { border: '4px solid black', padding: `${padding}px 10px`, textAlign: 'center', fontWeight: 'bold', fontSize: `${fontSize * 0.85}px`, backgroundColor: '#e5e7eb', color: 'black', lineHeight: '1.1' };
+    const tdStyle = { border: '4px solid black', padding: `${padding}px 10px`, textAlign: 'center', fontSize: `${fontSize}px`, fontWeight: '900', color: 'black', lineHeight: '1.1' };
+    const tdDesc = { ...tdStyle, textAlign: 'left', wordBreak: 'break-word', overflow: 'hidden' }; 
+
     const rows = [];
-    for (let i = 0; i < half; i++) {
-      rows.push({ left: itensLoja[i], right: itensLoja[i + half] });
+    for (let i = 0; i < (usarDuasColunas ? Math.ceil(itensLoja.length / 2) : itensLoja.length); i++) {
+      if (usarDuasColunas) {
+        rows.push({ left: itensLoja[i], right: itensLoja[i + Math.ceil(itensLoja.length / 2)] });
+      } else {
+        rows.push({ left: itensLoja[i] });
+      }
     }
 
-    const thStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#e5e7eb', color: 'black' };
-    const tdStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontSize: '12px', fontWeight: '900', color: 'black' };
-    const tdDesc = { ...tdStyle, textAlign: 'left', fontSize: '13px', fontWeight: '900', color: 'black', wordBreak: 'break-word' }; 
+    const gerarCelulasItem = (item) => {
+        if (!item) return <><td style={tdStyle}></td><td style={tdDesc}></td><td style={tdStyle}></td><td style={tdStyle}></td></>;
+        
+        let corUnit = 'black';
+        let corTotal = 'black';
+        let uDisp = item.unitDisplay;
+        let tDisp = item.totalDisplay;
+
+        if (item.isFalta) {
+            corUnit = '#ef4444'; corTotal = '#ef4444';
+            uDisp = 'FALTA'; tDisp = 'FALTA';
+        } else if (item.isPendente) {
+            corUnit = '#f97316'; corTotal = '#f97316';
+        } else if (item.isBoleto) {
+            corUnit = '#d97706'; corTotal = '#d97706';
+            uDisp = 'BOLETO'; tDisp = 'BOLETO';
+        } else {
+            if (String(uDisp).includes('BONIFIC.')) corUnit = '#16a34a'; 
+            if (tDisp === 'BONIFIC.') corTotal = '#16a34a'; 
+        }
+
+        if (isMotorista && !item.isFalta && !item.isPendente && !item.isBoleto) {
+            uDisp = '';
+            tDisp = '';
+        } 
+
+        return (
+            <>
+              <td style={tdStyle}>{item.qtdEntregue}</td>
+              <td style={tdDesc}>{formatarNomeItem(item.nome)}</td>
+              <td style={{...tdStyle, color: corUnit}}>{uDisp}</td>
+              <td style={{...tdStyle, color: corTotal}}>{tDisp}</td>
+            </>
+        );
+    };
+
+    if (!usarDuasColunas) {
+        return (
+            <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', marginTop: '20px' }}>
+                <thead>
+                    <tr>
+                        <th style={{...thStyle, width: '10%'}}>QTD.</th>
+                        <th style={{...thStyle, width: '50%'}}>DESCRIÇÃO DO ITEM</th>
+                        <th style={{...thStyle, width: '20%'}}>VAL. UNIT.</th>
+                        <th style={{...thStyle, width: '20%'}}>VAL. TOTAL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows.map((row, idx) => (
+                        <tr key={idx} style={{ height: '1%' }}>{/* height 1% força a distribuição igual */}
+                            {gerarCelulasItem(row.left)}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
 
     return (
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+      <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', marginTop: '20px' }}>
         <thead>
           <tr>
-            <th style={{...thStyle, width: '7%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '22%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '14%'}}>VAL. UNIT.</th>
-            <th style={{...thStyle, width: '10%'}}>VAL. TOTAL.</th>
-            <th style={{ border: 'none', width: '2%', backgroundColor: 'transparent' }}></th>
-            <th style={{...thStyle, width: '7%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '22%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '14%'}}>VAL. UNIT.</th>
-            <th style={{...thStyle, width: '10%'}}>VAL. TOTAL.</th>
+            <th style={{...thStyle, width: '8%'}}>QTD.</th>
+            <th style={{...thStyle, width: '27%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '13%'}}>V. UNIT.</th>
+            <th style={{...thStyle, width: '11%'}}>TOTAL</th>
+            <th style={{ border: 'none', width: '2%', backgroundColor: 'transparent', padding: 0 }}></th>
+            <th style={{...thStyle, width: '8%'}}>QTD.</th>
+            <th style={{...thStyle, width: '27%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '13%'}}>V. UNIT.</th>
+            <th style={{...thStyle, width: '11%'}}>TOTAL</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, idx) => {
-             const renderCell = (item) => {
-               if (!item) return <><td style={tdStyle}></td><td style={tdDesc}></td><td style={tdStyle}></td><td style={tdStyle}></td></>;
-               
-               let corUnit = 'black';
-               let corTotal = 'black';
-               let uDisp = item.unitDisplay;
-               let tDisp = item.totalDisplay;
-
-               if (item.isFalta) {
-                  corUnit = '#ef4444'; corTotal = '#ef4444';
-                  uDisp = 'FALTA'; tDisp = 'FALTA';
-               } else if (item.isPendente) {
-                  corUnit = '#f97316'; corTotal = '#f97316';
-               } else if (item.isBoleto) {
-                  corUnit = '#d97706'; corTotal = '#d97706';
-                  uDisp = 'BOLETO'; tDisp = 'BOLETO';
-               } else {
-                  if (String(uDisp).includes('BONIFIC.')) corUnit = '#16a34a'; 
-                  if (tDisp === 'BONIFIC.') corTotal = '#16a34a'; 
-               }
-
-               if (isMotorista && !item.isFalta && !item.isPendente && !item.isBoleto) {
-                  uDisp = '';
-                  tDisp = '';
-               } 
-
-               return (
-                 <>
-                   <td style={tdStyle}>{item.qtdEntregue}</td>
-                   <td style={tdDesc}>{formatarNomeItem(item.nome)}</td>
-                   <td style={{...tdStyle, fontSize: '11px', color: corUnit, fontWeight: '900'}}>{uDisp}</td>
-                   <td style={{...tdStyle, fontSize: '11px', color: corTotal, fontWeight: '900'}}>{tDisp}</td>
-                 </>
-               );
-             };
-
-             return (
-               <tr key={idx}>
-                 {renderCell(row.left)}
-                 <td style={{ border: 'none', width: '2%' }}></td>
-                 {renderCell(row.right)}
-               </tr>
-             )
-          })}
+          {rows.map((row, idx) => (
+            <tr key={idx} style={{ height: '1%' }}>
+              {gerarCelulasItem(row.left)}
+              <td style={{ border: 'none', width: '2%', padding: 0 }}></td>
+              {gerarCelulasItem(row.right)}
+            </tr>
+          ))}
         </tbody>
       </table>
     );
   };
 
+  // 💡 ATUALIZADO: Layout forçado e rígido de 2480x3450px (pouco menor que 3508 para nunca fatiar errado)
   if (modoVisualizacaoImp) {
     const isMotGlobal = (tipoImpressao === 'motorista_todos');
     const isMotorista = tipoImpressao?.startsWith('motorista');
@@ -735,42 +770,68 @@ export default function FechamentoLojas({ isEscuro }) {
            </div>
         </div>
 
-        <div style={{ overflowX: 'auto', paddingBottom: '20px' }}>
-            <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', width: '100%', maxWidth: '850px', margin: '0 auto' }}>
+        <div style={{ width: '100%', overflowX: 'auto', paddingBottom: '40px', backgroundColor: '#525659' }}>
+            <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', width: '2480px', margin: '0 auto' }}>
                
                {lojasParaRenderizar.map((loja, idx) => (
-                  <div key={loja.loja_id} className="print-break" style={{ padding: '15px', position: 'relative', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+                  <div key={loja.loja_id} className="print-break" style={{ 
+                      width: '2480px', 
+                      height: '3450px', // 💡 Altura reduzida pouquíssima coisa para garantir que caiba em 1 página de PDF sem vazar
+                      padding: '80px', 
+                      boxSizing: 'border-box', 
+                      display: 'flex', 
+                      flexDirection: 'column',
+                      backgroundColor: '#fff',
+                      overflow: 'hidden',
+                      pageBreakInside: 'avoid' // 💡 FORÇA A NUNCA QUEBRAR NO MEIO
+                  }}>
                      
-                     <div style={{ border: '2px solid black', boxSizing: 'border-box', padding: '10px', height: '100%' }}>
+                     <div style={{ border: '8px solid black', boxSizing: 'border-box', padding: '40px', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                          
-                         <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '2px solid black', paddingBottom: '10px', marginBottom: '10px' }}>
+                         {/* CABEÇALHO FIXO */}
+                         <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '8px solid black', paddingBottom: '30px', marginBottom: '20px' }}>
                             {isMotorista ? (
                               <>
                                 <div style={{ flex: '1', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                                    <span style={{ fontWeight: '900', fontSize: '18px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
-                                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: 'black', marginTop: '4px' }}>DATA: {dataFechamentoBr}</span>
+                                    <span style={{ fontWeight: '900', fontSize: '70px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
+                                    <span style={{ fontWeight: 'bold', fontSize: '45px', color: '#333', marginTop: '10px' }}>DATA: {dataFechamentoBr}</span>
                                 </div>
                                 <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '60px', objectFit: 'contain' }} />
+                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '180px', objectFit: 'contain' }} />
                                 </div>
                               </>
                             ) : (
                               <>
                                 <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
-                                    <span style={{ fontWeight: '900', fontSize: '18px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
+                                    <span style={{ fontWeight: '900', fontSize: '70px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
                                 </div>
                                 <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '55px', objectFit: 'contain' }} />
+                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '170px', objectFit: 'contain' }} />
                                 </div>
                                 <div style={{ flex: '1', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center' }}>
-                                    <span style={{ fontWeight: '900', fontSize: '20px', color: 'black' }}>TOTAL: {formatarMoeda(loja.totalFatura)}</span>
-                                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: 'black', marginTop: '2px' }}>DATA: {dataFechamentoBr}</span>
+                                    <span style={{ fontWeight: '900', fontSize: '75px', color: 'black' }}>TOTAL: {formatarMoeda(loja.totalFatura)}</span>
+                                    <span style={{ fontWeight: 'bold', fontSize: '45px', color: '#333', marginTop: '10px' }}>DATA: {dataFechamentoBr}</span>
                                 </div>
                               </>
                             )}
                          </div>
 
-                         {renderTabelaDupla(loja.itens, isMotorista)}
+                         {/* CONTEÚDO EXPANSÍVEL (TABELA) */}
+                         <div style={{ flex: 1, width: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                            {renderTabelaDupla(loja.itens, isMotorista)}
+                         </div>
+
+                         {/* RODAPÉ DE ASSINATURA FIXO */}
+                         <div style={{ marginTop: 'auto', paddingTop: '80px', display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end' }}>
+                            <div style={{ textAlign: 'center', width: '40%' }}>
+                                <div style={{ borderBottom: '4px solid black', marginBottom: '15px', height: '50px' }}></div>
+                                <span style={{ fontSize: '40px', fontWeight: 'bold', color: 'black' }}>Assinatura Entregador</span>
+                            </div>
+                            <div style={{ textAlign: 'center', width: '40%' }}>
+                                <div style={{ borderBottom: '4px solid black', marginBottom: '15px', height: '50px' }}></div>
+                                <span style={{ fontSize: '40px', fontWeight: 'bold', color: 'black' }}>Assinatura Conferente (Loja)</span>
+                            </div>
+                         </div>
 
                      </div>
                   </div>
@@ -778,14 +839,14 @@ export default function FechamentoLojas({ isEscuro }) {
             </div>
         </div>
 
+        {/* 💡 ESTILOS GLOBAIS DE IMPRESSÃO PROTEGIDOS */}
         <style>{`
           @media print {
             .no-print { display: none !important; }
-            .print-break { page-break-after: always !important; break-after: page !important; }
-            html, body { height: auto !important; overflow: visible !important; background: white; margin: 0; padding: 0; }
-            #root, div { overflow: visible !important; height: auto !important; }
-            .print-section { box-shadow: none !important; min-width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; }
-            @page { margin: 10mm; size: portrait; } 
+            .print-break { page-break-after: always !important; page-break-inside: avoid !important; break-after: page !important; break-inside: avoid !important; }
+            html, body { height: 100% !important; width: 100% !important; margin: 0; padding: 0; overflow: hidden !important; background: white; }
+            .print-section { width: 2480px !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; }
+            @page { margin: 0; size: 2480px 3508px; } 
           }
         `}</style>
       </div>
