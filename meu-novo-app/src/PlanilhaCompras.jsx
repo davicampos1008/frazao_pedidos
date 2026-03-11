@@ -282,8 +282,11 @@ export default function PlanilhaCompras() {
                  mapaForn[fNome].qtdBonificadaGeral += qtdBonifFornecedor;
                  mapaForn[fNome].totalGeral += totalItemFornCobrado;
 
-                 if (isBoleto) mapaForn[fNome].totalBoleto += totalItemFornCobrado;
-                 else mapaForn[fNome].totalPix += totalItemFornCobrado;
+                 if (isBoleto) {
+                     mapaForn[fNome].totalBoleto += totalItemFornCobrado;
+                 } else {
+                     mapaForn[fNome].totalPix += totalItemFornCobrado;
+                 }
              }
           }
         }
@@ -322,24 +325,11 @@ export default function PlanilhaCompras() {
 
   useEffect(() => { carregarDados(); }, [carregarDados]);
 
-  // 💡 NOVO: Atualização Automática em Tempo Real sem travar a tela
-  useEffect(() => {
-    const canalPlanilha = supabase
-      .channel('planilha_compras_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'pedidos' },
-        (payload) => {
-          // Atualiza silenciosamente as listas para todos que estiverem na tela
-          carregarDados(true);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(canalPlanilha);
-    };
-  }, [carregarDados]);
+  // 💡 FUNÇÃO DO NOVO BOTÃO DE ATUALIZAR STATUS AO VIVO
+  const atualizarAoVivo = () => {
+    carregarDados(true); // true = silencioso (não mostra a tela de carregamento)
+    mostrarNotificacao('🔄 Lista atualizada com os dados mais recentes!', 'sucesso');
+  };
 
   const resetarPedidosDoDia = async () => {
     if (!window.confirm(`🚨 ATENÇÃO: Isso vai ZERAR todos os pedidos, boletos e faltas da data ${dataBr}.\n\nTudo voltará para a aba de PENDENTES.\n\nDeseja realmente recomeçar?`)) return;
@@ -505,7 +495,6 @@ export default function PlanilhaCompras() {
      carregarDados();
   };
 
-  // 💡 ATUALIZADO: Ignora unidade por padrão (a não ser que você mande incluir nas configs)
   const getNomeExibicaoWhatsApp = (fornecedorNome, itemName, itemUnidade) => {
      if (nomesPersonalizados[fornecedorNome] && nomesPersonalizados[fornecedorNome][itemName]) {
          const obj = nomesPersonalizados[fornecedorNome][itemName];
@@ -544,7 +533,6 @@ export default function PlanilhaCompras() {
        const precoNum = tratarPrecoNum(i.valor_unit);
        const totalLinha = (i.qtd - (i.qtd_bonificada || 0)) * precoNum;
 
-       // 💡 ATUALIZADO: Template sem unidade "10 ALHO"
        msg += `${i.qtd} ${nomeWhats} - ${i.valor_unit} (Total: ${formatarMoeda(totalLinha)})`;
        if (i.qtd_bonificada > 0) msg += ` (🎁 +${i.qtd_bonificada})`;
        msg += `\n`;
@@ -567,7 +555,6 @@ export default function PlanilhaCompras() {
     let msg = `*${nomeFormatado}*\n\n`;
     lojaData.itens.forEach(i => { 
         const nomeWhats = getNomeExibicaoWhatsApp(fNome, i.nome, i.unidade);
-        // 💡 ATUALIZADO: Template sem unidade "10 ALHO"
         msg += `${i.qtd} ${nomeWhats}`;
         if (i.qtd_bonificada > 0) msg += ` (🎁 +${i.qtd_bonificada})`;
         msg += `\n`;
@@ -790,7 +777,6 @@ export default function PlanilhaCompras() {
           <div>
             <h2 style={{ margin: 0, fontSize: '22px', fontWeight: '900' }}>🛒 MESA DE COMPRAS</h2>
             
-            {/* 💡 AQUI FICA O SELETOR COM O NOVO BOTÃO DE VOLTAR PARA HOJE */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
               <span style={{ color: '#94a3b8', fontSize: '13px' }}>Data:</span>
               <input 
@@ -811,9 +797,17 @@ export default function PlanilhaCompras() {
 
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-end' }}>
-            <button onClick={resetarPedidosDoDia} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '11px', boxShadow: '0 4px 15px rgba(239,68,68,0.4)' }}>
-              🚨 ZERAR TUDO
-            </button>
+            
+            {/* 💡 NOVO BOTÃO DE ATUALIZAÇÃO MANUAL/AO VIVO */}
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={atualizarAoVivo} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '11px', boxShadow: '0 4px 15px rgba(59,130,246,0.4)' }}>
+                🔄 ATUALIZAR STATUS
+              </button>
+              <button onClick={resetarPedidosDoDia} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '11px', boxShadow: '0 4px 15px rgba(239,68,68,0.4)' }}>
+                🚨 ZERAR TUDO
+              </button>
+            </div>
+
             <div style={{ display: 'flex', backgroundColor: '#333', borderRadius: '10px', padding: '4px' }}>
               <button onClick={() => setLocalCompra('ceasa')} style={{ border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: localCompra === 'ceasa' ? '#f97316' : 'transparent', color: localCompra === 'ceasa' ? '#fff' : '#999' }}>CEASA</button>
               <button onClick={() => setLocalCompra('ceilandia')} style={{ border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: localCompra === 'ceilandia' ? '#f97316' : 'transparent', color: localCompra === 'ceilandia' ? '#fff' : '#999' }}>CEILÂNDIA</button>
