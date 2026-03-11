@@ -299,7 +299,6 @@ export default function MenuCliente({ usuario, tema }) {
     const qtdFinal = parseInt(quantidade, 10) || 1;
     const bonifFinal = temBonificacao ? (parseInt(qtdBonificada, 10) || 0) : 0;
     
-    // 💡 Blinda para não deixar a bonificação ser maior que a quantidade total pedida
     const bonificacaoSegura = Math.min(qtdFinal, bonifFinal);
     const qtdCobrada = Math.max(0, qtdFinal - bonificacaoSegura);
 
@@ -477,6 +476,15 @@ export default function MenuCliente({ usuario, tema }) {
       setDadosSenha({ antiga: '', nova: '', confirma: '' });
     } catch (err) { setErroSenha(err.message); } finally { setCarregandoSenha(false); }
   };
+
+  // 💡 LÓGICA DE MATEMÁTICA MOVIDA PARA FORA DO RETURN (Resolve o erro 1109 / 1005 do compilador)
+  const infosVendaExpandido = produtoExpandido ? tratarInfosDeVenda(produtoExpandido) : null;
+  const qtdFinalExp = parseInt(quantidade) || 1;
+  const bonifFinalExp = temBonificacao ? (parseInt(qtdBonificada) || 0) : 0;
+  const bonifSeguraExp = Math.min(qtdFinalExp, bonifFinalExp);
+  const qtdCobradaExp = Math.max(0, qtdFinalExp - bonifSeguraExp);
+  const valorTotalCalcExp = infosVendaExpandido ? infosVendaExpandido.precoBase * qtdCobradaExp : 0;
+  const valorEconomiaExp = infosVendaExpandido ? infosVendaExpandido.precoBase * bonifSeguraExp : 0;
 
   if (listaEnviadaHoje && !modoVisualizacao) {
     const aguardandoLiberacao = listaEnviadaHoje.some(item => item.solicitou_refazer === true);
@@ -673,90 +681,77 @@ export default function MenuCliente({ usuario, tema }) {
       )}
 
       {/* MODAL PRODUTO */}
-      {produtoExpandido && (() => {
-        const infos = tratarInfosDeVenda(produtoExpandido);
-        
-        // Matemáticas do modal em tempo real
-        const qtdFinal = parseInt(quantidade) || 1;
-        const bonifFinal = temBonificacao ? (parseInt(qtdBonificada) || 0) : 0;
-        const bonificacaoSegura = Math.min(qtdFinal, bonifFinal);
-        const qtdCobrada = Math.max(0, qtdFinal - bonificacaoSegura);
-        const valorTotalCalc = infos.precoBase * qtdCobrada;
-        const valorEconomia = infos.precoBase * bonificacaoSegura;
-
-        return (
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
-            <button onClick={() => setProdutoExpandido(null)} style={{ alignSelf: 'flex-end', margin: '20px', color: '#fff', fontSize: '28px', background: 'none', border: 'none' }}>✕</button>
-            <div style={{ flex: 1, backgroundImage: `url(${(produtoExpandido.foto_url || '').split(',')[0]})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', margin: '20px' }} />
-            
-            <div style={{ backgroundColor: configDesign.cores.fundoCards, padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <h2 style={{margin: 0, fontSize: '20px', color: configDesign.cores.textoForte, flex: 1}}>{produtoExpandido.nome}</h2>
-                  <span style={{ fontSize: '12px', background: configDesign.cores.inputFundo, padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>Vendido por {infos.unidadeFinal}</span>
+      {produtoExpandido && infosVendaExpandido && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
+          <button onClick={() => setProdutoExpandido(null)} style={{ alignSelf: 'flex-end', margin: '20px', color: '#fff', fontSize: '28px', background: 'none', border: 'none' }}>✕</button>
+          <div style={{ flex: 1, backgroundImage: `url(${(produtoExpandido.foto_url || '').split(',')[0]})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', margin: '20px' }} />
+          
+          <div style={{ backgroundColor: configDesign.cores.fundoCards, padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <h2 style={{margin: 0, fontSize: '20px', color: configDesign.cores.textoForte, flex: 1}}>{produtoExpandido.nome}</h2>
+                <span style={{ fontSize: '12px', background: configDesign.cores.inputFundo, padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>Vendido por {infosVendaExpandido.unidadeFinal}</span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
+                <div>
+                  <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário {infosVendaExpandido.isCaixa && '(Caixa Fechada)'}</span>
+                  <span style={{color: configDesign.cores.primaria, fontSize: '20px', fontWeight: '900'}}>{infosVendaExpandido.textoPreco}</span>
+                  {infosVendaExpandido.isCaixa && <span style={{display: 'block', fontSize: '10px', color: configDesign.cores.textoSuave}}>{infosVendaExpandido.textoSecundario}</span>}
                 </div>
-                
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
-                  <div>
-                    <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário {infos.isCaixa && '(Caixa Fechada)'}</span>
-                    <span style={{color: configDesign.cores.primaria, fontSize: '20px', fontWeight: '900'}}>{infos.textoPreco}</span>
-                    {infos.isCaixa && <span style={{display: 'block', fontSize: '10px', color: configDesign.cores.textoSuave}}>{infos.textoSecundario}</span>}
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Total a Pagar ({formatarQtdUnidade(qtdCobrada, infos.unidadeFinal)})</span>
-                    <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>{formatarMoeda(valorTotalCalc)}</span>
-                    {temBonificacao && bonificacaoSegura > 0 && (
-                       <span style={{color: configDesign.cores.sucesso, fontSize: '11px', fontWeight: 'bold', display: 'block'}}>
-                          Desconto: -{formatarMoeda(valorEconomia)}
-                       </span>
-                    )}
-                  </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Total a Pagar ({formatarQtdUnidade(qtdCobradaExp, infosVendaExpandido.unidadeFinal)})</span>
+                  <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>{formatarMoeda(valorTotalCalcExp)}</span>
+                  {temBonificacao && bonifSeguraExp > 0 && (
+                     <span style={{color: configDesign.cores.sucesso, fontSize: '11px', fontWeight: 'bold', display: 'block'}}>
+                        Desconto: -{formatarMoeda(valorEconomiaExp)}
+                     </span>
+                  )}
                 </div>
+              </div>
 
-                {!isAppTravado ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', margin: '20px 0' }}>
-                    
-                    {/* CONTROLE DE QUANTIDADE NORMAL */}
-                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px' }}>
-                      <span style={{fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave}}>QTD. TOTAL:</span>
-                      <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '45px', height: '45px', fontSize: '20px', borderRadius: '12px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>-</button>
-                      <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '60px', height: '45px', fontSize: '20px', fontWeight: '900', textAlign: 'center', borderRadius: '12px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
-                      <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '45px', height: '45px', fontSize: '20px', borderRadius: '12px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>+</button>
-                    </div>
-
-                    {/* 💡 CAIXA DE BONIFICAÇÃO EXCLUSIVA DO CLIENTE */}
-                    <div style={{ backgroundColor: temBonificacao ? (isEscuro ? '#14532d' : '#dcfce7') : configDesign.cores.inputFundo, padding: '12px 15px', borderRadius: '12px', border: temBonificacao ? '1px solid #86efac' : `1px solid ${configDesign.cores.borda}`, transition: '0.2s' }}>
-                       <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: temBonificacao ? (isEscuro ? '#86efac' : '#166534') : configDesign.cores.textoForte, fontWeight: '900', fontSize: '13px', cursor: 'pointer' }}>
-                         <input type="checkbox" checked={temBonificacao} onChange={(e) => { setTemBonificacao(e.target.checked); if(!e.target.checked) setQtdBonificada(0); }} style={{ width: '20px', height: '20px', accentColor: configDesign.cores.sucesso }} />
-                         🎁 INCLUIR BONIFICAÇÃO (Opção Loja)
-                       </label>
-                       
-                       {temBonificacao && (
-                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', paddingTop: '10px', borderTop: isEscuro ? '1px dashed #22c55e' : '1px dashed #86efac' }}>
-                            <span style={{fontSize: '12px', fontWeight: 'bold', color: isEscuro ? '#86efac' : '#166534'}}>Qtd Bonificada:</span>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                               <button onClick={() => tratarInputBonificacao(Math.max(0, (parseInt(qtdBonificada) || 0) - 1))} style={{ width: '35px', height: '35px', fontSize: '18px', borderRadius: '8px', border: 'none', background: '#bbf7d0', color: '#166534' }}>-</button>
-                               <input type="number" value={qtdBonificada} onChange={(e) => tratarInputBonificacao(e.target.value)} style={{ width: '50px', height: '35px', fontSize: '16px', fontWeight: '900', textAlign: 'center', borderRadius: '8px', border: `1px solid #22c55e`, outline: 'none', color: '#166534', background: '#fff' }} />
-                               <button onClick={() => tratarInputBonificacao((parseInt(qtdBonificada) || 0) + 1)} style={{ width: '35px', height: '35px', fontSize: '18px', borderRadius: '8px', border: 'none', background: '#bbf7d0', color: '#166534' }}>+</button>
-                            </div>
-                         </div>
-                       )}
-                    </div>
-
-                    <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px' }}>
-                      {carrinhoSeguro.find(i => i.id === produtoExpandido.id) ? 'ATUALIZAR QUANTIDADE' : 'ADICIONAR AO CARRINHO'}
-                    </button>
+              {!isAppTravado ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', margin: '20px 0' }}>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px' }}>
+                    <span style={{fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave}}>QTD. TOTAL:</span>
+                    <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '45px', height: '45px', fontSize: '20px', borderRadius: '12px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>-</button>
+                    <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '60px', height: '45px', fontSize: '20px', fontWeight: '900', textAlign: 'center', borderRadius: '12px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
+                    <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '45px', height: '45px', fontSize: '20px', borderRadius: '12px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>+</button>
                   </div>
-                ) : (
-                  <div style={{ marginTop: '25px' }}>
-                    <button disabled style={{ width: '100%', padding: '22px', background: isEscuro ? '#334155' : '#e2e8f0', color: isEscuro ? '#94a3b8' : '#94a3b8', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '13px' }}>
-                      🔒 {modoVisualizacao ? 'PEDIDO JÁ ENVIADO' : 'AGUARDANDO LIBERAÇÃO DE PREÇOS'}
-                    </button>
+
+                  {/* CAIXA DE BONIFICAÇÃO EXCLUSIVA DO CLIENTE */}
+                  <div style={{ backgroundColor: temBonificacao ? (isEscuro ? '#14532d' : '#dcfce7') : configDesign.cores.inputFundo, padding: '12px 15px', borderRadius: '12px', border: temBonificacao ? '1px solid #86efac' : `1px solid ${configDesign.cores.borda}`, transition: '0.2s' }}>
+                     <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: temBonificacao ? (isEscuro ? '#86efac' : '#166534') : configDesign.cores.textoForte, fontWeight: '900', fontSize: '13px', cursor: 'pointer' }}>
+                       <input type="checkbox" checked={temBonificacao} onChange={(e) => { setTemBonificacao(e.target.checked); if(!e.target.checked) setQtdBonificada(0); }} style={{ width: '20px', height: '20px', accentColor: configDesign.cores.sucesso }} />
+                       🎁 INCLUIR BONIFICAÇÃO (Opção Loja)
+                     </label>
+                     
+                     {temBonificacao && (
+                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', paddingTop: '10px', borderTop: isEscuro ? '1px dashed #22c55e' : '1px dashed #86efac' }}>
+                          <span style={{fontSize: '12px', fontWeight: 'bold', color: isEscuro ? '#86efac' : '#166534'}}>Qtd Bonificada:</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                             <button onClick={() => tratarInputBonificacao(Math.max(0, (parseInt(qtdBonificada) || 0) - 1))} style={{ width: '35px', height: '35px', fontSize: '18px', borderRadius: '8px', border: 'none', background: '#bbf7d0', color: '#166534' }}>-</button>
+                             <input type="number" value={qtdBonificada} onChange={(e) => tratarInputBonificacao(e.target.value)} style={{ width: '50px', height: '35px', fontSize: '16px', fontWeight: '900', textAlign: 'center', borderRadius: '8px', border: `1px solid #22c55e`, outline: 'none', color: '#166534', background: '#fff' }} />
+                             <button onClick={() => tratarInputBonificacao((parseInt(qtdBonificada) || 0) + 1)} style={{ width: '35px', height: '35px', fontSize: '18px', borderRadius: '8px', border: 'none', background: '#bbf7d0', color: '#166534' }}>+</button>
+                          </div>
+                       </div>
+                     )}
                   </div>
-                )}
-            </div>
+
+                  <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px' }}>
+                    {carrinhoSeguro.find(i => i.id === produtoExpandido.id) ? 'ATUALIZAR QUANTIDADE' : 'ADICIONAR AO CARRINHO'}
+                  </button>
+                </div>
+              ) : (
+                <div style={{ marginTop: '25px' }}>
+                  <button disabled style={{ width: '100%', padding: '22px', background: isEscuro ? '#334155' : '#e2e8f0', color: isEscuro ? '#94a3b8' : '#94a3b8', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '13px' }}>
+                    🔒 {modoVisualizacao ? 'PEDIDO JÁ ENVIADO' : 'AGUARDANDO LIBERAÇÃO DE PREÇOS'}
+                  </button>
+                </div>
+              )}
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       {/* MODAL CARRINHO */}
       {modalCarrinhoAberto && (
