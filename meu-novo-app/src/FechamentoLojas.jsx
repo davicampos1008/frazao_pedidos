@@ -623,6 +623,18 @@ export default function FechamentoLojas({ isEscuro }) {
 
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif', color: themeText }}>🔄 Processando...</div>;
 
+  
+# Vou analisar o código e criar uma solução para o design da via do motorista
+# A ideia é que a tabela seja responsiva ao tamanho da lista
+
+# Primeiro, vou identificar a parte do código que precisa ser modificada
+# A função renderTabelaDupla precisa ser ajustada para:
+# 1. Ajustar dinamicamente o tamanho da fonte baseado na quantidade de itens
+# 2. Garantir que caiba em uma página A4 (2480 x 3508 pixels a 300 DPI, ou ~210mm x 297mm)
+
+# Vou criar o código modificado
+
+codigo_modificado = '''
   const renderTabelaDupla = (itensLoja, isMotorista) => {
     const half = Math.ceil(itensLoja.length / 2);
     const rows = [];
@@ -630,12 +642,89 @@ export default function FechamentoLojas({ isEscuro }) {
       rows.push({ left: itensLoja[i], right: itensLoja[i + half] });
     }
 
-    const thStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#e5e7eb', color: 'black' };
-    const tdStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontSize: '12px', fontWeight: '900', color: 'black' };
-    const tdDesc = { ...tdStyle, textAlign: 'left', fontSize: '13px', fontWeight: '900', color: 'black', wordBreak: 'break-word' }; 
+    // 💡 CÁLCULO DINÂMICO DO TAMANHO DA FONTE BASEADO NA QUANTIDADE DE ITENS
+    // A4 tem aproximadamente 1123 pixels de altura útil (descontando margens)
+    // Cada linha precisa de aproximadamente 35-40px de altura mínima para legibilidade
+    const totalItens = itensLoja.length;
+    const alturaUtil = 1000; // pixels úteis na página A4
+    const alturaMinimaLinha = 28; // altura mínima para legibilidade
+    const alturaMaximaLinha = 45; // altura máxima para não ficar muito espaçado
+    
+    // Calcula quantas linhas cabem (máximo de metade dos itens, pois são 2 colunas)
+    const numeroLinhas = Math.ceil(totalItens / 2);
+    
+    // Calcula o tamanho ideal da fonte
+    let fontSizeBase = 13;
+    let paddingVertical = 8;
+    
+    if (numeroLinhas > 0) {
+      const alturaPorLinha = Math.min(
+        Math.max(alturaUtil / numeroLinhas, alturaMinimaLinha),
+        alturaMaximaLinha
+      );
+      
+      // Ajusta o tamanho da fonte proporcionalmente
+      fontSizeBase = Math.min(
+        Math.max(Math.floor(alturaPorLinha * 0.35), 9), // mínimo 9px para legibilidade
+        14 // máximo 14px para não ficar gigante
+      );
+      
+      paddingVertical = Math.max(Math.floor(alturaPorLinha * 0.2), 4);
+    }
+    
+    // Para listas muito grandes (>40 itens), força um tamanho menor
+    if (totalItens > 40) {
+      fontSizeBase = 9;
+      paddingVertical = 4;
+    } else if (totalItens > 30) {
+      fontSizeBase = 10;
+      paddingVertical = 5;
+    } else if (totalItens > 20) {
+      fontSizeBase = 11;
+      paddingVertical = 6;
+    }
+    
+    // Para listas muito pequenas (<10 itens), aumenta um pouco
+    if (totalItens <= 10) {
+      fontSizeBase = 13;
+      paddingVertical = 10;
+    }
+
+    const thStyle = { 
+      border: '1px solid black', 
+      padding: `${paddingVertical}px 4px`, 
+      textAlign: 'center', 
+      fontWeight: 'bold', 
+      fontSize: `${fontSizeBase - 1}px`, 
+      backgroundColor: '#e5e7eb', 
+      color: 'black',
+      lineHeight: '1.2'
+    };
+    
+    const tdStyle = { 
+      border: '1px solid black', 
+      padding: `${paddingVertical}px 4px`, 
+      textAlign: 'center', 
+      fontSize: `${fontSizeBase}px`, 
+      fontWeight: '900', 
+      color: 'black',
+      lineHeight: '1.2',
+      height: `${alturaMinimaLinha}px`,
+      boxSizing: 'border-box'
+    };
+    
+    const tdDesc = { 
+      ...tdStyle, 
+      textAlign: 'left', 
+      fontSize: `${fontSizeBase + 1}px`, 
+      fontWeight: '900', 
+      color: 'black', 
+      wordBreak: 'break-word',
+      lineHeight: '1.2'
+    };
 
     return (
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px', tableLayout: 'fixed' }}>
         <thead>
           <tr>
             <th style={{...thStyle, width: '7%'}}>QUANT.</th>
@@ -672,6 +761,7 @@ export default function FechamentoLojas({ isEscuro }) {
                   if (tDisp === 'BONIFIC.') corTotal = '#16a34a'; 
                }
 
+               // 💡 PARA VIA DO MOTORISTA: OCULTA VALORES MAS MANTÉM ESPAÇO
                if (isMotorista && !item.isFalta && !item.isPendente && !item.isBoleto) {
                   uDisp = '';
                   tDisp = '';
@@ -681,16 +771,16 @@ export default function FechamentoLojas({ isEscuro }) {
                  <>
                    <td style={tdStyle}>{item.qtdEntregue}</td>
                    <td style={tdDesc}>{formatarNomeItem(item.nome)}</td>
-                   <td style={{...tdStyle, fontSize: '11px', color: corUnit, fontWeight: '900'}}>{uDisp}</td>
-                   <td style={{...tdStyle, fontSize: '11px', color: corTotal, fontWeight: '900'}}>{tDisp}</td>
+                   <td style={{...tdStyle, fontSize: `${fontSizeBase - 1}px`, color: corUnit, fontWeight: '900'}}>{uDisp}</td>
+                   <td style={{...tdStyle, fontSize: `${fontSizeBase - 1}px`, color: corTotal, fontWeight: '900'}}>{tDisp}</td>
                  </>
                );
              };
 
              return (
-               <tr key={idx}>
+               <tr key={idx} style={{ height: `${alturaMinimaLinha}px` }}>
                  {renderCell(row.left)}
-                 <td style={{ border: 'none', width: '2%' }}></td>
+                 <td style={{ border: 'none', width: '2%', backgroundColor: 'transparent' }}></td>
                  {renderCell(row.right)}
                </tr>
              )
@@ -699,6 +789,11 @@ export default function FechamentoLojas({ isEscuro }) {
       </table>
     );
   };
+'''
+
+print("Código da função renderTabelaDupla modificada:")
+print(codigo_modificado)
+
 
   if (modoVisualizacaoImp) {
     const isMotGlobal = (tipoImpressao === 'motorista_todos');
