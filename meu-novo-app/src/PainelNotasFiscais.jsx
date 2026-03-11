@@ -18,7 +18,7 @@ export default function PainelNotasFiscais({ isEscuro }) {
   };
 
   const [abaAtiva, setAbaAtiva] = useState('pedidos_nf');
-  const [subAbaNF, setSubAbaNF] = useState('pendentes'); // 💡 Nova sub-aba
+  const [subAbaNF, setSubAbaNF] = useState('pendentes'); 
   const [carregando, setCarregando] = useState(true);
   
   const [pedidosFornecedor, setPedidosFornecedor] = useState([]);
@@ -27,8 +27,10 @@ export default function PainelNotasFiscais({ isEscuro }) {
   
   const [inputsNF, setInputsNF] = useState({});
   const [busca, setBusca] = useState('');
+  
+  // 💡 ESTADO PARA ALERTAS DE NOMES PARECIDOS
+  const [alertasNomesParecidos, setAlertasNomesParecidos] = useState([]);
 
-  // 💡 Controles de Expansão (Cards pequenos)
   const [expandidoNF, setExpandidoNF] = useState(null);
   const [expandidoLoja, setExpandidoLoja] = useState(null);
   const [expandidoCad, setExpandidoCad] = useState(null);
@@ -49,7 +51,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
 
   const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // 💡 NORMALIZADOR DE BUSCA (Ignora acentos e todos os espaços)
   const normalizarBusca = (str) => {
     if (!str) return '';
     return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s/g, '').toLowerCase();
@@ -63,9 +64,12 @@ export default function PainelNotasFiscais({ isEscuro }) {
 
   async function carregarDados() {
     setCarregando(true);
+    setAlertasNomesParecidos([]); // Reseta alertas a cada carregamento
+    
     try {
       const { data: fornData } = await supabase.from('fornecedores').select('*').order('nome_fantasia', { ascending: true });
-      setListaFornecedores(fornData || []);
+      let fornecedoresDB = fornData || [];
+      setListaFornecedores(fornecedoresDB);
 
       const { data: lojasData } = await supabase.from('lojas').select('*');
 
@@ -77,14 +81,72 @@ export default function PainelNotasFiscais({ isEscuro }) {
       const pedidos = pedData || [];
       const lojas = lojasData || [];
 
-      // 1. AGRUPAR POR FORNECEDOR (Com mesclagem de itens idênticos)
+      // 💡 1. LÓGICA DE VERIFICAÇÃO E CRIAÇÃO AUTOMÁTICA DE FORNECEDORES
+      const nomesNosPedidos = [...new Set(pedidos.map(p => String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase()))];
+      const novosFornecedoresParaCriar = [];
+      const alertasTemp = [];
+
+      for (const nomePed of nomesNosPedidos) {
+          if (nomePed === 'DESCONHECIDO') continue;
+
+          const nomeNormalizadoPed = normalizarBusca(nomePed);
+          
+          // Verifica se já existe um cadastro exato
+          const existeExato = fornecedoresDB.find(f => normalizarBusca(f.nome_fantasia) === nomeNormalizadoPed);
+          
+          if (!existeExato) {
+              // Não tem exato. Vamos ver se tem parecido (um contendo o outro)
+              const parecido = fornecedoresDB.find(f => {
+                  const nomeNormalizadoDB = normalizarBusca(f.nome_fantasia);
+                  // Verifica se um nome está dentro do outro (ex: "Fabiana" dentro de "Fabiana Brocolis")
+                  return nomeNormalizadoPed.includes(nomeNormalizadoDB) || nomeNormalizadoDB.includes(nomeNormalizadoPed);
+              });
+
+              if (parecido) {
+                  // Achou parecido! Não cria automático. Dispara Alerta.
+                  alertasTemp.push(`Pedido para "${nomePed}", mas já existe "${parecido.nome_fantasia}" cadastrado.`);
+              } else {
+                  // Não tem exato e nem parecido. Cria automático.
+                  novosFornecedoresParaCriar.push({
+                      nome_fantasia: nomePed,
+                      tipo_chave_pix: 'CPF', // Padrão CPF
+                      status: true
+                  });
+              }
+          }
+      }
+
+      if (alertasTemp.length > 0) setAlertasNomesParecidos(alertasTemp);
+
+      // Se achou gente nova e segura para criar, manda pro banco
+      if (novosFornecedoresParaCriar.length > 0) {
+          const { data: criados } = await supabase.from('fornecedores').insert(novosFornecedoresParaCriar).select();
+          if (criados) {
+             fornecedoresDB = [...fornecedoresDB, ...criados];
+             setListaFornecedores(fornecedoresDB.sort((a,b) => a.nome_fantasia.localeCompare(b.nome_fantasia)));
+          }
+      }
+
+
+      // 2. AGRUPAR POR FORNECEDOR (Com mesclagem de itens idênticos)
       const mapaForn = {};
       const initNFs = {};
       
       pedidos.forEach(p => {
         const fNome = String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase();
+        
+        // 💡 Puxa o tipo do cadastro do banco atualizado
+        const infoFornBD = fornecedoresDB.find(f => normalizarBusca(f.nome_fantasia) === normalizarBusca(fNome));
+        const tipoPessoa = infoFornBD?.tipo_chave_pix === 'CNPJ' ? 'PJ' : 'PF';
+
         if (!mapaForn[fNome]) {
-          mapaForn[fNome] = { fornecedor: fNome, total: 0, nota_fiscal: p.nota_fiscal || '', itens: [] };
+          mapaForn[fNome] = { 
+              fornecedor: fNome, 
+              tipoPessoa: tipoPessoa, // 💡 Guarda o tipo
+              total: 0, 
+              nota_fiscal: p.nota_fiscal || '', 
+              itens: [] 
+          };
           if (p.nota_fiscal) initNFs[fNome] = p.nota_fiscal;
         }
 
@@ -95,7 +157,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
 
         mapaForn[fNome].total += totalItem;
 
-        // 💡 AGRUPA ITENS COM O MESMO NOME, PREÇO E TIPO (Boleto/Vista)
         const itemExistente = mapaForn[fNome].itens.find(i => i.nome === p.nome_produto && i.preco_unit === valNum && i.isBoleto === isBoleto);
         
         if (itemExistente) {
@@ -121,7 +182,7 @@ export default function PainelNotasFiscais({ isEscuro }) {
       setPedidosFornecedor(Object.values(mapaForn).sort((a,b) => a.fornecedor.localeCompare(b.fornecedor)));
       setInputsNF(initNFs);
 
-      // 2. AGRUPAR POR LOJA
+      // 3. AGRUPAR POR LOJA
       const mapaLoja = {};
       pedidos.forEach(p => {
         const idLoja = parseInt(String(p.loja_id).match(/\d+/)?.[0]);
@@ -141,7 +202,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
 
         mapaLoja[nomeLoja].total += totalItem;
 
-        // 💡 Agrupa por loja também
         const itemExLoja = mapaLoja[nomeLoja].itens.find(i => i.nome === p.nome_produto && i.preco_unit === valNum && i.isBoleto === isBoleto);
         if (itemExLoja) {
             itemExLoja.qtd += qtd;
@@ -185,7 +245,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
       if (error) throw error;
       
       alert(`✅ Nota Fiscal do fornecedor ${fornecedorNome} salva com sucesso!`);
-      // Ao recarregar, ele já vai pra aba de concluídos pois a nota_fiscal estará preenchida.
       setExpandidoNF(null); 
       carregarDados();
     } catch (err) {
@@ -228,7 +287,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
      }
   };
 
-  // 💡 MODO IMPRESSÃO LOJAS
   if (modoImpressaoLojas) {
       return (
           <div style={{ backgroundColor: '#525659', minHeight: '100vh', padding: '10px', fontFamily: 'Arial, sans-serif' }}>
@@ -295,6 +353,17 @@ export default function PainelNotasFiscais({ isEscuro }) {
         <p style={{ margin: '5px 0 0 0', fontSize: '13px', color: configDesign.cores.textoSuave }}>Data Base: {dataBr}</p>
       </div>
 
+      {/* 💡 ALERTA DE NOMES PARECIDOS */}
+      {alertasNomesParecidos.length > 0 && (
+         <div style={{ background: '#fef2f2', border: `1px solid ${configDesign.cores.alerta}`, padding: '15px', borderRadius: '15px', marginBottom: '20px' }}>
+            <h4 style={{ margin: '0 0 10px 0', color: configDesign.cores.alerta }}>⚠️ ATENÇÃO: DUPLICIDADE DETECTADA</h4>
+            <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#991b1b' }}>Os seguintes fornecedores foram informados nos pedidos, mas possuem nomes <b>MUITO PARECIDOS</b> com fornecedores que já existem. O sistema bloqueou a criação automática para evitar erros na Nota Fiscal. Altere o nome no pedido ou cadastre manualmente:</p>
+            <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#991b1b', fontWeight: 'bold' }}>
+               {alertasNomesParecidos.map((alerta, i) => <li key={i}>{alerta}</li>)}
+            </ul>
+         </div>
+      )}
+
       {/* TABS PRINCIPAIS */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', overflowX: 'auto', paddingBottom: '5px' }}>
         <button onClick={() => setAbaAtiva('pedidos_nf')} style={{ flexShrink: 0, padding: '12px 20px', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', backgroundColor: abaAtiva === 'pedidos_nf' ? configDesign.cores.primaria : configDesign.cores.fundoCards, color: abaAtiva === 'pedidos_nf' ? '#fff' : configDesign.cores.textoSuave }}>
@@ -317,7 +386,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
       {/* ================================================================= */}
       {abaAtiva === 'pedidos_nf' && (
         <>
-          {/* SUB-ABAS DE NOTA FISCAL (PENDENTE/CONCLUIDO) */}
           <div style={{ display: 'flex', gap: '5px', marginBottom: '15px' }}>
              <button onClick={() => setSubAbaNF('pendentes')} style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', backgroundColor: subAbaNF === 'pendentes' ? configDesign.cores.aviso : configDesign.cores.fundoCards, color: subAbaNF === 'pendentes' ? '#fff' : configDesign.cores.textoSuave }}>
                ⏳ PENDENTES DE NF
@@ -329,8 +397,8 @@ export default function PainelNotasFiscais({ isEscuro }) {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
             {pedidosFornecedor
-              .filter(f => subAbaNF === 'pendentes' ? !f.nota_fiscal : !!f.nota_fiscal) // Filtro de sub-aba
-              .filter(f => normalizarBusca(f.fornecedor).includes(normalizarBusca(busca))) // Filtro de busca blindada
+              .filter(f => subAbaNF === 'pendentes' ? !f.nota_fiscal : !!f.nota_fiscal)
+              .filter(f => normalizarBusca(f.fornecedor).includes(normalizarBusca(busca)))
               .map(f => {
                 const isConcluido = !!f.nota_fiscal;
                 const isExpandido = expandidoNF === f.fornecedor;
@@ -340,10 +408,17 @@ export default function PainelNotasFiscais({ isEscuro }) {
                 return (
                   <div key={f.fornecedor} style={{ background: bgCard, padding: '20px', borderRadius: '16px', border: `2px solid ${corStatus}`, boxShadow: '0 4px 15px rgba(0,0,0,0.02)' }}>
                     
-                    {/* CABEÇALHO DO CARD (CLICÁVEL PARA EXPANDIR) */}
                     <div onClick={() => setExpandidoNF(isExpandido ? null : f.fornecedor)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-                      <h3 style={{ margin: 0, color: isEscuro ? '#fff' : '#111', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <h3 style={{ margin: 0, color: isEscuro ? '#fff' : '#111', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                         🏢 {f.fornecedor} 
+                        
+                        {/* 💡 SELO DE PESSOA FÍSICA OU JURÍDICA */}
+                        {f.tipoPessoa === 'PJ' ? (
+                            <span style={{fontSize: '9px', background: '#3b82f6', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>PESSOA JURÍDICA</span>
+                        ) : (
+                            <span style={{fontSize: '9px', background: '#64748b', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>PESSOA FÍSICA</span>
+                        )}
+
                         {isConcluido && <span style={{fontSize: '10px', background: configDesign.cores.sucesso, color: '#fff', padding: '3px 8px', borderRadius: '6px'}}>NF: {f.nota_fiscal}</span>}
                       </h3>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -352,7 +427,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
                       </div>
                     </div>
 
-                    {/* CORPO EXPANSÍVEL */}
                     {isExpandido && (
                       <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: `1px solid ${corStatus}50` }}>
                         <div style={{ background: configDesign.cores.fundoCards, padding: '15px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '15px', border: `1px solid ${configDesign.cores.borda}` }}>
@@ -365,22 +439,28 @@ export default function PainelNotasFiscais({ isEscuro }) {
                           ))}
                         </div>
 
-                        {/* ÁREA DE LANÇAMENTO DA NOTA FISCAL */}
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: configDesign.cores.fundoGeral, padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}` }}>
-                          <div style={{ flex: 1 }}>
-                              <label style={{ display: 'block', fontSize: '10px', fontWeight: 'bold', color: configDesign.cores.textoSuave, marginBottom: '5px' }}>NÚMERO DA NOTA FISCAL</label>
-                              <input 
-                                type="text" 
-                                value={inputsNF[f.fornecedor] !== undefined ? inputsNF[f.fornecedor] : (f.nota_fiscal || '')} 
-                                onChange={(e) => setInputsNF({...inputsNF, [f.fornecedor]: e.target.value})} 
-                                placeholder="Ex: NF-123456" 
-                                style={{ width: '100%', padding: '12px', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, outline: 'none', background: configDesign.cores.fundoCards, color: configDesign.cores.textoForte, fontWeight: 'bold', boxSizing: 'border-box' }}
-                              />
-                          </div>
-                          <button onClick={() => salvarNotaFiscal(f.fornecedor)} style={{ background: isConcluido ? '#111' : configDesign.cores.primaria, color: '#fff', border: 'none', padding: '0 20px', height: '42px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', marginTop: '18px' }}>
-                              {isConcluido ? '🔄 ATUALIZAR NF' : '💾 SALVAR NF'}
-                          </button>
-                        </div>
+                        {/* ÁREA DE LANÇAMENTO DA NOTA FISCAL (SÓ PARA PJ) */}
+                        {f.tipoPessoa === 'PJ' ? (
+                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: configDesign.cores.fundoGeral, padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}` }}>
+                              <div style={{ flex: 1 }}>
+                                  <label style={{ display: 'block', fontSize: '10px', fontWeight: 'bold', color: configDesign.cores.textoSuave, marginBottom: '5px' }}>NÚMERO DA NOTA FISCAL</label>
+                                  <input 
+                                    type="text" 
+                                    value={inputsNF[f.fornecedor] !== undefined ? inputsNF[f.fornecedor] : (f.nota_fiscal || '')} 
+                                    onChange={(e) => setInputsNF({...inputsNF, [f.fornecedor]: e.target.value})} 
+                                    placeholder="Ex: NF-123456" 
+                                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, outline: 'none', background: configDesign.cores.fundoCards, color: configDesign.cores.textoForte, fontWeight: 'bold', boxSizing: 'border-box' }}
+                                  />
+                              </div>
+                              <button onClick={() => salvarNotaFiscal(f.fornecedor)} style={{ background: isConcluido ? '#111' : configDesign.cores.primaria, color: '#fff', border: 'none', padding: '0 20px', height: '42px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', marginTop: '18px' }}>
+                                  {isConcluido ? '🔄 ATUALIZAR NF' : '💾 SALVAR NF'}
+                              </button>
+                            </div>
+                        ) : (
+                            <div style={{ textAlign: 'center', padding: '15px', background: '#f1f5f9', color: '#64748b', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
+                                🚫 Fornecedor Pessoa Física não emite Nota Fiscal.
+                            </div>
+                        )}
                       </div>
                     )}
                   </div>
