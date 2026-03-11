@@ -11,7 +11,6 @@ import Marketing from './Marketing';
 import Listas from './Listas';
 import PlanilhaCompras from './PlanilhaCompras';
 import FechamentoLojas from './FechamentoLojas';
-import FechamentoCliente from './FechamentoCliente';
 import PainelNotasFiscais from './PainelNotasFiscais';
 import ConferenciaMadrugada from './ConferenciaMadrugada'; // 💡 IMPORT NOVO
 
