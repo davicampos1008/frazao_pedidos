@@ -152,6 +152,9 @@ export default function PlanilhaCompras() {
       const mapaForn = {};
 
       (pedData || []).forEach(p => {
+        // 💡 IGNORAR SE ESTIVER BLOQUEADO
+        if (p.bloqueado === true) return; 
+
         const idLoja = extrairNum(p.loja_id);
         const nomeProdutoUpper = String(p.nome_produto || "DESCONHECIDO").toUpperCase();
         const qtdPedida = Number(p.quantidade || 0);
@@ -483,12 +486,13 @@ export default function PlanilhaCompras() {
      carregarDados();
   };
 
+  // 💡 ATUALIZADO: Ignora unidade por padrão (a não ser que você mande incluir nas configs)
   const getNomeExibicaoWhatsApp = (fornecedorNome, itemName, itemUnidade) => {
      if (nomesPersonalizados[fornecedorNome] && nomesPersonalizados[fornecedorNome][itemName]) {
          const obj = nomesPersonalizados[fornecedorNome][itemName];
          return obj.usarUnidade ? `${obj.nome} - ${String(itemUnidade).toUpperCase()}` : obj.nome;
      }
-     return `${limparNomeParaWhatsapp(formatarNomeItem(itemName))} - ${String(itemUnidade).toUpperCase()}`;
+     return limparNomeParaWhatsapp(formatarNomeItem(itemName));
   };
 
   const gerarPedidoGeral = (f) => {
@@ -521,7 +525,8 @@ export default function PlanilhaCompras() {
        const precoNum = tratarPrecoNum(i.valor_unit);
        const totalLinha = (i.qtd - (i.qtd_bonificada || 0)) * precoNum;
 
-       msg += `${i.qtd} ${String(i.unidade).toUpperCase()} - ${nomeWhats} - ${i.valor_unit} (Total: ${formatarMoeda(totalLinha)})`;
+       // 💡 ATUALIZADO: Template sem unidade "10 ALHO"
+       msg += `${i.qtd} ${nomeWhats} - ${i.valor_unit} (Total: ${formatarMoeda(totalLinha)})`;
        if (i.qtd_bonificada > 0) msg += ` (🎁 +${i.qtd_bonificada})`;
        msg += `\n`;
     });
@@ -543,7 +548,8 @@ export default function PlanilhaCompras() {
     let msg = `*${nomeFormatado}*\n\n`;
     lojaData.itens.forEach(i => { 
         const nomeWhats = getNomeExibicaoWhatsApp(fNome, i.nome, i.unidade);
-        msg += `${i.qtd} ${String(i.unidade).toUpperCase()} - ${nomeWhats}`;
+        // 💡 ATUALIZADO: Template sem unidade "10 ALHO"
+        msg += `${i.qtd} ${nomeWhats}`;
         if (i.qtd_bonificada > 0) msg += ` (🎁 +${i.qtd_bonificada})`;
         msg += `\n`;
     });
@@ -933,7 +939,7 @@ export default function PlanilhaCompras() {
                         <button onClick={() => removerGrupoFornecedor(grupo.id)} style={{ background: '#fef2f2', color: '#ef4444', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>❌ Desfazer Grupo</button>
                         {isEnviadoSemPreco && (
                            <button onClick={() => voltarGrupoParaEdicao(grupo.id)} style={{ background: '#fff7ed', color: '#d97706', border: '1px solid #fde68a', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>
-                              🔄 ADICIONAR PREÇOS FINAIS
+                             🔄 ADICIONAR PREÇOS FINAIS
                            </button>
                         )}
                      </div>
@@ -988,7 +994,9 @@ export default function PlanilhaCompras() {
                    </div>
                  )}
               </div>
-            )}))}
+            );
+            })
+          )}
         </div>
       )}
 
@@ -1116,7 +1124,7 @@ export default function PlanilhaCompras() {
                                 {loja.itens.map((item, idxx) => (
                                   <div key={idxx} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ flex: 1 }}>
-                                      <span>{item.qtd} {String(item.unidade).toUpperCase()} - <b>{getNomeExibicaoWhatsApp(f.nome, item.nome, item.unidade)}</b></span>
+                                      <span>{item.qtd} <b>{getNomeExibicaoWhatsApp(f.nome, item.nome, item.unidade)}</b></span>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                       {item.qtd_bonificada > 0 && (
@@ -1158,7 +1166,7 @@ export default function PlanilhaCompras() {
                
                {Array.from(new Set(Object.values(modalNomesFornecedor.lojas).flatMap(l => l.itens.map(i => i.nome)))).map(nomeOriginal => {
                    const configsAtuais = nomesPersonalizados[modalNomesFornecedor.nome] || {};
-                   const configDesteItem = configsAtuais[nomeOriginal] || { nome: nomeOriginal, usarUnidade: true };
+                   const configDesteItem = configsAtuais[nomeOriginal] || { nome: formatarNomeItem(nomeOriginal), usarUnidade: false };
 
                    return (
                      <div key={nomeOriginal} style={{ marginBottom: '15px', padding: '10px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
@@ -1171,7 +1179,7 @@ export default function PlanilhaCompras() {
                                  ...prev,
                                  [modalNomesFornecedor.nome]: {
                                      ...(prev[modalNomesFornecedor.nome] || {}),
-                                     [nomeOriginal]: { ...configDesteItem, nome: e.target.value }
+                                     [nomeOriginal]: { ...configDesteItem, nome: e.target.value.toUpperCase() }
                                  }
                               }));
                            }}
@@ -1311,15 +1319,15 @@ export default function PlanilhaCompras() {
                 
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                   <thead>
-                     <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #000' }}>
+                      <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #000' }}>
                         <th style={{ padding: '8px', textAlign: 'left', width: '40%' }}>PRODUTO</th>
                         <th style={{ padding: '8px', textAlign: 'center' }}>PEDIDO</th>
                         <th style={{ padding: '8px', textAlign: 'center' }}>COMPRADO</th>
                         <th style={{ padding: '8px', textAlign: 'center' }}>FALTA</th>
-                     </tr>
+                      </tr>
                   </thead>
                   <tbody>
-                     {listaGeralItens.map((item, idx) => {
+                      {listaGeralItens.map((item, idx) => {
                         const faltaNum = item.total_solicitado - item.total_comprado;
                         const statusFalta = item.isFaltaTotal ? 'F. ASSUMIDA' : (faltaNum > 0 ? faltaNum : 'OK');
                         const isPendencia = !item.isFaltaTotal && faltaNum > 0;
@@ -1331,7 +1339,7 @@ export default function PlanilhaCompras() {
                              <td style={{ padding: '8px', textAlign: 'center', color: isPendencia ? '#ef4444' : 'inherit' }}>{statusFalta}</td>
                           </tr>
                         );
-                     })}
+                      })}
                   </tbody>
                 </table>
              </div>
