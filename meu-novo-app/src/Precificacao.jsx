@@ -2,16 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 
 // ============================================================================
-// COMPONENTE: LINHA DO PRODUTO (Otimizado com Escolha de Embalagem)
+// COMPONENTE: LINHA DO PRODUTO (Edição Rápida com Filtro de Unidades)
 // ============================================================================
 const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) => {
   const [preco, setPreco] = useState(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
   const [pesoCaixaNum, setPesoCaixaNum] = useState('');
   const [pesoCaixaUnd, setPesoCaixaUnd] = useState('Kg');
-  const [tipoEmbalagem, setTipoEmbalagem] = useState('CX'); // 📦 NOVO: CX ou SACO
+  const [tipoEmbalagem, setTipoEmbalagem] = useState('CX'); 
   const [statusAviso, setStatusAviso] = useState('');
   
   const ignorarRadar = useRef(false);
+
+  // Lista padrão de unidades do sistema
+  const UNIDADES_SISTEMA = ['UN', 'KG', 'CX', 'PCT', 'DZ', 'MAÇO', 'BDJ', 'SACO'];
 
   useEffect(() => {
     if (ignorarRadar.current) return;
@@ -21,7 +24,8 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
     
     if (produto.peso_caixa) {
        setPesoCaixaNum(String(produto.peso_caixa).replace(/[^\d.,]/g, '').trim());
-       setPesoCaixaUnd(String(produto.peso_caixa).replace(/[\d.,\s]/g, '').trim() || 'Kg');
+       const undEncontrada = String(produto.peso_caixa).replace(/[\d.,\s]/g, '').trim();
+       setPesoCaixaUnd(undEncontrada || 'Kg');
     } else {
        setPesoCaixaNum('');
        setPesoCaixaUnd('Kg');
@@ -47,7 +51,6 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
     let statusCalculado = acaoForcada || (precoFinal === 'R$ 0,00' ? 'pendente' : 'ativo');
     let pesoCaixaFinal = pPesoNum ? `${pPesoNum}${pPesoUnd}` : '';
 
-    // Verifica se houve mudança real
     if (!acaoForcada && 
         precoFinal === produto.preco && 
         pesoCaixaFinal === (produto.peso_caixa || '') && 
@@ -100,7 +103,7 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
       </div>
 
       <div style={{ display: 'flex', gap: '8px' }}>
-        <div style={{ position: 'relative', flex: 1.2 }}>
+        <div style={{ position: 'relative', flex: 1.5 }}>
           <span style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8', fontWeight: 'bold', fontSize: '11px' }}>R$</span>
           <input 
             type="text" value={preco} onChange={e => setPreco(e.target.value)} onBlur={handleBlur}
@@ -108,15 +111,17 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
           />
         </div>
 
-        {/* 💡 SELETOR DE PRODUTO FINAL (CAIXA OU SACO) */}
-        <select 
-          value={tipoEmbalagem} 
-          onChange={e => { setTipoEmbalagem(e.target.value); dispararAutoSave(preco, pesoCaixaNum, pesoCaixaUnd, e.target.value); }}
-          style={{ width: '75px', padding: '0 5px', borderRadius: '8px', border: '1px solid #3b82f6', outline: 'none', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#eff6ff', cursor: 'pointer' }}
-        >
-          <option value="CX">📦 CAIXA</option>
-          <option value="SACO">🛍️ SACO</option>
-        </select>
+        {/* 💡 SÓ EXIBE SE A UNIDADE DO PESO FOR KG (Case-insensitive check) */}
+        {String(pesoCaixaUnd).toUpperCase() === 'KG' && (
+          <select 
+            value={tipoEmbalagem} 
+            onChange={e => { setTipoEmbalagem(e.target.value); dispararAutoSave(preco, pesoCaixaNum, pesoCaixaUnd, e.target.value); }}
+            style={{ width: '75px', padding: '0 5px', borderRadius: '8px', border: '1px solid #3b82f6', outline: 'none', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#eff6ff', cursor: 'pointer' }}
+          >
+            <option value="CX">📦 CX</option>
+            <option value="SACO">🛍️ SACO</option>
+          </select>
+        )}
 
         <div style={{ display: 'flex', flex: 1 }}>
           <input 
@@ -126,9 +131,9 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
           <select 
             value={pesoCaixaUnd} 
             onChange={e => { setPesoCaixaUnd(e.target.value); dispararAutoSave(preco, pesoCaixaNum, e.target.value, tipoEmbalagem); }}
-            style={{ width: '45px', borderRadius: '0 8px 8px 0', border: '1px solid #eab308', borderLeft: 'none', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#fefce8' }}
+            style={{ width: '60px', borderRadius: '0 8px 8px 0', border: '1px solid #eab308', borderLeft: 'none', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#fefce8' }}
           >
-            <option value="Kg">Kg</option>
+            {UNIDADES_SISTEMA.map(u => <option key={u} value={u}>{u}</option>)}
             <option value="g">g</option>
             <option value="L">L</option>
             <option value="ml">ml</option>
@@ -146,7 +151,7 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
 });
 
 // ============================================================================
-// TELA PRINCIPAL: PRECIFICACAO COMPLETA
+// TELA PRINCIPAL: PRECIFICACAO
 // ============================================================================
 export default function Precificacao() {
   const [produtos, setProdutos] = useState([]);
@@ -158,7 +163,8 @@ export default function Precificacao() {
   const [prodModal, setProdModal] = useState(null);
   const [formModal, setFormModal] = useState({ preco: '', status: 'pendente', promocao: false, novidade: false, fotos_novas: [], unidade: 'UN', peso_caixa: '', tipo_embalagem: 'CX' });
   const [unidadePesoExtra, setUnidadePesoExtra] = useState('Kg');
-  const [fazendoUpload, setFazendoUpload] = useState(false);
+
+  const UNIDADES_SISTEMA = ['UN', 'KG', 'CX', 'PCT', 'DZ', 'MAÇO', 'BDJ', 'SACO'];
 
   useEffect(() => { 
     carregarDados(); 
@@ -209,8 +215,6 @@ export default function Precificacao() {
     }
 
     let pesoFinal = formModal.peso_caixa ? `${formModal.peso_caixa}${unidadePesoExtra}` : '';
-    const fotosAtuais = prodModal.foto_url ? String(prodModal.foto_url).split(',') : [];
-
     const payload = {
       preco: (formModal.status === 'falta' || formModal.status === 'sem_preco') ? 'R$ 0,00' : precoFinal,
       peso_caixa: pesoFinal,
@@ -219,7 +223,7 @@ export default function Precificacao() {
       promocao: formModal.promocao,
       novidade: formModal.novidade,
       unidade_medida: formModal.unidade,
-      foto_url: [...fotosAtuais, ...formModal.fotos_novas].filter(f=>f).join(',')
+      foto_url: prodModal.foto_url
     };
 
     setCarregando(true);
@@ -227,13 +231,10 @@ export default function Precificacao() {
     if (!error) {
       handleAtualizarLista(prodModal.id, payload);
       setModalAberto(false);
-    } else {
-      alert("Erro ao salvar: " + error.message);
     }
     setCarregando(false);
   };
 
-  // Lógica das Abas
   const listas = {
     pendentes: produtos.filter(p => !p.status_cotacao || p.status_cotacao === 'pendente'),
     prontos: produtos.filter(p => p.status_cotacao === 'ativo' && p.preco !== 'R$ 0,00'),
@@ -255,13 +256,12 @@ export default function Precificacao() {
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', padding: '10px' }}>
       
-      {/* HEADER */}
+      {/* HEADER E BUSCA IGUAIS... */}
       <div style={{ backgroundColor: '#111', padding: '20px', borderRadius: '20px', color: 'white', marginBottom: '15px' }}>
         <h2 style={{ margin: 0 }}>💲 PRECIFICAÇÃO</h2>
-        <p style={{ fontSize: '12px', color: '#94a3b8' }}>Faltam {listas.pendentes.length} itens para concluir.</p>
+        <p style={{ fontSize: '12px', color: '#94a3b8' }}>Faltam {listas.pendentes.length} itens.</p>
       </div>
 
-      {/* TABS */}
       <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', overflowX: 'auto', paddingBottom: '5px' }}>
         {CONFIG_ABAS.map(aba => (
           <button 
@@ -273,12 +273,10 @@ export default function Precificacao() {
         ))}
       </div>
 
-      {/* BUSCA */}
       <div style={{ backgroundColor: '#fff', borderRadius: '10px', padding: '10px', display: 'flex', gap: '10px', marginBottom: '15px', border: '1px solid #e2e8f0' }}>
         <span>🔍</span><input placeholder="Buscar produto..." value={busca} onChange={e => setBusca(e.target.value)} style={{ border: 'none', width: '100%', outline: 'none' }} />
       </div>
 
-      {/* LISTA */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {listas[abaAtiva].filter(p => p.nome.toLowerCase().includes(busca.toLowerCase())).map(p => (
            <LinhaProduto key={p.id} produto={p} corBorda={CONFIG_ABAS.find(a => a.id === (p.status_cotacao || 'pendentes'))?.cor || '#3b82f6'} abrirModal={abrirEdicaoCompleta} aoSalvar={handleAtualizarLista} />
@@ -290,36 +288,41 @@ export default function Precificacao() {
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'flex-end' }}>
           <div style={{ backgroundColor: '#fff', width: '100%', maxWidth: '500px', borderRadius: '20px 20px 0 0', padding: '25px', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
-              <h3 style={{ margin: 0 }}>Editar {prodModal.nome}</h3>
+              <h3 style={{ margin: 0 }}>{prodModal.nome}</h3>
               <button onClick={() => setModalAberto(false)} style={{ border: 'none', background: '#f1f5f9', borderRadius: '50%', width: '30px', height: '30px', cursor: 'pointer' }}>✕</button>
             </div>
 
-            <div style={{ marginBottom: '15px' }}>
-               <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>TIPO DE PRODUTO FINAL</label>
-               <div style={{ display: 'flex', gap: '10px', marginTop: '5px' }}>
-                  <button onClick={() => setFormModal({...formModal, tipo_embalagem: 'CX'})} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: formModal.tipo_embalagem === 'CX' ? '2px solid #3b82f6' : '1px solid #e2e8f0', background: formModal.tipo_embalagem === 'CX' ? '#eff6ff' : '#fff', fontWeight: 'bold' }}>📦 CAIXA</button>
-                  <button onClick={() => setFormModal({...formModal, tipo_embalagem: 'SACO'})} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: formModal.tipo_embalagem === 'SACO' ? '2px solid #3b82f6' : '1px solid #e2e8f0', background: formModal.tipo_embalagem === 'SACO' ? '#eff6ff' : '#fff', fontWeight: 'bold' }}>🛍️ SACO</button>
-               </div>
-            </div>
+            {/* 💡 MODAL: SÓ EXIBE SE A UNIDADE DO PESO FOR KG */}
+            {String(unidadePesoExtra).toUpperCase() === 'KG' && (
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>TIPO DE PRODUTO FINAL</label>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '5px' }}>
+                    <button onClick={() => setFormModal({...formModal, tipo_embalagem: 'CX'})} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: formModal.tipo_embalagem === 'CX' ? '2px solid #3b82f6' : '1px solid #e2e8f0', background: formModal.tipo_embalagem === 'CX' ? '#eff6ff' : '#fff', fontWeight: 'bold' }}>📦 CAIXA</button>
+                    <button onClick={() => setFormModal({...formModal, tipo_embalagem: 'SACO'})} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: formModal.tipo_embalagem === 'SACO' ? '2px solid #3b82f6' : '1px solid #e2e8f0', background: formModal.tipo_embalagem === 'SACO' ? '#eff6ff' : '#fff', fontWeight: 'bold' }}>🛍️ SACO</button>
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
                <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>PREÇO BASE (R$)</label>
                   <input type="text" value={formModal.preco} onChange={e => setFormModal({...formModal, preco: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', boxSizing: 'border-box', fontSize: '16px', fontWeight: 'bold' }} />
                </div>
-               <div style={{ width: '120px' }}>
+               <div style={{ width: '140px' }}>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>PESO FINAL</label>
                   <div style={{ display: 'flex' }}>
-                    <input type="text" value={formModal.peso_caixa} onChange={e => setFormModal({...formModal, peso_caixa: e.target.value})} style={{ width: '60%', padding: '12px', borderRadius: '10px 0 0 10px', border: '1px solid #eab308', textAlign: 'center' }} />
-                    <select value={unidadePesoExtra} onChange={e => setUnidadePesoExtra(e.target.value)} style={{ width: '40%', borderRadius: '0 10px 10px 0', border: '1px solid #eab308', background: '#fefce8' }}>
-                       <option value="Kg">Kg</option>
+                    <input type="text" value={formModal.peso_caixa} onChange={e => setFormModal({...formModal, peso_caixa: e.target.value})} style={{ width: '50%', padding: '12px', borderRadius: '10px 0 0 10px', border: '1px solid #eab308', textAlign: 'center' }} />
+                    <select value={unidadePesoExtra} onChange={e => setUnidadePesoExtra(e.target.value)} style={{ width: '50%', borderRadius: '0 10px 10px 0', border: '1px solid #eab308', background: '#fefce8', fontWeight: 'bold', fontSize: '11px' }}>
+                       {UNIDADES_SISTEMA.map(u => <option key={u} value={u}>{u}</option>)}
                        <option value="g">g</option>
+                       <option value="L">L</option>
+                       <option value="ml">ml</option>
                     </select>
                   </div>
                </div>
             </div>
 
-            <button onClick={salvarModal} style={{ width: '100%', padding: '15px', background: '#111', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer' }}>💾 SALVAR ALTERAÇÕES</button>
+            <button onClick={salvarModal} style={{ width: '100%', padding: '15px', background: '#111', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer' }}>💾 SALVAR</button>
           </div>
         </div>
       )}
