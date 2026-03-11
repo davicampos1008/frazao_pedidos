@@ -322,6 +322,25 @@ export default function PlanilhaCompras() {
 
   useEffect(() => { carregarDados(); }, [carregarDados]);
 
+  // 💡 NOVO: Atualização Automática em Tempo Real sem travar a tela
+  useEffect(() => {
+    const canalPlanilha = supabase
+      .channel('planilha_compras_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'pedidos' },
+        (payload) => {
+          // Atualiza silenciosamente as listas para todos que estiverem na tela
+          carregarDados(true);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(canalPlanilha);
+    };
+  }, [carregarDados]);
+
   const resetarPedidosDoDia = async () => {
     if (!window.confirm(`🚨 ATENÇÃO: Isso vai ZERAR todos os pedidos, boletos e faltas da data ${dataBr}.\n\nTudo voltará para a aba de PENDENTES.\n\nDeseja realmente recomeçar?`)) return;
     setCarregando(true);
