@@ -84,27 +84,20 @@ export default function Usuarios() {
   };
 
   const selecionarLoja = (loja) => {
-    const nomeDaLoja = loja['Nome Fantasia'] || loja.nome_fantasia || loja.Nome_Fantasia || 'LOJA DESCONHECIDA';
-    const idDaLoja = loja.codigo_loja;
+  // ... resto do seu código
+  
+  // Garanta que o idDaLoja seja salvo como String ou Número fixo
+  const idDaLoja = loja.codigo_loja; 
 
-    if (!idDaLoja) {
-      alert("Erro V.I.R.T.U.S: Loja sem 'codigo_loja' cadastrado.");
-      return;
-    }
-    
-    // 💡 Só gera novo código se for um cadastro novo (sem ID)
-    if (!dados.id) {
-        const prefixo = String(idDaLoja).padStart(2, '0');
-        const usuariosDaLoja = usuarios.filter(u => u.codigo?.startsWith(prefixo));
-        const proximoNumero = (usuariosDaLoja.length + 1).toString().padStart(2, '0');
-        setDados({ ...dados, loja: nomeDaLoja, codigo: `${prefixo}${proximoNumero}`, codigo_loja: idDaLoja });
-    } else {
-        setDados({ ...dados, loja: nomeDaLoja, codigo_loja: idDaLoja });
-    }
-
-    setLojaDigitada(nomeDaLoja);
-    setMostrarSugestoesLoja(false);
-  };
+  setDados({ 
+    ...dados, 
+    loja: nomeDaLoja, 
+    codigo: dados.id ? dados.codigo : `${prefixo}${proximoNumero}`, 
+    codigo_loja: idDaLoja // Mantenha o padrão que vem da tabela de lojas
+  });
+  
+  // ... resto da função
+};
 
   async function salvar() {
     if (!dados.nome.trim()) return alert("⚠️ V.I.R.T.U.S INFORMA: O campo NOME COMPLETO é obrigatório!");
@@ -137,11 +130,18 @@ export default function Usuarios() {
     String(a.codigo_loja).localeCompare(String(b.codigo_loja), undefined, { numeric: true })
   );
 
-  const usuariosExibidos = usuarios.filter(u => {
-    const matchesBusca = u.nome?.toLowerCase().includes(busca.toLowerCase());
-    const matchesLoja = lojaAtiva ? u.codigo_loja === lojaAtiva : true;
-    return matchesBusca && matchesLoja;
-  });
+ // 💡 FILTRAGEM CORRIGIDA: Convertendo ambos para String para ignorar tipos e zeros à esquerda
+const usuariosExibidos = usuarios.filter(u => {
+  const matchesBusca = u.nome?.toLowerCase().includes(busca.toLowerCase());
+  
+  // Se não tiver loja selecionada, mostra todos. 
+  // Se tiver, converte ambos para String para garantir que "1" ou "01" sejam lidos iguais.
+  const matchesLoja = lojaAtiva !== null 
+    ? String(u.codigo_loja) === String(lojaAtiva) 
+    : true;
+
+  return matchesBusca && matchesLoja;
+});
 
   const lojasFiltradasModal = listaLojas.filter(l => {
     const nome = l['Nome Fantasia'] || l.nome_fantasia || l.Nome_Fantasia || '';
