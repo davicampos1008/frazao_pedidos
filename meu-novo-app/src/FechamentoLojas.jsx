@@ -572,11 +572,12 @@ export default function FechamentoLojas({ isEscuro }) {
        nomeArquivo = `${lojaObj.nome_fantasia} - ${dataFechamentoBr.replace(/\//g, '-')}.pdf`;
     }
 
+    // 💡 ATUALIZADO: Configurado para lidar com o tamanho de 2480px e encaixar na A4 sem margem adicional, gerando PDF em alta resolução
     const opt = {
-      margin:       [10, 10, 15, 10], 
+      margin:       0, 
       filename:     nomeArquivo,
       image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true, logging: false },
+      html2canvas:  { scale: 1, useCORS: true, logging: false, windowWidth: 2480 },
       jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }, 
       pagebreak:    { mode: 'css', after: '.print-break' }
     };
@@ -623,6 +624,7 @@ export default function FechamentoLojas({ isEscuro }) {
 
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif', color: themeText }}>🔄 Processando...</div>;
 
+  // 💡 ATUALIZADO: Tabela com altura flexível (100%) e fontes em alta resolução para caber precisamente na 2480x3508px
   const renderTabelaDupla = (itensLoja, isMotorista) => {
     const half = Math.ceil(itensLoja.length / 2);
     const rows = [];
@@ -630,12 +632,12 @@ export default function FechamentoLojas({ isEscuro }) {
       rows.push({ left: itensLoja[i], right: itensLoja[i + half] });
     }
 
-    const thStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#e5e7eb', color: 'black' };
-    const tdStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontSize: '12px', fontWeight: '900', color: 'black' };
-    const tdDesc = { ...tdStyle, textAlign: 'left', fontSize: '13px', fontWeight: '900', color: 'black', wordBreak: 'break-word' }; 
+    const thStyle = { border: '4px solid black', padding: '15px 10px', textAlign: 'center', fontWeight: 'bold', fontSize: '38px', backgroundColor: '#e5e7eb', color: 'black' };
+    const tdStyle = { border: '4px solid black', padding: '15px 10px', textAlign: 'center', fontSize: '42px', fontWeight: '900', color: 'black' };
+    const tdDesc = { ...tdStyle, textAlign: 'left', fontSize: '46px', fontWeight: '900', color: 'black', wordBreak: 'break-word' }; 
 
     return (
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+      <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', marginTop: '20px' }}>
         <thead>
           <tr>
             <th style={{...thStyle, width: '7%'}}>QUANT.</th>
@@ -681,8 +683,8 @@ export default function FechamentoLojas({ isEscuro }) {
                  <>
                    <td style={tdStyle}>{item.qtdEntregue}</td>
                    <td style={tdDesc}>{formatarNomeItem(item.nome)}</td>
-                   <td style={{...tdStyle, fontSize: '11px', color: corUnit, fontWeight: '900'}}>{uDisp}</td>
-                   <td style={{...tdStyle, fontSize: '11px', color: corTotal, fontWeight: '900'}}>{tDisp}</td>
+                   <td style={{...tdStyle, fontSize: '38px', color: corUnit, fontWeight: '900'}}>{uDisp}</td>
+                   <td style={{...tdStyle, fontSize: '38px', color: corTotal, fontWeight: '900'}}>{tDisp}</td>
                  </>
                );
              };
@@ -700,6 +702,7 @@ export default function FechamentoLojas({ isEscuro }) {
     );
   };
 
+  // 💡 ATUALIZADO: Layout renderizado forçando as medidas exatas de uma A4 em 300dpi (2480x3508px)
   if (modoVisualizacaoImp) {
     const isMotGlobal = (tipoImpressao === 'motorista_todos');
     const isMotorista = tipoImpressao?.startsWith('motorista');
@@ -735,42 +738,68 @@ export default function FechamentoLojas({ isEscuro }) {
            </div>
         </div>
 
-        <div style={{ overflowX: 'auto', paddingBottom: '20px' }}>
-            <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', width: '100%', maxWidth: '850px', margin: '0 auto' }}>
+        <div style={{ width: '100%', overflowX: 'auto', paddingBottom: '40px' }}>
+            {/* O container id="area-impressao" assume os 2480px exatos */}
+            <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', width: '2480px', margin: '0 auto' }}>
                
                {lojasParaRenderizar.map((loja, idx) => (
-                  <div key={loja.loja_id} className="print-break" style={{ padding: '15px', position: 'relative', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+                  <div key={loja.loja_id} className="print-break" style={{ 
+                      width: '2480px', 
+                      height: '3508px', 
+                      padding: '100px', // Simula a margem de impressão na própria resolução
+                      boxSizing: 'border-box', 
+                      position: 'relative', 
+                      display: 'flex', 
+                      flexDirection: 'column',
+                      backgroundColor: '#fff',
+                      overflow: 'hidden' // Garante que nunca vai extrapolar a folha
+                  }}>
                      
-                     <div style={{ border: '2px solid black', boxSizing: 'border-box', padding: '10px', height: '100%' }}>
+                     <div style={{ border: '8px solid black', boxSizing: 'border-box', padding: '40px', height: '100%', display: 'flex', flexDirection: 'column' }}>
                          
-                         <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '2px solid black', paddingBottom: '10px', marginBottom: '10px' }}>
+                         <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '8px solid black', paddingBottom: '30px', marginBottom: '20px' }}>
                             {isMotorista ? (
                               <>
                                 <div style={{ flex: '1', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                                    <span style={{ fontWeight: '900', fontSize: '18px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
-                                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: 'black', marginTop: '4px' }}>DATA: {dataFechamentoBr}</span>
+                                    <span style={{ fontWeight: '900', fontSize: '70px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
+                                    <span style={{ fontWeight: 'bold', fontSize: '45px', color: '#333', marginTop: '10px' }}>DATA: {dataFechamentoBr}</span>
                                 </div>
                                 <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '60px', objectFit: 'contain' }} />
+                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '180px', objectFit: 'contain' }} />
                                 </div>
                               </>
                             ) : (
                               <>
                                 <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
-                                    <span style={{ fontWeight: '900', fontSize: '18px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
+                                    <span style={{ fontWeight: '900', fontSize: '70px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
                                 </div>
                                 <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '55px', objectFit: 'contain' }} />
+                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '170px', objectFit: 'contain' }} />
                                 </div>
                                 <div style={{ flex: '1', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center' }}>
-                                    <span style={{ fontWeight: '900', fontSize: '20px', color: 'black' }}>TOTAL: {formatarMoeda(loja.totalFatura)}</span>
-                                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: 'black', marginTop: '2px' }}>DATA: {dataFechamentoBr}</span>
+                                    <span style={{ fontWeight: '900', fontSize: '75px', color: 'black' }}>TOTAL: {formatarMoeda(loja.totalFatura)}</span>
+                                    <span style={{ fontWeight: 'bold', fontSize: '45px', color: '#333', marginTop: '10px' }}>DATA: {dataFechamentoBr}</span>
                                 </div>
                               </>
                             )}
                          </div>
 
-                         {renderTabelaDupla(loja.itens, isMotorista)}
+                         {/* Área da tabela flexível. Ocupará exatamente o meio da folha verticalmente */}
+                         <div style={{ flex: 1, width: '100%', display: 'flex', flexDirection: 'column' }}>
+                            {renderTabelaDupla(loja.itens, isMotorista)}
+                         </div>
+
+                         {/* Assinaturas travadas no rodapé da folha */}
+                         <div style={{ marginTop: 'auto', paddingTop: '80px', display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end' }}>
+                            <div style={{ textAlign: 'center', width: '40%' }}>
+                                <div style={{ borderBottom: '4px solid black', marginBottom: '15px', height: '50px' }}></div>
+                                <span style={{ fontSize: '40px', fontWeight: 'bold', color: 'black' }}>Assinatura Entregador</span>
+                            </div>
+                            <div style={{ textAlign: 'center', width: '40%' }}>
+                                <div style={{ borderBottom: '4px solid black', marginBottom: '15px', height: '50px' }}></div>
+                                <span style={{ fontSize: '40px', fontWeight: 'bold', color: 'black' }}>Assinatura Conferente (Loja)</span>
+                            </div>
+                         </div>
 
                      </div>
                   </div>
@@ -785,7 +814,7 @@ export default function FechamentoLojas({ isEscuro }) {
             html, body { height: auto !important; overflow: visible !important; background: white; margin: 0; padding: 0; }
             #root, div { overflow: visible !important; height: auto !important; }
             .print-section { box-shadow: none !important; min-width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; }
-            @page { margin: 10mm; size: portrait; } 
+            @page { margin: 0; size: portrait; } 
           }
         `}</style>
       </div>
