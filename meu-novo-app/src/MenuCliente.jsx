@@ -299,6 +299,7 @@ export default function MenuCliente({ usuario, tema }) {
     const qtdFinal = parseInt(quantidade, 10) || 1;
     const bonifFinal = temBonificacao ? (parseInt(qtdBonificada, 10) || 0) : 0;
     
+    // 💡 Blinda para não deixar a bonificação ser maior que a quantidade total pedida
     const bonificacaoSegura = Math.min(qtdFinal, bonifFinal);
     const qtdCobrada = Math.max(0, qtdFinal - bonificacaoSegura);
 
@@ -364,6 +365,7 @@ export default function MenuCliente({ usuario, tema }) {
   const abrirRevisao = () => {
     if(carrinhoSeguro.length === 0) return;
 
+    // 💡 REMOVIDA: A lógica que olhava p.lista_padrao como array, voltando para a regra simples antiga.
     const itensPadrao = produtos.filter(p => p.lista_padrao === true && p.status_cotacao !== 'falta' && p.status_cotacao !== 'sem_preco');
     const itensFaltando = itensPadrao.filter(pPadrao => !carrinhoSeguro.some(c => c.id === pPadrao.id));
 
