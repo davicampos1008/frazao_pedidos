@@ -248,8 +248,8 @@ function App() {
                 <button onClick={() => navegarPara('listas')} style={s.btnNav}>📋 PAINEL DE CONFERÊNCIA</button>
                 <button onClick={() => navegarPara('compras')} style={s.btnNav}>🛒 MESA DE COMPRAS</button>
                 <button onClick={() => navegarPara('fechamento')} style={s.btnNav}>🧾 GESTÃO DE FECHAMENTOS</button>
+                {/* 💡 AQUI FOI ADICIONADO O BOTÃO NO MENU DO ADMIN */}
                 <button onClick={() => navegarPara('notas_fiscais')} style={s.btnNav}>🧾 PAINEL NOTAS FISCAIS</button> 
-                {/* 💡 AGORA O ADMIN PODE VER A TELA DO CLIENTE (TESTE) */}
                 <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>📄 VISÃO CLIENTE (FECHAMENTO)</button>
               </>
             )}
@@ -307,7 +307,7 @@ function App() {
         {telaAtiva === 'marketing' && <Marketing />}
         {telaAtiva === 'listas' && <Listas usuario={usuarioLogado} />}
         {telaAtiva === 'cliente' && usuarioLogado && <MenuCliente usuario={usuarioLogado} tema={tema} />}
- {telaAtiva === 'compras' && <PlanilhaCompras navegarPara={navegarPara} setTelaAtiva={setTelaAtiva} />}
+        {telaAtiva === 'compras' && <PlanilhaCompras navegarPara={navegarPara} setTelaAtiva={setTelaAtiva} />}
         {telaAtiva === 'fechamento' && <FechamentoLojas isEscuro={isEscuro} />}
         
         {/* 💡 RENDERIZAÇÃO DAS TELAS AQUI */}
@@ -326,7 +326,7 @@ function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isEscuro ? '#0f172a' : '#f8fafc', border: `1px solid ${isEscuro ? '#334155' : '#e2e8f0'}`, borderRadius: '15px', padding: '15px' }}>
                 <span style={{ fontWeight: 'bold', color: config.identidade.corTexto, fontSize: '14px' }}>Tema Visual</span>
-                <button onClick={() => setTema(isEscuro ? 'claro' : 'escuro')} style={{ background: isEscuro ? '#1e293b' : '#fff', color: config.identidade.corTexto, border: `1px solid ${isEscuro ? '#475569' : '#ccc'}`, padding: '8px 12px', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', fontSize: '12px' }}>
+                <button onClick={() => setTema(isEscuro ? 'claro' : 'escuro')} style={{ background: isEscuro ? '#1e293b' : '#fff', color: config.identidade.corTexto, border: `1px solid ${isEscuro ? '#475569' : '#ccc'}`, padding: '8px 12px', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   {isEscuro ? '☀️ CLARO' : '🌙 ESCURO'}
                 </button>
               </div>
