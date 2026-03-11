@@ -623,78 +623,106 @@ export default function FechamentoLojas({ isEscuro }) {
 
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif', color: themeText }}>🔄 Processando...</div>;
 
+  // 💡 NOVA RENDERIZAÇÃO RESPONSIVA E FLUIDA DA TABELA DO MOTORISTA
   const renderTabelaDupla = (itensLoja, isMotorista) => {
+    const thStyle = { border: '1px solid black', padding: '8px 6px', textAlign: 'center', fontWeight: 'bold', fontSize: '13px', backgroundColor: '#e5e7eb', color: 'black' };
+    const tdStyle = { border: '1px solid black', padding: '8px 6px', textAlign: 'center', fontSize: '14px', fontWeight: '900', color: 'black' };
+    const tdDesc = { ...tdStyle, textAlign: 'left', fontSize: '15px', fontWeight: '900', color: 'black', wordBreak: 'break-word' }; 
+
+    // Helper para gerar as células (td) de um item
+    const gerarCelulasItem = (item) => {
+        if (!item) return <><td style={tdStyle}></td><td style={tdDesc}></td><td style={tdStyle}></td><td style={tdStyle}></td></>;
+        
+        let corUnit = 'black';
+        let corTotal = 'black';
+        let uDisp = item.unitDisplay;
+        let tDisp = item.totalDisplay;
+
+        if (item.isFalta) {
+            corUnit = '#ef4444'; corTotal = '#ef4444';
+            uDisp = 'FALTA'; tDisp = 'FALTA';
+        } else if (item.isPendente) {
+            corUnit = '#f97316'; corTotal = '#f97316';
+        } else if (item.isBoleto) {
+            corUnit = '#d97706'; corTotal = '#d97706';
+            uDisp = 'BOLETO'; tDisp = 'BOLETO';
+        } else {
+            if (String(uDisp).includes('BONIFIC.')) corUnit = '#16a34a'; 
+            if (tDisp === 'BONIFIC.') corTotal = '#16a34a'; 
+        }
+
+        // Motorista não precisa ver o preço, exceto se for falta/boleto
+        if (isMotorista && !item.isFalta && !item.isPendente && !item.isBoleto) {
+            uDisp = '';
+            tDisp = '';
+        } 
+
+        return (
+            <>
+            <td style={tdStyle}>{item.qtdEntregue}</td>
+            <td style={tdDesc}>{formatarNomeItem(item.nome)}</td>
+            <td style={{...tdStyle, fontSize: '12px', color: corUnit}}>{uDisp}</td>
+            <td style={{...tdStyle, fontSize: '12px', color: corTotal}}>{tDisp}</td>
+            </>
+        );
+    };
+
+    // Se tiver poucos itens, ou se estivemos imprimindo a via da loja (com preços), renderizamos em 1 coluna ocupando 100% da largura
+    // Se for motorista e tiver muitos itens, dividimos em 2 colunas para economizar papel.
+    const usarDuasColunas = isMotorista && itensLoja.length > 15;
+
+    if (!usarDuasColunas) {
+        return (
+            <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '15px' }}>
+                <thead>
+                    <tr>
+                        <th style={{...thStyle, width: '10%'}}>QTD.</th>
+                        <th style={{...thStyle, width: '50%'}}>DESCRIÇÃO DO ITEM</th>
+                        <th style={{...thStyle, width: '20%'}}>VAL. UNIT.</th>
+                        <th style={{...thStyle, width: '20%'}}>VAL. TOTAL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {itensLoja.map((item, idx) => (
+                        <tr key={idx}>
+                            {gerarCelulasItem(item)}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
+
+    // Lógica para 2 colunas (Economia de Papel para Motorista)
     const half = Math.ceil(itensLoja.length / 2);
     const rows = [];
     for (let i = 0; i < half; i++) {
       rows.push({ left: itensLoja[i], right: itensLoja[i + half] });
     }
 
-    const thStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#e5e7eb', color: 'black' };
-    const tdStyle = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontSize: '12px', fontWeight: '900', color: 'black' };
-    const tdDesc = { ...tdStyle, textAlign: 'left', fontSize: '13px', fontWeight: '900', color: 'black', wordBreak: 'break-word' }; 
-
     return (
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '15px' }}>
         <thead>
           <tr>
-            <th style={{...thStyle, width: '7%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '22%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '14%'}}>VAL. UNIT.</th>
-            <th style={{...thStyle, width: '10%'}}>VAL. TOTAL.</th>
-            <th style={{ border: 'none', width: '2%', backgroundColor: 'transparent' }}></th>
-            <th style={{...thStyle, width: '7%'}}>QUANT.</th>
-            <th style={{...thStyle, width: '22%'}}>DESCRIÇÃO</th>
-            <th style={{...thStyle, width: '14%'}}>VAL. UNIT.</th>
-            <th style={{...thStyle, width: '10%'}}>VAL. TOTAL.</th>
+            <th style={{...thStyle, width: '8%'}}>QTD.</th>
+            <th style={{...thStyle, width: '27%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '15%'}}>V. UNIT.</th>
+            <th style={{...thStyle, width: '10%'}}>TOTAL</th>
+            <th style={{ border: 'none', width: '2%', backgroundColor: 'transparent', padding: 0 }}></th>
+            <th style={{...thStyle, width: '8%'}}>QTD.</th>
+            <th style={{...thStyle, width: '27%'}}>DESCRIÇÃO</th>
+            <th style={{...thStyle, width: '15%'}}>V. UNIT.</th>
+            <th style={{...thStyle, width: '10%'}}>TOTAL</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, idx) => {
-             const renderCell = (item) => {
-               if (!item) return <><td style={tdStyle}></td><td style={tdDesc}></td><td style={tdStyle}></td><td style={tdStyle}></td></>;
-               
-               let corUnit = 'black';
-               let corTotal = 'black';
-               let uDisp = item.unitDisplay;
-               let tDisp = item.totalDisplay;
-
-               if (item.isFalta) {
-                  corUnit = '#ef4444'; corTotal = '#ef4444';
-                  uDisp = 'FALTA'; tDisp = 'FALTA';
-               } else if (item.isPendente) {
-                  corUnit = '#f97316'; corTotal = '#f97316';
-               } else if (item.isBoleto) {
-                  corUnit = '#d97706'; corTotal = '#d97706';
-                  uDisp = 'BOLETO'; tDisp = 'BOLETO';
-               } else {
-                  if (String(uDisp).includes('BONIFIC.')) corUnit = '#16a34a'; 
-                  if (tDisp === 'BONIFIC.') corTotal = '#16a34a'; 
-               }
-
-               if (isMotorista && !item.isFalta && !item.isPendente && !item.isBoleto) {
-                  uDisp = '';
-                  tDisp = '';
-               } 
-
-               return (
-                 <>
-                   <td style={tdStyle}>{item.qtdEntregue}</td>
-                   <td style={tdDesc}>{formatarNomeItem(item.nome)}</td>
-                   <td style={{...tdStyle, fontSize: '11px', color: corUnit, fontWeight: '900'}}>{uDisp}</td>
-                   <td style={{...tdStyle, fontSize: '11px', color: corTotal, fontWeight: '900'}}>{tDisp}</td>
-                 </>
-               );
-             };
-
-             return (
-               <tr key={idx}>
-                 {renderCell(row.left)}
-                 <td style={{ border: 'none', width: '2%' }}></td>
-                 {renderCell(row.right)}
-               </tr>
-             )
-          })}
+          {rows.map((row, idx) => (
+            <tr key={idx}>
+              {gerarCelulasItem(row.left)}
+              <td style={{ border: 'none', width: '2%', padding: 0 }}></td>
+              {gerarCelulasItem(row.right)}
+            </tr>
+          ))}
         </tbody>
       </table>
     );
@@ -739,38 +767,53 @@ export default function FechamentoLojas({ isEscuro }) {
             <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', width: '100%', maxWidth: '850px', margin: '0 auto' }}>
                
                {lojasParaRenderizar.map((loja, idx) => (
-                  <div key={loja.loja_id} className="print-break" style={{ padding: '15px', position: 'relative', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+                  <div key={loja.loja_id} className="print-break" style={{ padding: '20px 15px', position: 'relative', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
                      
-                     <div style={{ border: '2px solid black', boxSizing: 'border-box', padding: '10px', height: '100%' }}>
+                     <div style={{ border: '2px solid black', boxSizing: 'border-box', padding: '15px', height: '100%', display: 'flex', flexDirection: 'column' }}>
                          
-                         <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '2px solid black', paddingBottom: '10px', marginBottom: '10px' }}>
+                         <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '2px solid black', paddingBottom: '15px', marginBottom: '10px' }}>
                             {isMotorista ? (
                               <>
                                 <div style={{ flex: '1', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                                    <span style={{ fontWeight: '900', fontSize: '18px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
-                                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: 'black', marginTop: '4px' }}>DATA: {dataFechamentoBr}</span>
+                                    <span style={{ fontWeight: '900', fontSize: '22px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
+                                    <span style={{ fontWeight: 'bold', fontSize: '15px', color: '#333', marginTop: '6px' }}>ENTREGA: {dataFechamentoBr}</span>
                                 </div>
                                 <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '60px', objectFit: 'contain' }} />
+                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '70px', objectFit: 'contain' }} />
                                 </div>
                               </>
                             ) : (
                               <>
                                 <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
-                                    <span style={{ fontWeight: '900', fontSize: '18px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
+                                    <span style={{ fontWeight: '900', fontSize: '22px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
                                 </div>
                                 <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '55px', objectFit: 'contain' }} />
+                                    <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '65px', objectFit: 'contain' }} />
                                 </div>
                                 <div style={{ flex: '1', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center' }}>
-                                    <span style={{ fontWeight: '900', fontSize: '20px', color: 'black' }}>TOTAL: {formatarMoeda(loja.totalFatura)}</span>
-                                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: 'black', marginTop: '2px' }}>DATA: {dataFechamentoBr}</span>
+                                    <span style={{ fontWeight: '900', fontSize: '24px', color: 'black' }}>TOTAL: {formatarMoeda(loja.totalFatura)}</span>
+                                    <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#333', marginTop: '4px' }}>DATA: {dataFechamentoBr}</span>
                                 </div>
                               </>
                             )}
                          </div>
 
-                         {renderTabelaDupla(loja.itens, isMotorista)}
+                         {/* A tabela agora ocupa o espaço restante de forma fluida */}
+                         <div style={{ flex: 1, width: '100%' }}>
+                            {renderTabelaDupla(loja.itens, isMotorista)}
+                         </div>
+
+                         {/* Área para assinatura no final da folha */}
+                         <div style={{ marginTop: 'auto', paddingTop: '40px', display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end' }}>
+                            <div style={{ textAlign: 'center', width: '40%' }}>
+                                <div style={{ borderBottom: '1px solid black', marginBottom: '5px', height: '20px' }}></div>
+                                <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'black' }}>Assinatura Entregador</span>
+                            </div>
+                            <div style={{ textAlign: 'center', width: '40%' }}>
+                                <div style={{ borderBottom: '1px solid black', marginBottom: '5px', height: '20px' }}></div>
+                                <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'black' }}>Assinatura Conferente (Loja)</span>
+                            </div>
+                         </div>
 
                      </div>
                   </div>
