@@ -195,24 +195,30 @@ export default function MenuCliente({ usuario, tema }) {
     return (isNaN(num) ? 0 : num).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
   
+  // 💡 CALCULO DE EMBALAGEM INTELIGENTE (Caixa, Saco, BDJ, etc)
   const tratarInfosDeVenda = (produto) => {
-    const precoKg = tratarPreco(produto.preco);
-    const pesoCx = parseFloat(String(produto.peso_caixa || '').replace(/[^\d.]/g, ''));
+    const precoBase = tratarPreco(produto.preco);
     
-    if (produto.unidade_medida === 'KG' && pesoCx > 0) {
-      const precoCaixa = precoKg * pesoCx;
+    // Extrai o número puro, se houver
+    const temPesoExtra = produto.peso_caixa && String(produto.peso_caixa).trim() !== '';
+    const numeroPeso = temPesoExtra ? parseFloat(String(produto.peso_caixa).replace(/[^\d.]/g, '')) : 0;
+    
+    if (temPesoExtra && numeroPeso > 0) {
+      const precoFechado = precoBase * numeroPeso;
+      const nomeUnidade = String(produto.unidade_medida || 'UN').toUpperCase();
+      
       return { 
         isCaixa: true, 
-        precoBase: precoCaixa, 
-        textoPreco: `${formatarMoeda(precoCaixa)} / CX`, 
-        textoSecundario: `(Cx c/ ${pesoCx}kg - ${formatarMoeda(precoKg)} o Kg)`,
-        unidadeFinal: 'CX'
+        precoBase: precoFechado, 
+        textoPreco: `${formatarMoeda(precoFechado)} / ${nomeUnidade}`, 
+        textoSecundario: `(Unid. c/ ${produto.peso_caixa} - ${formatarMoeda(precoBase)} a medida base)`,
+        unidadeFinal: nomeUnidade
       };
     }
     
     return { 
       isCaixa: false, 
-      precoBase: precoKg, 
+      precoBase: precoBase, 
       textoPreco: `${produto.preco} / ${produto.unidade_medida}`, 
       textoSecundario: '',
       unidadeFinal: produto.unidade_medida
@@ -277,7 +283,6 @@ export default function MenuCliente({ usuario, tema }) {
   const edicaoLiberadaBD = listaEnviadaHoje?.some(item => item.liberado_edicao === true);
   const isAppTravado = !precosLiberados || (listaEnviadaHoje && !edicaoLiberadaBD);
 
-  // 💡 LÓGICA PARA VERIFICAR SE O ITEM É DA LISTA PADRÃO INDEPENDENTE DE COMO ESTÁ NO BANCO
   const verificarSePadrao = (valorPadrao) => {
     if (valorPadrao === true || valorPadrao === 'true') return true;
     if (Array.isArray(valorPadrao) && valorPadrao.length > 0) return true;
@@ -306,7 +311,6 @@ export default function MenuCliente({ usuario, tema }) {
     const qtdFinal = parseInt(quantidade, 10) || 1;
     const bonifFinal = temBonificacao ? (parseInt(qtdBonificada, 10) || 0) : 0;
     
-    // 💡 Blinda para não deixar a bonificação ser maior que a quantidade total pedida
     const bonificacaoSegura = Math.min(qtdFinal, bonifFinal);
     const qtdCobrada = Math.max(0, qtdFinal - bonificacaoSegura);
 
@@ -372,7 +376,6 @@ export default function MenuCliente({ usuario, tema }) {
   const abrirRevisao = () => {
     if(carrinhoSeguro.length === 0) return;
 
-    // 💡 ATUALIZADO: Agora usa a verificação universal de Lista Padrão
     const itensPadrao = produtos.filter(p => verificarSePadrao(p.lista_padrao) && p.status_cotacao !== 'falta' && p.status_cotacao !== 'sem_preco');
     const itensFaltando = itensPadrao.filter(pPadrao => !carrinhoSeguro.some(c => c.id === pPadrao.id));
 
@@ -577,7 +580,6 @@ export default function MenuCliente({ usuario, tema }) {
           const termoBuscado = removerAcentos(buscaMenu.toLowerCase().trim());
           const nomeProduto = removerAcentos(p.nome.toLowerCase());
           
-          // 💡 ATUALIZADO: Aplica a verificação universal na filtragem também
           const ehPadrao = verificarSePadrao(p.lista_padrao);
           
           if (termoBuscado) {
@@ -706,7 +708,7 @@ export default function MenuCliente({ usuario, tema }) {
               
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
                 <div>
-                  <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário {infosVendaExpandido.isCaixa && '(Caixa Fechada)'}</span>
+                  <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário {infosVendaExpandido.isCaixa && `(Embalagem Fechada)`}</span>
                   <span style={{color: configDesign.cores.primaria, fontSize: '20px', fontWeight: '900'}}>{infosVendaExpandido.textoPreco}</span>
                   {infosVendaExpandido.isCaixa && <span style={{display: 'block', fontSize: '10px', color: configDesign.cores.textoSuave}}>{infosVendaExpandido.textoSecundario}</span>}
                 </div>
@@ -731,7 +733,6 @@ export default function MenuCliente({ usuario, tema }) {
                     <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '45px', height: '45px', fontSize: '20px', borderRadius: '12px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>+</button>
                   </div>
 
-                  {/* CAIXA DE BONIFICAÇÃO EXCLUSIVA DO CLIENTE */}
                   <div style={{ backgroundColor: temBonificacao ? (isEscuro ? '#14532d' : '#dcfce7') : configDesign.cores.inputFundo, padding: '12px 15px', borderRadius: '12px', border: temBonificacao ? '1px solid #86efac' : `1px solid ${configDesign.cores.borda}`, transition: '0.2s' }}>
                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: temBonificacao ? (isEscuro ? '#86efac' : '#166534') : configDesign.cores.textoForte, fontWeight: '900', fontSize: '13px', cursor: 'pointer' }}>
                        <input type="checkbox" checked={temBonificacao} onChange={(e) => { setTemBonificacao(e.target.checked); if(!e.target.checked) setQtdBonificada(0); }} style={{ width: '20px', height: '20px', accentColor: configDesign.cores.sucesso }} />
