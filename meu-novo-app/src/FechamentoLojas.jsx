@@ -42,11 +42,6 @@ export default function FechamentoLojas({ isEscuro }) {
   const [abaForn, setAbaForn] = useState('pendentes'); 
   const [fornExpandido, setFornExpandido] = useState(null);
 
-  // 💡 NOVOS ESTADOS PARA VALOR MÉDIA
-  const [modalMediaAberto, setModalMediaAberto] = useState(false);
-  const [itemMediaSelecionado, setItemMediaSelecionado] = useState('');
-  const [valorMediaInput, setValorMediaInput] = useState('');
-
   const themeBg = isEscuro ? '#0f172a' : '#f5f5f4';
   const themeCard = isEscuro ? '#1e293b' : '#ffffff';
   const themeText = isEscuro ? '#f8fafc' : '#111111';
@@ -143,12 +138,13 @@ export default function FechamentoLojas({ isEscuro }) {
             return;
         }
 
-        // --- FORNECEDORES (NÃO MUDA NADA, USA CUSTO_UNIT) ---
+        // --- FORNECEDORES ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
           let fNomeOriginal = p.fornecedor_compra ? String(p.fornecedor_compra).toUpperCase() : 'SEM FORNECEDOR';
           if (fNomeOriginal.startsWith('ALERTA|')) fNomeOriginal = fNomeOriginal.replace('ALERTA|', '');
           
           const isBoleto = p.status_compra === 'boleto';
+          // 💡 SEPARAÇÃO AUTOMÁTICA DE BOLETOS
           const fNome = isBoleto ? `${fNomeOriginal} (BOLETO)` : fNomeOriginal;
           
           let baseVal = p.custo_unit;
@@ -190,9 +186,9 @@ export default function FechamentoLojas({ isEscuro }) {
           mapaForn[fNome].lojasEnvolvidas[nomeLojaForn] = lInfoForn || { nome_fantasia: nomeLojaForn, placa_caminhao: 'SEM PLACA' };
 
           const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => 
-              i.nomeItem === p.nome_produto && 
-              i.isBoleto === isBoleto && 
-              tratarPrecoNum(i.valUnit) === valNum
+             i.nomeItem === p.nome_produto && 
+             i.isBoleto === isBoleto && 
+             tratarPrecoNum(i.valUnit) === valNum
           );
 
           if (itemExistenteIndex >= 0) {
@@ -225,7 +221,7 @@ export default function FechamentoLojas({ isEscuro }) {
           }
         }
 
-        // --- LOJAS (AQUI PRIORIZAMOS O PRECO_VENDA PARA O FECHAMENTO) ---
+        // --- LOJAS ---
         const idLoja = extrairNum(p.loja_id);
         if (!idLoja || idLoja <= 1) return;
 
@@ -246,20 +242,17 @@ export default function FechamentoLojas({ isEscuro }) {
         
         let qtdDisplay = p.quantidade; 
         let qtdBonificada = Number(p.qtd_bonificada) || 0;
-        
-        // 💡 Lógica de prioridade de preço para a loja
-        let unitParaLoja = p.preco_venda || p.custo_unit || 'R$ 0,00';
-        let unitDisplay = unitParaLoja;
+        let unitDisplay = p.custo_unit || 'R$ 0,00';
         let totalItem = 0;
         let totalDisplay = '';
-        let precoOriginal = unitParaLoja;
+        let precoOriginal = p.custo_unit || 'R$ 0,00';
         let isBonif = false;
 
         if (isFalta) {
           unitDisplay = 'FALTA';
           totalDisplay = 'FALTA';
-        } else if (String(unitParaLoja).includes('BONIFICAÇÃO |')) {
-          const parts = unitParaLoja.split('|');
+        } else if (String(p.custo_unit).includes('BONIFICAÇÃO |')) {
+          const parts = p.custo_unit.split('|');
           precoOriginal = parts[1] ? parts[1].trim() : 'R$ 0,00';
           const pUnit = tratarPrecoNum(precoOriginal);
           qtdDisplay = p.qtd_atendida;
@@ -284,7 +277,7 @@ export default function FechamentoLojas({ isEscuro }) {
           totalDisplay = 'BOLETO';
         } else {
           qtdDisplay = p.qtd_atendida; 
-          const valNum = tratarPrecoNum(unitParaLoja);
+          const valNum = tratarPrecoNum(p.custo_unit);
           
           const restCobrado = Math.max(0, qtdDisplay - qtdBonificada);
           totalItem = restCobrado * valNum;
@@ -359,35 +352,6 @@ export default function FechamentoLojas({ isEscuro }) {
 
     } catch (err) { console.error(err); } finally { setCarregando(false); }
   }
-
-  // 💡 FUNÇÃO PARA APLICAR VALOR MÉDIA (VENDA) SEM ALTERAR CUSTO
-  const aplicarPrecoMedia = async () => {
-    if(!itemMediaSelecionado || !valorMediaInput) return alert("Selecione o item e o valor.");
-    
-    let v = valorMediaInput.replace(/[^\d,.]/g, '');
-    if(v.includes('.') && !v.includes(',')) v = v.replace('.', ',');
-    v = v.replace(/[^\d,]/g, '');
-    let num = parseFloat(v.replace(',', '.')) || 0;
-    let finalStr = num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
-    setCarregando(true);
-    try {
-        const { error } = await supabase
-            .from('pedidos')
-            .update({ preco_venda: finalStr })
-            .eq('data_pedido', dataFiltro)
-            .eq('nome_produto', itemMediaSelecionado);
-        
-        if(error) throw error;
-        alert(`Sucesso! O item ${itemMediaSelecionado} agora custa ${finalStr} para as lojas.`);
-        setModalMediaAberto(false);
-        setValorMediaInput('');
-        carregar();
-    } catch(e) {
-        alert("Erro ao aplicar média: " + e.message);
-        setCarregando(false);
-    }
-  };
 
   const abrirEdicao = (loja) => {
     setLojaEmEdicao(loja);
@@ -474,8 +438,7 @@ export default function FechamentoLojas({ isEscuro }) {
         fornecedor_compra: `ALERTA|${item.fornecedor_original || ''}`, 
         custo_unit: '',
         qtd_atendida: 0,
-        qtd_bonificada: 0,
-        preco_venda: null // Limpa o preco venda tambem se devolver
+        qtd_bonificada: 0
      }).eq('id', item.id_pedido);
      
      setLojaEmEdicao(null);
@@ -494,8 +457,7 @@ export default function FechamentoLojas({ isEscuro }) {
               qtd_bonificada: 0,
               custo_unit: '',
               fornecedor_compra: `ALERTA|${item.fornecedor_original || ''}`,
-              status_compra: 'pendente',
-              preco_venda: null
+              status_compra: 'pendente'
             }).eq('id', item.id_pedido);
             continue;
         }
@@ -529,6 +491,7 @@ export default function FechamentoLojas({ isEscuro }) {
   }, 0);
 
   const abrirPreviewImpressao = (tipo, loja = null) => {
+    // 💡 REMOVIDO O BLOQUEIO DE ABERTURA AQUI PARA PERMITIR A VISUALIZAÇÃO PRÉVIA SEMPRE
     setTipoImpressao(tipo);
     setLojaParaImprimir(loja);
     setModoVisualizacaoImp(true);
@@ -671,6 +634,7 @@ export default function FechamentoLojas({ isEscuro }) {
                   if (tDisp === 'BONIFIC.') corTotal = '#16a34a'; 
                }
 
+               // 💡 MESMO NA VIA DO MOTORISTA, FALTA E BOLETO DEVEM APARECER
                if (isMotorista && !item.isFalta && !item.isPendente && !item.isBoleto) {
                   uDisp = '';
                   tDisp = '';
@@ -704,6 +668,7 @@ export default function FechamentoLojas({ isEscuro }) {
     const isMotorista = tipoImpressao?.startsWith('motorista');
     const lojasParaRenderizar = isMotGlobal ? fechamentos : [lojaParaImprimir];
     
+    // 💡 CALCULA SE DEVE BLOQUEAR O DOWNLOAD/WHATSAPP DEVIDO A PENDÊNCIAS
     const bloquearExportacao = isMotGlobal 
       ? fechamentos.some(l => l.temPendencia) 
       : lojaParaImprimir.temPendencia;
@@ -820,17 +785,11 @@ export default function FechamentoLojas({ isEscuro }) {
           </p>
         </div>
         
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            <button onClick={() => setModalMediaAberto(true)} style={{ backgroundColor: '#8b5cf6', color: '#fff', border: 'none', padding: '12px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', display: 'flex', gap: '10px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>
-                <span>📊</span> VALOR MÉDIA
-            </button>
-
-            {abaAtiva === 'lojas' && (
-            <button onClick={() => abrirPreviewImpressao('motorista_todos')} style={{ backgroundColor: isEscuro ? '#334155' : '#fff', color: isEscuro ? '#f8fafc' : '#111', border: 'none', padding: '12px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', display: 'flex', gap: '10px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.1)', flex: '1 1 auto', justifyContent: 'center' }}>
-                <span>🚚</span> VIAS MOTORISTAS PDF
-            </button>
-            )}
-        </div>
+        {abaAtiva === 'lojas' && (
+          <button onClick={() => abrirPreviewImpressao('motorista_todos')} style={{ backgroundColor: isEscuro ? '#334155' : '#fff', color: isEscuro ? '#f8fafc' : '#111', border: 'none', padding: '12px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', display: 'flex', gap: '10px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.1)', flex: '1 1 auto', justifyContent: 'center' }}>
+            <span>🚚</span> VIAS MOTORISTAS PDF
+          </button>
+        )}
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px', maxWidth: '1000px', margin: '0 auto 20px auto' }}>
@@ -1136,41 +1095,6 @@ export default function FechamentoLojas({ isEscuro }) {
             <button onClick={salvarEdicaoLoja} style={{ width: '100%', padding: '15px', backgroundColor: '#22c55e', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '14px', marginTop: '15px', cursor: 'pointer', boxShadow: '0 4px 15px rgba(34,197,94,0.3)' }}>
               💾 SALVAR - TOTAL: {formatarMoeda(totalAoVivoEdicao)}
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* 💡 MODAL DE VALOR MÉDIA */}
-      {modalMediaAberto && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 11000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
-          <div style={{ backgroundColor: themeCard, width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '25px', boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
-            <h3 style={{ margin: '0 0 20px 0', color: themeText, textAlign: 'center' }}>📊 Aplicar Valor Média</h3>
-            
-            <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#94a3b8', display: 'block', marginBottom: '5px' }}>ESCOLHA O ITEM:</label>
-            <select 
-                value={itemMediaSelecionado} 
-                onChange={(e) => setItemMediaSelecionado(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', marginBottom: '20px', backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', color: themeText, border: `1px solid ${themeBorder}` }}
-            >
-                <option value="">Selecione um produto...</option>
-                {[...new Set(fechamentos.flatMap(l => l.itens.map(i => i.nome)))].sort().map(nome => (
-                    <option key={nome} value={nome}>{nome}</option>
-                ))}
-            </select>
-
-            <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#94a3b8', display: 'block', marginBottom: '5px' }}>NOVO PREÇO PARA LOJAS (R$):</label>
-            <input 
-                type="text"
-                placeholder="Ex: 5,50"
-                value={valorMediaInput}
-                onChange={(e) => setValorMediaInput(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', marginBottom: '25px', backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', color: themeText, border: `1px solid ${themeBorder}`, fontSize: '18px', fontWeight: 'bold', textAlign: 'center' }}
-            />
-
-            <div style={{ display: 'flex', gap: '10px' }}>
-                <button onClick={() => setModalMediaAberto(false)} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', background: '#334155', color: '#fff', cursor: 'pointer' }}>CANCELAR</button>
-                <button onClick={aplicarPrecoMedia} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', background: '#8b5cf6', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>APLICAR MÉDIA</button>
-            </div>
           </div>
         </div>
       )}
