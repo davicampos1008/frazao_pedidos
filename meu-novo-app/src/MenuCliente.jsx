@@ -39,8 +39,7 @@ export default function MenuCliente({ usuario, tema }) {
   const primeiroNome = (usuario?.nome || 'Cliente').split(' ')[0];
   const nomeLojaLimpo = (usuario?.loja || 'Matriz').replace(/^\d+\s*-\s*/, '').trim();
   
-  // 💡 Identificador único da loja do cliente
-  const codLoja = Number(usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]));
+  const codLoja = usuario?.codigo_loja || parseInt(String(usuario?.nome || "").match(/\d+/)?.[0]);
 
   const categoriasDinamicas = [
     'DESTAQUES', 'TODOS', '🍎 Frutas', '🥬 Verduras & Fungos', '🥕 Legumes', 
@@ -58,8 +57,12 @@ export default function MenuCliente({ usuario, tema }) {
       const salvo = localStorage.getItem('carrinho_virtus');
       if (!salvo) return [];
       const parseado = JSON.parse(salvo);
-      return Array.isArray(parseado) ? parseado : [];
-    } catch (e) { return []; }
+      if (!Array.isArray(parseado)) return [];
+      return parseado.filter(item => item && typeof item === 'object' && item.id && item.nome);
+    } catch (e) { 
+      localStorage.removeItem('carrinho_virtus');
+      return []; 
+    }
   });
 
   const [produtoExpandido, setProdutoExpandido] = useState(null);
@@ -77,196 +80,756 @@ export default function MenuCliente({ usuario, tema }) {
 
   const [navState, setNavState] = useState({ show: true, shrink: false });
   const ultimoScroll = useRef(0);
+  
   const [banners, setBanners] = useState({ topo: '', logo: '', tematico: '' });
-  const [historicoNotificacoes, setHistoricoNotificacoes] = useState([]);
+  const [notificacoes, setNotificacoes] = useState([]);
+  const [permissaoPush, setPermissaoPush] = useState('default');
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  
+  const [historicoNotificacoes, setHistoricoNotificacoes] = useState(() => {
+    try {
+      const salvo = localStorage.getItem('historico_notif_virtus');
+      const parseado = salvo ? JSON.parse(salvo) : [];
+      return Array.isArray(parseado) ? parseado : [];
+    } catch (e) { return []; }
+  });
+
+  const [modalNotificacoesAberto, setModalNotificacoesAberto] = useState(false);
+  const [modalConfigNotifAberto, setModalConfigNotifAberto] = useState(false);
+  const [configNotif, setConfigNotif] = useState({ precos: true, edicao: true, promocoes: true, novidades: true });
+  
   const [modalConfiguracoesAberto, setModalConfiguracoesAberto] = useState(false);
   const [modalSenhaAberto, setModalSenhaAberto] = useState(false);
   const [dadosSenha, setDadosSenha] = useState({ antiga: '', nova: '', confirma: '' });
+  const [mostrarSenha, setMostrarSenha] = useState(false);
+  const [erroSenha, setErroSenha] = useState('');
+  const [carregandoSenha, setCarregandoSenha] = useState(false);
 
-  const carregarDados = useCallback(async () => {
+  const produtosCarregadosRef = useRef(false);
+  const dataUltimoCarregamento = useRef(0);
+  const enviandoRef = useRef(false);
+
+  useEffect(() => {
+    document.body.style.backgroundColor = configDesign.cores.fundoGeral;
+    document.documentElement.style.backgroundColor = configDesign.cores.fundoGeral;
+    
+    const handleInstall = (e) => { e.preventDefault(); setDeferredPrompt(e); };
+    window.addEventListener('beforeinstallprompt', handleInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleInstall);
+  }, [configDesign.cores.fundoGeral]);
+
+  useEffect(() => {
+    if (usuario?.senha === '123456' || usuario?.senha === codLoja?.toString()) {
+      const timer = setTimeout(() => {
+        alert("⚠️ Aviso de Segurança: Detectamos que você está usando uma senha padrão. Por favor, clique na engrenagem no topo da tela e altere sua senha para proteger sua conta.");
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [usuario?.senha, codLoja]);
+
+  const instalarApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') setDeferredPrompt(null);
+  };
+
+  useEffect(() => { localStorage.setItem('carrinho_virtus', JSON.stringify(carrinho)); }, [carrinho]);
+  useEffect(() => { localStorage.setItem('historico_notif_virtus', JSON.stringify(historicoNotificacoes)); }, [historicoNotificacoes]);
+
+  useEffect(() => {
+    if ("Notification" in window) setPermissaoPush(Notification.permission);
+  }, []);
+
+  const removerAcentos = (str) => {
+    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  };
+
+  const lidarComCliqueNotificacao = useCallback((msg) => {
+    if (!produtos.length) return;
+    let termoBusca = null;
+    const matchAspas = msg.match(/"([^"]+)"/);
+    if (matchAspas) termoBusca = matchAspas[1];
+    else {
+      const matchPalavra = msg.match(/PROMOÇÃO:\s*(.*?)\s*por/i) || msg.match(/Chegou\s*(.*?)!/i) || msg.match(/item\s*(.*?)\s*subiu/i);
+      if (matchPalavra) termoBusca = matchPalavra[1];
+    }
+    if (termoBusca) {
+      const prod = produtos.find(p => removerAcentos(p.nome.toLowerCase()).includes(removerAcentos(termoBusca.toLowerCase().trim())));
+      if (prod) {
+        setModalNotificacoesAberto(false);
+        abrirProduto(prod);
+      }
+    }
+  }, [produtos, carrinho]);
+
+  const mostrarNotificacao = (mensagem, tipo = 'info', tituloPush = 'Frazão Frutas & CIA') => {
+    const id = Date.now() + Math.random();
+    setNotificacoes(prev => [...prev, { id, mensagem, tipo }]);
+    setHistoricoNotificacoes(prev => [{ id, mensagem, tipo, data: new Date().toLocaleTimeString(), lida: false }, ...prev].slice(0, 20));
+    setTimeout(() => { setNotificacoes(prev => prev.filter(n => n.id !== id)); }, 5000);
+    
+    if ("Notification" in window && Notification.permission === "granted") {
+      try {
+        const n = new Notification(tituloPush, { body: mensagem, icon: banners.logo });
+        n.onclick = (e) => { e.preventDefault(); window.focus(); lidarComCliqueNotificacao(mensagem); n.close(); };
+      } catch (e) {}
+    }
+  };
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentY = window.scrollY;
+      if (currentY > ultimoScroll.current && currentY > 150) setNavState({ show: false, shrink: true }); 
+      else if (currentY < ultimoScroll.current) setNavState({ show: true, shrink: currentY > 60 }); 
+      ultimoScroll.current = currentY;
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const tratarPreco = (p) => parseFloat(String(p || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
+  
+  const formatarMoeda = (v) => {
+    const num = Number(v);
+    return (isNaN(num) ? 0 : num).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
+  
+  const tratarInfosDeVenda = (produto) => {
+    const precoKg = tratarPreco(produto.preco);
+    const pesoCx = parseFloat(String(produto.peso_caixa || '').replace(/[^\d.]/g, ''));
+    
+    if (produto.unidade_medida === 'KG' && pesoCx > 0) {
+      const precoCaixa = precoKg * pesoCx;
+      return { 
+        isCaixa: true, 
+        precoBase: precoCaixa, 
+        textoPreco: `${formatarMoeda(precoCaixa)} / CX`, 
+        textoSecundario: `(Cx c/ ${pesoCx}kg - ${formatarMoeda(precoKg)} o Kg)`,
+        unidadeFinal: 'CX'
+      };
+    }
+    
+    return { 
+      isCaixa: false, 
+      precoBase: precoKg, 
+      textoPreco: `${produto.preco} / ${produto.unidade_medida}`, 
+      textoSecundario: '',
+      unidadeFinal: produto.unidade_medida
+    };
+  };
+
+  const formatarQtdUnidade = (qtd, und) => {
+    const u = String(und || 'UN').toUpperCase();
+    const q = Number(qtd);
+    const qFinal = isNaN(q) ? 1 : q;
+    if (qFinal <= 1 || ['UN', 'KG'].includes(u)) return `${qFinal} ${u}`;
+    if (u === 'MAÇO') return `${qFinal} MAÇOS`;
+    if (u === 'SACO') return `${qFinal} SACOS`;
+    return `${qFinal} ${u}S`;
+  };
+
+  const carregarDados = useCallback(async (silencioso = false) => {
+    if (enviandoRef.current) return;
+
+    const agora = Date.now();
+    if (agora - dataUltimoCarregamento.current < 2000) return;
+    if (silencioso && agora - dataUltimoCarregamento.current < 8000) return;
+    
+    dataUltimoCarregamento.current = agora;
+
     try {
       const { data: configData } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
       if (configData) setPrecosLiberados(configData.precos_liberados);
 
-      const { data: pData } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
-      if (pData) setProdutos(pData);
+      if (!produtosCarregadosRef.current) {
+        const { data: dbBanners } = await supabase.from('banners').select('*');
+        if (dbBanners) {
+          const bMap = {};
+          dbBanners.forEach(b => bMap[b.posicao] = b.imagem_url);
+          setBanners({ topo: bMap.topo || '', logo: bMap.logo || '', tematico: bMap.tematico || '' });
+        }
+        
+        const { data: pData } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
+        if (pData) {
+          setProdutos(pData);
+          produtosCarregadosRef.current = true;
+        }
+      }
 
       if (codLoja) {
-        const { data: pedidoExistente } = await supabase.from('pedidos').select('*').eq('data_pedido', hoje).eq('loja_id', codLoja);
-        setListaEnviadaHoje(pedidoExistente?.length > 0 ? pedidoExistente : null);
+        const { data: pedidoExistente, error: errPed } = await supabase.from('pedidos').select('*').eq('data_pedido', hoje).eq('loja_id', codLoja);
+        if (!errPed) {
+          setListaEnviadaHoje(pedidoExistente?.length > 0 ? pedidoExistente : null);
+        }
       }
-    } catch (e) { console.error(e); }
-  }, [codLoja, hoje]);
+    } catch (e) { console.error("Erro VIRTUS:", e); }
+  }, [codLoja, hoje]); 
 
   useEffect(() => { carregarDados(); }, [carregarDados]);
+  useEffect(() => {
+    const radar = setInterval(() => carregarDados(true), 20000);
+    return () => clearInterval(radar);
+  }, [carregarDados]);
 
-  const tratarPreco = (p) => parseFloat(String(p || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
-  const formatarMoeda = (v) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const carrinhoSeguro = carrinho.filter(i => i && typeof i === 'object' && i.id && i.nome);
+  const valorTotalCarrinho = carrinhoSeguro.reduce((acc, item) => acc + (Number(item.total) || 0), 0);
+  const edicaoLiberadaBD = listaEnviadaHoje?.some(item => item.liberado_edicao === true);
+  const isAppTravado = !precosLiberados || (listaEnviadaHoje && !edicaoLiberadaBD);
 
-  const tratarInfosDeVenda = (produto) => {
-    const precoKg = tratarPreco(produto.preco);
-    const pesoCx = parseFloat(String(produto.peso_caixa || '').replace(/[^\d.]/g, ''));
-    if (produto.unidade_medida === 'KG' && pesoCx > 0) {
-      const precoCaixa = precoKg * pesoCx;
-      return { isCaixa: true, precoBase: precoCaixa, textoPreco: `${formatarMoeda(precoCaixa)} / CX`, unidadeFinal: 'CX' };
-    }
-    return { isCaixa: false, precoBase: precoKg, textoPreco: `${produto.preco} / ${produto.unidade_medida}`, unidadeFinal: produto.unidade_medida };
+  const abrirProduto = (p) => {
+    setProdutoExpandido(p);
+    const itemExistente = carrinhoSeguro.find(i => i.id === p.id);
+    setQuantidade(itemExistente?.quantidade || 1);
+    setQtdBonificada(itemExistente?.qtd_bonificada || 0);
+    setTemBonificacao(!!itemExistente?.qtd_bonificada && itemExistente.qtd_bonificada > 0);
+  };
+  
+  const tratarInputQuantidade = (valorDigitado) => {
+    const val = parseInt(valorDigitado, 10);
+    setQuantidade(isNaN(val) || val < 1 ? '' : val);
   };
 
-  const formatarQtdUnidade = (qtd, und) => `${qtd} ${und}${qtd > 1 && und !== 'KG' ? 'S' : ''}`;
+  const tratarInputBonificacao = (valorDigitado) => {
+    const val = parseInt(valorDigitado, 10);
+    setQtdBonificada(isNaN(val) || val < 0 ? 0 : val);
+  };
 
-  // 💡 LÓGICA DE REVISÃO: Filtra itens padrão APENAS da loja do cliente
+  const salvarNoCarrinho = () => {
+    const qtdFinal = parseInt(quantidade, 10) || 1;
+    const bonifFinal = temBonificacao ? (parseInt(qtdBonificada, 10) || 0) : 0;
+    
+    // 💡 Blinda para não deixar a bonificação ser maior que a quantidade total pedida
+    const bonificacaoSegura = Math.min(qtdFinal, bonifFinal);
+    const qtdCobrada = Math.max(0, qtdFinal - bonificacaoSegura);
+
+    const infosVenda = tratarInfosDeVenda(produtoExpandido);
+    
+    if (produtoExpandido.status_cotacao === 'falta') {
+      if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está marcado como EM FALTA. Deseja adicionar ao pedido mesmo assim?`)) return;
+    } else if (produtoExpandido.status_cotacao === 'sem_preco' || infosVenda.precoBase === 0) {
+      if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está SEM PREÇO definido hoje. O valor final será atualizado posteriormente. Deseja confirmar?`)) return;
+    }
+    
+    const valorTotalItem = infosVenda.precoBase * qtdCobrada;
+    const itemEx = carrinhoSeguro.find(i => i.id === produtoExpandido.id);
+    
+    const novoItemFormatado = {
+        ...produtoExpandido, 
+        quantidade: qtdFinal, 
+        qtd_bonificada: bonificacaoSegura, 
+        valorUnit: infosVenda.precoBase, 
+        total: valorTotalItem, 
+        unidade_medida: infosVenda.unidadeFinal
+    };
+
+    if (itemEx) {
+      setCarrinho(carrinhoSeguro.map(i => i.id === produtoExpandido.id ? novoItemFormatado : i));
+    } else {
+      setCarrinho([...carrinhoSeguro, novoItemFormatado]);
+    }
+    setProdutoExpandido(null);
+  };
+
+  const alterarQtdCart = (id, delta) => {
+    setCarrinho(prev => prev.map(item => {
+      if (item.id === id) {
+        const novaQtd = Math.max(1, (Number(item.quantidade) || 0) + delta);
+        const bonif = Number(item.qtd_bonificada) || 0;
+        const cobrada = Math.max(0, novaQtd - bonif);
+        return { ...item, quantidade: novaQtd, total: cobrada * (Number(item.valorUnit) || 0) };
+      }
+      return item;
+    }));
+  };
+
+  const alterarQtdCartInput = (id, valor) => {
+    const novaQtd = parseInt(valor, 10) || 1;
+    setCarrinho(prev => prev.map(item => {
+        if (item.id === id) {
+            const bonif = Number(item.qtd_bonificada) || 0;
+            const cobrada = Math.max(0, novaQtd - bonif);
+            return { ...item, quantidade: novaQtd, total: cobrada * (Number(item.valorUnit) || 0) };
+        }
+        return item;
+    }));
+  };
+
+  const zerarCarrinho = () => {
+    if (window.confirm("⚠️ Tem certeza que deseja apagar todos os itens do carrinho?")) {
+      setCarrinho([]);
+      setModalCarrinhoAberto(false);
+    }
+  };
+
   const abrirRevisao = () => {
-    if(carrinho.length === 0) return;
+    if(carrinhoSeguro.length === 0) return;
 
-    const itensPadraoDaMinhaLoja = produtos.filter(p => 
-      Array.isArray(p.lista_padrao) && 
-      p.lista_padrao.map(Number).includes(codLoja) && 
-      p.status_cotacao !== 'falta'
-    );
+    const itensPadrao = produtos.filter(p => p.lista_padrao === true && p.status_cotacao !== 'falta' && p.status_cotacao !== 'sem_preco');
+    const itensFaltando = itensPadrao.filter(pPadrao => !carrinhoSeguro.some(c => c.id === pPadrao.id));
 
-    const itensEsquecidos = itensPadraoDaMinhaLoja.filter(p => !carrinho.some(c => c.id === p.id));
-
-    if (itensEsquecidos.length > 0) {
-      const listaNomes = itensEsquecidos.map(i => `- ${i.nome}`).join('\n');
-      const confirma = window.confirm(`⚠️ AVISO DE LISTA PADRÃO\n\nSua loja costuma pedir estes itens e eles não estão no carrinho:\n\n${listaNomes}\n\nDeseja revisar antes de enviar?`);
-      if (confirma) {
+    if (itensFaltando.length > 0) {
+      const listaNomes = itensFaltando.map(i => `- ${i.nome}`).join('\n');
+      const confirma = window.confirm(`⚠️ AVISO DE LISTA PADRÃO\n\nVocê esqueceu de adicionar os seguintes itens da sua lista padrão:\n\n${listaNomes}\n\nDeseja revisar o pedido antes de enviar? (Clique em Cancelar para revisar, ou OK para ignorar e enviar mesmo assim)`);
+      
+      if (!confirma) {
         setCategoriaAtiva('⭐ LISTA PADRÃO');
         setModalCarrinhoAberto(false);
         return;
       }
     }
+
     setModalRevisaoAberto(true);
   };
 
-  const salvarNoCarrinho = () => {
-    const infos = tratarInfosDeVenda(produtoExpandido);
-    const itemFormatado = {
-        ...produtoExpandido, 
-        quantidade: quantidade, 
-        qtd_bonificada: temBonificacao ? qtdBonificada : 0, 
-        valorUnit: infos.precoBase, 
-        total: infos.precoBase * (quantidade - (temBonificacao ? qtdBonificada : 0)), 
-        unidade_medida: infos.unidadeFinal
-    };
-    const existe = carrinho.find(i => i.id === produtoExpandido.id);
-    setCarrinho(existe ? carrinho.map(i => i.id === produtoExpandido.id ? itemFormatado : i) : [...carrinho, itemFormatado]);
-    setProdutoExpandido(null);
-  };
-
   const confirmarEnvio = async () => {
+    if (!codLoja) return alert("🚨 ERRO: Seu usuário não tem uma Loja vinculada.");
+
     setEnviandoPedido(true);
+    enviandoRef.current = true; 
+    
     try {
-      const dadosEnvio = carrinho.map(item => ({
+      const dadosParaEnviar = carrinhoSeguro.map(item => ({
         loja_id: codLoja, 
-        nome_usuario: usuario?.nome, 
+        nome_usuario: usuario?.nome || "Operador", 
         nome_produto: item.nome, 
-        quantidade: item.quantidade,
+        quantidade: item.quantidade || 1,
         qtd_bonificada: item.qtd_bonificada || 0,
-        unidade_medida: item.unidade_medida, 
+        unidade_medida: item.unidade_medida || 'UN', 
         data_pedido: hoje, 
+        solicitou_refazer: false, 
+        liberado_edicao: false, 
         status_compra: 'pendente' 
       }));
+
       await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
-      await supabase.from('pedidos').insert(dadosEnvio);
-      setListaEnviadaHoje(dadosEnvio);
-      setCarrinho([]);
-      setModalRevisaoAberto(false);
-      setModalCarrinhoAberto(false);
-    } catch (e) { alert(e.message); } finally { setEnviandoPedido(false); }
+      const { error } = await supabase.from('pedidos').insert(dadosParaEnviar);
+      if (error) throw error;
+
+      setListaEnviadaHoje(dadosParaEnviar); 
+      setCarrinho([]); 
+      localStorage.removeItem('carrinho_virtus');
+      setModalRevisaoAberto(false); 
+      setModalCarrinhoAberto(false); 
+      setModoVisualizacao(false);
+      window.scrollTo(0,0);
+      mostrarNotificacao("🚀 LISTA ENVIADA COM SUCESSO!", 'sucesso');
+      
+      enviandoRef.current = false;
+    } catch (err) { 
+      if (err.message?.includes('LockManager')) {
+        alert("O sistema está atualizando, tente clicar de novo.");
+      } else {
+        alert("Erro ao gravar: " + err.message); 
+      }
+      enviandoRef.current = false;
+    } finally { 
+      setEnviandoPedido(false); 
+    }
   };
 
-  const carrinhoSeguro = Array.isArray(carrinho) ? carrinho : [];
-  const valorTotalCarrinho = carrinhoSeguro.reduce((acc, item) => acc + (Number(item.total) || 0), 0);
-  const isAppTravado = !precosLiberados || (listaEnviadaHoje && !listaEnviadaHoje.some(i => i.liberado_edicao));
+  const pedirParaEditar = async () => {
+    if(!window.confirm("Pedir ao administrador para liberar a edição da lista?")) return;
+    try {
+        await supabase.from('pedidos').update({ solicitou_refazer: true }).eq('data_pedido', hoje).eq('loja_id', codLoja);
+        setListaEnviadaHoje(prev => prev.map(item => ({...item, solicitou_refazer: true})));
+        mostrarNotificacao("✅ Solicitação enviada! Aguardando aprovação.", 'sucesso');
+    } catch (err) { alert("Erro ao solicitar: " + err.message); }
+  };
+
+  const importarParaCarrinho = async () => {
+    if(!window.confirm("Isso vai voltar os itens para o carrinho para você ajustar. Continuar?")) return;
+    try {
+      await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
+      const itensRestaurados = listaEnviadaHoje.map(dbItem => {
+        const prodOriginal = produtos.find(p => p.nome === dbItem.nome_produto);
+        if (prodOriginal) {
+          const infosVenda = tratarInfosDeVenda(prodOriginal);
+          const bonif = Number(dbItem.qtd_bonificada) || 0;
+          const qtdCobr = Math.max(0, dbItem.quantidade - bonif);
+          return { ...prodOriginal, quantidade: dbItem.quantidade, qtd_bonificada: bonif, valorUnit: infosVenda.precoBase, total: infosVenda.precoBase * qtdCobr, unidade_medida: infosVenda.unidadeFinal };
+        }
+        return { id: Math.random(), nome: dbItem.nome_produto, quantidade: dbItem.quantidade, qtd_bonificada: dbItem.qtd_bonificada || 0, valorUnit: 0, total: 0, unidade_medida: dbItem.unidade_medida };
+      });
+      setCarrinho(itensRestaurados);
+      setListaEnviadaHoje(null);
+      setModoVisualizacao(false);
+      mostrarNotificacao("🛒 Itens de volta no carrinho!", 'info');
+    } catch (err) { alert("Erro ao importar: " + err.message); }
+  };
+
+  const salvarNovaSenha = async () => {
+    if(!dadosSenha.antiga || !dadosSenha.nova || !dadosSenha.confirma) return setErroSenha("Preencha todos os campos.");
+    if(dadosSenha.nova !== dadosSenha.confirma) return setErroSenha("A nova senha não confere.");
+    if(dadosSenha.nova.length < 6) return setErroSenha("A nova senha deve ter no mínimo 6 caracteres.");
+    
+    setCarregandoSenha(true); setErroSenha('');
+    try {
+      const { data: u, error: errU } = await supabase.from('usuarios').select('*').eq('nome', usuario.nome).single();
+      if(errU || !u) throw new Error("Usuário não encontrado.");
+      if(u.senha !== dadosSenha.antiga) throw new Error("A senha antiga está incorreta.");
+      
+      const { error } = await supabase.from('usuarios').update({ senha: dadosSenha.nova }).eq('id', u.id);
+      if(error) throw error;
+      
+      mostrarNotificacao("🔒 Senha alterada com sucesso!", 'sucesso');
+      setModalSenhaAberto(false);
+      setDadosSenha({ antiga: '', nova: '', confirma: '' });
+    } catch (err) { setErroSenha(err.message); } finally { setCarregandoSenha(false); }
+  };
+
+  if (listaEnviadaHoje && !modoVisualizacao) {
+    const aguardandoLiberacao = listaEnviadaHoje.some(item => item.solicitou_refazer === true);
+    const edicaoLiberada = listaEnviadaHoje.some(item => item.liberado_edicao === true);
+
+    return (
+      <div style={{ padding: '20px', fontFamily: configDesign.geral.fontePadrao, textAlign: 'center', backgroundColor: configDesign.cores.fundoGeral, minHeight: '100vh', paddingBottom: '50px' }}>
+        <div style={{ background: edicaoLiberada ? configDesign.cores.sucesso : (aguardandoLiberacao ? configDesign.cores.promocao : configDesign.cores.textoForte), color: isEscuro && !edicaoLiberada && !aguardandoLiberacao ? '#000' : '#fff', padding: '40px 30px', borderRadius: '30px', marginTop: '20px' }}>
+          <div style={{fontSize: '50px', marginBottom: '10px'}}>{edicaoLiberada ? '🔓' : (aguardandoLiberacao ? '⏳' : '✅')}</div>
+          <h2 style={{ margin: 0 }}>{edicaoLiberada ? 'EDIÇÃO LIBERADA' : (aguardandoLiberacao ? 'AGUARDANDO ADMIN' : 'PEDIDO ENVIADO!')}</h2>
+        </div>
+        <div style={{ textAlign: 'left', marginTop: '25px', background: configDesign.cores.fundoCards, padding: '20px', borderRadius: '20px', border: `1px solid ${configDesign.cores.borda}`, maxHeight: '40vh', overflowY: 'auto' }}>
+          <h3 style={{ fontSize: '14px', color: configDesign.cores.textoSuave, marginBottom: '15px', marginTop: 0 }}>RESUMO DO PEDIDO:</h3>
+          {listaEnviadaHoje.map((item, i) => (
+            <div key={`resumo-${i}`} style={{ padding: '12px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{color: configDesign.cores.textoForte}}><b>{item.quantidade}x</b> {item.nome_produto} {item.qtd_bonificada > 0 && <span style={{color: configDesign.cores.sucesso, fontSize: '10px'}}>(🎁 {item.qtd_bonificada})</span>}</span><small style={{ color: configDesign.cores.textoSuave }}>{item.unidade_medida}</small>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <button onClick={() => carregarDados(false)} style={{ background: configDesign.cores.inputFundo, border: `1px solid ${configDesign.cores.borda}`, padding: '18px', borderRadius: '15px', color: configDesign.cores.textoForte, fontWeight: 'bold' }}>🔄 ATUALIZAR STATUS AGORA</button>
+          {edicaoLiberada ? (
+            <button onClick={importarParaCarrinho} style={{ background: configDesign.cores.sucesso, border: 'none', padding: '18px', borderRadius: '15px', color: '#fff', fontWeight: '900' }}>📥 PUXAR PARA O CARRINHO E EDITAR</button>
+          ) : (
+            <button onClick={aguardandoLiberacao ? null : pedirParaEditar} style={{ background: configDesign.cores.fundoCards, border: `2px solid ${aguardandoLiberacao ? configDesign.cores.borda : configDesign.cores.textoForte}`, padding: '18px', borderRadius: '15px', color: aguardandoLiberacao ? configDesign.cores.textoSuave : configDesign.cores.textoForte, fontWeight: 'bold' }}>
+              {aguardandoLiberacao ? '⏳ SOLICITAÇÃO PENDENTE...' : '✏️ SOLICITAR EDIÇÃO DE LISTA'}
+            </button>
+          )}
+          <button onClick={() => setModoVisualizacao(true)} style={{ background: 'transparent', border: 'none', padding: '20px', color: configDesign.cores.textoSuave, fontWeight: '900', textDecoration: 'underline' }}>VOLTAR AO INÍCIO (APENAS VISUALIZAR)</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ width: '100%', minHeight: '100vh', backgroundColor: configDesign.cores.fundoGeral, fontFamily: configDesign.geral.fontePadrao, paddingBottom: '100px' }}>
       
-      {/* HEADER CLIENTE */}
+      {/* HEADER */}
       <div style={{ padding: '25px 20px 15px 20px', backgroundColor: configDesign.cores.fundoCards, borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: '20px', color: configDesign.cores.textoForte, fontWeight: '900' }}>Olá, {primeiroNome}!</h2>
-          <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: configDesign.cores.primaria, fontWeight: '900' }}>📍 {nomeLojaLimpo}</p>
+          <h2 style={{ margin: 0, fontSize: '22px', color: configDesign.cores.textoForte, fontWeight: '900' }}>{saudacaoStr}, {primeiroNome}!</h2>
+          <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: configDesign.cores.primaria, fontWeight: '900', textTransform: 'uppercase' }}>📍 {nomeLojaLimpo}</p>
         </div>
-        <button onClick={() => setModalConfiguracoesAberto(true)} style={{ background: configDesign.cores.inputFundo, border: 'none', width: '40px', height: '40px', borderRadius: '12px' }}>⚙️</button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={() => setModalConfiguracoesAberto(true)} style={{ background: configDesign.cores.inputFundo, border: 'none', width: '40px', height: '40px', borderRadius: '12px', fontSize: '20px' }}>⚙️</button>
+          <button onClick={() => setModalNotificacoesAberto(true)} style={{ background: configDesign.cores.inputFundo, border: 'none', width: '40px', height: '40px', borderRadius: '12px', position: 'relative' }}>
+            <span style={{ fontSize: '20px' }}>🔔</span>
+            {historicoNotificacoes.some(n => !n.lida) && <span style={{ position: 'absolute', top: 0, right: 0, width: '10px', height: '10px', background: configDesign.cores.alerta, borderRadius: '50%', border: '2px solid #fff' }}></span>}
+          </button>
+        </div>
       </div>
 
+      {/* BANNERS */}
+      {categoriaAtiva === 'DESTAQUES' && (
+        <div style={{ backgroundColor: configDesign.cores.fundoGeral }}>
+          <div style={{ width: '100%', height: '180px', backgroundImage: `url(${banners.topo})`, backgroundSize: 'cover', backgroundPosition: 'center' }}></div>
+          <div style={{ padding: '0 20px', display: 'flex', justifyContent: 'flex-start', marginTop: '-40px' }}>
+            <div style={{ width: '80px', height: '80px', borderRadius: '50%', border: `4px solid ${configDesign.cores.fundoGeral}`, backgroundImage: `url(${banners.logo})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', backgroundColor: '#fff' }}></div>
+          </div>
+          <div style={{ width: '100%', height: '140px', marginTop: '20px', backgroundImage: `url(${banners.tematico})`, backgroundSize: 'cover', backgroundPosition: 'center' }}></div>
+        </div>
+      )}
+
       {/* MENU CATEGORIAS */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 100, backgroundColor: configDesign.cores.fundoCards, padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}` }}>
+      <div style={{ position: categoriaAtiva === 'DESTAQUES' ? 'relative' : 'fixed', top: categoriaAtiva === 'DESTAQUES' ? '0' : (navState.show ? '0' : '-100px'), left: 0, right: 0, zIndex: 100, backgroundColor: categoriaAtiva === 'DESTAQUES' ? configDesign.cores.fundoGeral : configDesign.cores.fundoCards, borderBottom: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? `1px solid ${configDesign.cores.borda}` : 'none', transition: configDesign.animacoes.transicaoSuave, paddingTop: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? '10px' : '20px', marginTop: categoriaAtiva === 'DESTAQUES' ? '15px' : '0' }}>
+        <div style={{ padding: '0 20px 10px 20px' }}>
+          <div style={{ backgroundColor: configDesign.cores.inputFundo, borderRadius: '12px', padding: (categoriaAtiva !== 'DESTAQUES' && navState.shrink) ? '8px 12px' : '12px', display: 'flex', gap: '10px' }}>
+            <span>🔍</span><input placeholder="Procurar produto..." value={buscaMenu} onChange={e => setBuscaMenu(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', color: configDesign.cores.textoForte }} />
+          </div>
+        </div>
         <div style={{ display: 'flex', overflowX: 'auto', gap: '20px', padding: '0 20px', scrollbarWidth: 'none' }}>
           {categoriasDinamicas.map(cat => (
-            <button key={cat} onClick={() => setCategoriaAtiva(cat)} style={{ paddingBottom: '5px', whiteSpace: 'nowrap', fontWeight: '900', background: 'none', border: 'none', color: categoriaAtiva === cat ? configDesign.cores.primaria : configDesign.cores.textoSuave, borderBottom: categoriaAtiva === cat ? `3px solid ${configDesign.cores.primaria}` : 'none', cursor: 'pointer', fontSize: '13px' }}>{cat}</button>
+            <button key={cat} onClick={() => { setCategoriaAtiva(cat); window.scrollTo({top:0, behavior:'smooth'}); }} style={{ paddingBottom: '10px', whiteSpace: 'nowrap', fontWeight: '900', background: 'none', border: 'none', color: categoriaAtiva === cat ? configDesign.cores.primaria : configDesign.cores.textoSuave, borderBottom: categoriaAtiva === cat ? `3px solid ${configDesign.cores.primaria}` : 'none', cursor: 'pointer', fontSize: (categoriaAtiva !== 'DESTAQUES' && navState.shrink) ? '11px' : '13px' }}>{cat}</button>
           ))}
         </div>
       </div>
+      <div style={{ height: categoriaAtiva === 'DESTAQUES' ? '10px' : '110px' }}></div>
 
-      {/* LISTAGEM DE PRODUTOS FILTRADA */}
-      <div style={{ padding: '20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '15px' }}>
+      {/* PRODUTOS */}
+      <div style={{ padding: '0 20px 20px 20px', display: 'grid', gridTemplateColumns: categoriaAtiva === 'DESTAQUES' ? '1fr' : 'repeat(auto-fill, minmax(140px, 1fr))', gap: '15px' }}>
         {produtos.filter(p => {
-          const nomeP = p.nome.toLowerCase();
-          const buscaP = buscaMenu.toLowerCase();
+          const termoBuscado = removerAcentos(buscaMenu.toLowerCase().trim());
+          const nomeProduto = removerAcentos(p.nome.toLowerCase());
           
-          // 💡 Lógica de filtro da Categoria Estrela (Lista da Loja)
-          if (categoriaAtiva === '⭐ LISTA PADRÃO') {
-            const ehDaMinhaLoja = Array.isArray(p.lista_padrao) && p.lista_padrao.map(Number).includes(codLoja);
-            return ehDaMinhaLoja && nomeP.includes(buscaP);
+          if (termoBuscado) {
+            if (categoriaAtiva === '⭐ LISTA PADRÃO') {
+              return p.lista_padrao === true && nomeProduto.includes(termoBuscado);
+            }
+            return nomeProduto.includes(termoBuscado);
           }
+
+          if (categoriaAtiva === 'TODOS') return true;
+          if (categoriaAtiva === 'DESTAQUES') return p.promocao || p.novidade;
+          if (categoriaAtiva === '⭐ LISTA PADRÃO') return p.lista_padrao === true;
           
-          if (categoriaAtiva === 'DESTAQUES') return (p.promocao || p.novidade) && nomeP.includes(buscaP);
-          if (categoriaAtiva === 'TODOS') return nomeP.includes(buscaP);
-          
-          return p.categoria?.toUpperCase() === categoriaAtiva.replace(/[\u1000-\uFFFF]+/g, '').trim().toUpperCase() && nomeP.includes(buscaP);
+          return p.categoria && p.categoria.toUpperCase() === categoriaAtiva.replace(/[\u1000-\uFFFF]+/g, '').trim().toUpperCase();
         }).map(p => {
           const itemNoCarrinho = carrinhoSeguro.find(i => i.id === p.id);
-          const infos = tratarInfosDeVenda(p);
+          const infosVenda = tratarInfosDeVenda(p);
           
-          // 💡 Verifica se o item é padrão para ESTA loja para mostrar a estrela
-          const ehPadraoParaMim = Array.isArray(p.lista_padrao) && p.lista_padrao.map(Number).includes(codLoja);
+          let corBorda = configDesign.cores.fundoCards;
+          let selo = null;
+          let opacidade = 1;
+
+          if (p.status_cotacao === 'falta') {
+            corBorda = configDesign.cores.alerta;
+            selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>EM FALTA</div>;
+            opacidade = 0.6;
+          } else if (p.status_cotacao === 'sem_preco') {
+            corBorda = configDesign.cores.promocao;
+            selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>SEM PREÇO HOJE</div>;
+          } else if (p.promocao) { 
+            corBorda = configDesign.cores.promocao; 
+            selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>PROMOÇÃO</div>; 
+          } else if (p.novidade) { 
+            corBorda = configDesign.cores.novidade; 
+            selo = <div style={{position: 'absolute', top: '-10px', right: '10px', background: corBorda, color: '#fff', fontSize: '9px', fontWeight: '900', padding: '3px 8px', borderRadius: '6px', zIndex: 2 }}>NOVIDADE</div>; 
+          } else if (itemNoCarrinho) {
+            corBorda = configDesign.cores.primaria;
+          }
 
           return (
-            <div key={p.id} onClick={() => abrirProduto(p)} style={{ borderRadius: configDesign.cards.raioBorda, padding: '12px', cursor: 'pointer', backgroundColor: configDesign.cores.fundoCards, boxShadow: configDesign.cards.sombra, display: 'flex', flexDirection: 'column', gap: '8px', border: itemNoCarrinho ? `2px solid ${configDesign.cores.primaria}` : `1px solid ${configDesign.cores.borda}` }}>
-               <div style={{ height: '100px', borderRadius: '8px', backgroundImage: `url(${(p.foto_url || '').split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: configDesign.cores.inputFundo }} />
-               <strong style={{ fontSize: '12px', color: configDesign.cores.textoForte, height: '30px', overflow: 'hidden' }}>
-                 {p.nome} {ehPadraoParaMim && '⭐'}
-               </strong>
-               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
-                 <span style={{ color: configDesign.cores.primaria, fontWeight: '900', fontSize: '14px' }}>{infos.textoPreco}</span>
-                 {itemNoCarrinho && <span style={{ background: configDesign.cores.primaria, color: '#fff', fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>{itemNoCarrinho.quantidade}</span>}
+            <div key={p.id} onClick={() => abrirProduto(p)} style={{ border: `2px solid ${corBorda}`, borderRadius: configDesign.cards.raioBorda, padding: '10px', cursor: 'pointer', position: 'relative', backgroundColor: configDesign.cores.fundoCards, boxShadow: configDesign.cards.sombra, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: selo ? '10px' : '0', opacity: opacidade }}>
+               {selo}
+               {itemNoCarrinho && !selo && <div style={{position: 'absolute', top: '-8px', right: '-8px', background: configDesign.cores.primaria, color: '#fff', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: '900', fontSize: '11px', border: `2px solid ${configDesign.cores.fundoCards}`, zIndex: 2}}>{itemNoCarrinho.quantidade}</div>}
+               <div style={{ height: categoriaAtiva === 'DESTAQUES' ? configDesign.cards.alturaImgDestaque : configDesign.cards.alturaImgPequena, borderRadius: '8px', backgroundImage: `url(${(p.foto_url || '').split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: configDesign.cores.inputFundo }} />
+               <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                 <strong style={{ fontSize: categoriaAtiva === 'DESTAQUES' ? '14px' : '11px', color: configDesign.cores.textoForte, lineHeight: '1.2', height: categoriaAtiva === 'DESTAQUES' ? 'auto' : '26px', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                   {p.nome} {p.lista_padrao && '⭐'}
+                 </strong>
+                 {infosVenda.isCaixa && <small style={{fontSize: '9px', color: configDesign.cores.textoSuave, marginTop: '2px'}}>{infosVenda.textoSecundario}</small>}
+                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto', paddingTop: '5px' }}>
+                   <span style={{ color: configDesign.cores.primaria, fontWeight: '900', fontSize: categoriaAtiva === 'DESTAQUES' ? '18px' : '13px' }}>{infosVenda.textoPreco}</span>
+                   <span style={{ fontSize: '10px', color: configDesign.cores.textoSuave, fontWeight: 'bold', background: configDesign.cores.inputFundo, padding: '2px 6px', borderRadius: '4px' }}>{itemNoCarrinho ? formatarQtdUnidade(itemNoCarrinho.quantidade, infosVenda.unidadeFinal) : infosVenda.unidadeFinal}</span>
+                 </div>
                </div>
             </div>
           );
         })}
       </div>
 
-      {/* BOTÃO FLUTUANTE CARRINHO */}
       {carrinhoSeguro.length > 0 && !isAppTravado && (
-        <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '30px', right: '30px', width: '60px', height: '60px', borderRadius: '50%', backgroundColor: configDesign.cores.textoForte, color: '#fff', border: 'none', boxShadow: '0 5px 15px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500 }}>
-          🛒 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.primaria, fontSize: '12px', width: '20px', height: '20px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>{carrinhoSeguro.length}</span>
+        <button onClick={() => setModalCarrinhoAberto(true)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer' }}>
+          🛒 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.primaria, color: '#fff', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: `2px solid ${configDesign.cores.textoForte}`, fontWeight: 'bold' }}>{carrinhoSeguro.reduce((a,c)=>a+(Number(c?.quantidade)||0),0)}</span>
         </button>
       )}
 
-      {/* MODAL PRODUTO (RESUMIDO) */}
-      {produtoExpandido && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 1000, display: 'flex', alignItems: 'flex-end' }}>
-          <div style={{ backgroundColor: configDesign.cores.fundoCards, width: '100%', padding: '30px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px' }}>
-            <button onClick={() => setProdutoExpandido(null)} style={{ float: 'right', background: 'none', border: 'none', fontSize: '20px', color: configDesign.cores.textoForte }}>✕</button>
-            <h2 style={{ color: configDesign.cores.textoForte }}>{produtoExpandido.nome}</h2>
-            <p style={{ color: configDesign.cores.primaria, fontSize: '22px', fontWeight: '900' }}>{tratarInfosDeVenda(produtoExpandido).textoPreco}</p>
-            
-            <div style={{ display: 'flex', alignItems: 'center', gap: '20px', margin: '30px 0' }}>
-               <button onClick={() => setQuantidade(Math.max(1, quantidade - 1))} style={{ width: '50px', height: '50px', borderRadius: '15px', border: 'none', fontSize: '24px' }}>-</button>
-               <span style={{ fontSize: '24px', fontWeight: '900', color: configDesign.cores.textoForte }}>{quantidade}</span>
-               <button onClick={() => setQuantidade(quantidade + 1)} style={{ width: '50px', height: '50px', borderRadius: '15px', border: 'none', fontSize: '24px' }}>+</button>
-            </div>
+      {modoVisualizacao && listaEnviadaHoje && (
+        <button onClick={() => setModoVisualizacao(false)} style={{ position: 'fixed', bottom: '25px', right: '25px', width: '65px', height: '65px', borderRadius: '50%', backgroundColor: configDesign.cores.sucesso, color: '#fff', border: 'none', boxShadow: '0 8px 25px rgba(0,0,0,0.3)', fontSize: '24px', zIndex: 500, cursor: 'pointer', transition: configDesign.animacoes.transicaoSuave, transform: navState.show ? 'translateY(0)' : 'translateY(20px)' }}>
+          📝 <span style={{ position: 'absolute', top: 0, right: 0, background: configDesign.cores.textoForte, color: '#fff', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', border: `2px solid ${configDesign.cores.sucesso}`, fontWeight: 'bold' }}>✓</span>
+        </button>
+      )}
 
-            <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '20px', borderRadius: '15px', background: configDesign.cores.textoForte, color: '#fff', border: 'none', fontWeight: '900' }}>ADICIONAR AO PEDIDO</button>
+      {/* MODAL CONFIG GERAIS */}
+      {modalConfiguracoesAberto && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 6500, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+          <div style={{ background: configDesign.cores.fundoCards, width: '100%', maxWidth: '320px', borderRadius: '25px', padding: '25px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, color: configDesign.cores.textoForte }}>Configurações</h3>
+              <button onClick={() => setModalConfiguracoesAberto(false)} style={{ background: configDesign.cores.inputFundo, border: 'none', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>✕</button>
+            </div>
+            <button onClick={() => { setModalConfiguracoesAberto(false); setModalSenhaAberto(true); }} style={{ width: '100%', padding: '18px', background: configDesign.cores.fundoGeral, border: `1px solid ${configDesign.cores.borda}`, borderRadius: '15px', fontWeight: 'bold', color: configDesign.cores.textoForte, display: 'flex', alignItems: 'center', gap: '10px' }}>🔒 Alterar Minha Senha</button>
+            {deferredPrompt && <button onClick={instalarApp} style={{ width: '100%', padding: '18px', background: configDesign.cores.primaria, color: '#fff', border: 'none', borderRadius: '15px', fontWeight: 'bold', marginTop: '10px' }}>📲 Instalar App</button>}
           </div>
         </div>
       )}
 
-      {/* (Os outros modais de Carrinho e Revisão seguem a mesma lógica de renderização) */}
+      {/* MODAL TROCA DE SENHA */}
+      {modalSenhaAberto && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 7000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+          <div style={{ background: configDesign.cores.fundoCards, width: '100%', maxWidth: '350px', borderRadius: '25px', padding: '30px' }}>
+            <h3 style={{ marginTop: 0, textAlign: 'center', color: configDesign.cores.textoForte, marginBottom: '20px' }}>Alterar Senha</h3>
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Senha Antiga</label>
+              <input type={mostrarSenha ? "text" : "password"} value={dadosSenha.antiga} onChange={e => setDadosSenha({...dadosSenha, antiga: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
+            </div>
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Nova Senha</label>
+              <input type={mostrarSenha ? "text" : "password"} value={dadosSenha.nova} onChange={e => setDadosSenha({...dadosSenha, nova: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
+            </div>
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave, display: 'block', marginBottom: '5px' }}>Repetir Nova Senha</label>
+              <input type={mostrarSenha ? "text" : "password"} value={dadosSenha.confirma} onChange={e => setDadosSenha({...dadosSenha, confirma: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral, color: configDesign.cores.textoForte, outline: 'none' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+              <input type="checkbox" id="showPass" checked={mostrarSenha} onChange={() => setMostrarSenha(!mostrarSenha)} style={{ width: '18px', height: '18px', accentColor: configDesign.cores.primaria }} />
+              <label htmlFor="showPass" style={{ fontSize: '13px', color: configDesign.cores.textoForte }}>Mostrar senhas</label>
+            </div>
+            {erroSenha && <div style={{ color: configDesign.cores.alerta, fontSize: '12px', fontWeight: 'bold', textAlign: 'center', marginBottom: '15px', background: isEscuro ? '#450a0a' : '#fef2f2', padding: '10px', borderRadius: '8px' }}>{erroSenha}</div>}
+            <button onClick={salvarNovaSenha} disabled={carregandoSenha} style={{ width: '100%', padding: '18px', background: configDesign.cores.primaria, color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', cursor: 'pointer' }}>{carregandoSenha ? 'SALVANDO...' : 'CONFIRMAR ALTERAÇÃO'}</button>
+            <button onClick={() => { setModalSenhaAberto(false); setErroSenha(''); setDadosSenha({antiga:'', nova:'', confirma:''}); setMostrarSenha(false); }} style={{ width: '100%', marginTop: '10px', padding: '15px', background: 'transparent', color: configDesign.cores.textoSuave, border: 'none', fontWeight: 'bold' }}>Cancelar</button>
+          </div>
+        </div>
+      )}
 
+      {/* MODAL PRODUTO */}
+      {produtoExpandido && (() => {
+        const infos = tratarInfosDeVenda(produtoExpandido);
+        
+        // Matemáticas do modal em tempo real
+        const qtdFinal = parseInt(quantidade) || 1;
+        const bonifFinal = temBonificacao ? (parseInt(qtdBonificada) || 0) : 0;
+        const bonificacaoSegura = Math.min(qtdFinal, bonifFinal);
+        const qtdCobrada = Math.max(0, qtdFinal - bonificacaoSegura);
+        const valorTotalCalc = infos.precoBase * qtdCobrada;
+        const valorEconomia = infos.precoBase * bonificacaoSegura;
+
+        return (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
+            <button onClick={() => setProdutoExpandido(null)} style={{ alignSelf: 'flex-end', margin: '20px', color: '#fff', fontSize: '28px', background: 'none', border: 'none' }}>✕</button>
+            <div style={{ flex: 1, backgroundImage: `url(${(produtoExpandido.foto_url || '').split(',')[0]})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', margin: '20px' }} />
+            
+            <div style={{ backgroundColor: configDesign.cores.fundoCards, padding: '30px 20px', borderTopLeftRadius: '30px', borderTopRightRadius: '30px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <h2 style={{margin: 0, fontSize: '20px', color: configDesign.cores.textoForte, flex: 1}}>{produtoExpandido.nome}</h2>
+                  <span style={{ fontSize: '12px', background: configDesign.cores.inputFundo, padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>Vendido por {infos.unidadeFinal}</span>
+                </div>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário {infos.isCaixa && '(Caixa Fechada)'}</span>
+                    <span style={{color: configDesign.cores.primaria, fontSize: '20px', fontWeight: '900'}}>{infos.textoPreco}</span>
+                    {infos.isCaixa && <span style={{display: 'block', fontSize: '10px', color: configDesign.cores.textoSuave}}>{infos.textoSecundario}</span>}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Total a Pagar ({formatarQtdUnidade(qtdCobrada, infos.unidadeFinal)})</span>
+                    <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>{formatarMoeda(valorTotalCalc)}</span>
+                    {temBonificacao && bonificacaoSegura > 0 && (
+                       <span style={{color: configDesign.cores.sucesso, fontSize: '11px', fontWeight: 'bold', display: 'block'}}>
+                          Desconto: -{formatarMoeda(valorEconomia)}
+                       </span>
+                    )}
+                  </div>
+                </div>
+
+                {!isAppTravado ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', margin: '20px 0' }}>
+                    
+                    {/* CONTROLE DE QUANTIDADE NORMAL */}
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px' }}>
+                      <span style={{fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave}}>QTD. TOTAL:</span>
+                      <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '45px', height: '45px', fontSize: '20px', borderRadius: '12px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>-</button>
+                      <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '60px', height: '45px', fontSize: '20px', fontWeight: '900', textAlign: 'center', borderRadius: '12px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
+                      <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '45px', height: '45px', fontSize: '20px', borderRadius: '12px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>+</button>
+                    </div>
+
+                    {/* 💡 CAIXA DE BONIFICAÇÃO EXCLUSIVA DO CLIENTE */}
+                    <div style={{ backgroundColor: temBonificacao ? (isEscuro ? '#14532d' : '#dcfce7') : configDesign.cores.inputFundo, padding: '12px 15px', borderRadius: '12px', border: temBonificacao ? '1px solid #86efac' : `1px solid ${configDesign.cores.borda}`, transition: '0.2s' }}>
+                       <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: temBonificacao ? (isEscuro ? '#86efac' : '#166534') : configDesign.cores.textoForte, fontWeight: '900', fontSize: '13px', cursor: 'pointer' }}>
+                         <input type="checkbox" checked={temBonificacao} onChange={(e) => { setTemBonificacao(e.target.checked); if(!e.target.checked) setQtdBonificada(0); }} style={{ width: '20px', height: '20px', accentColor: configDesign.cores.sucesso }} />
+                         🎁 INCLUIR BONIFICAÇÃO (Opção Loja)
+                       </label>
+                       
+                       {temBonificacao && (
+                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', paddingTop: '10px', borderTop: isEscuro ? '1px dashed #22c55e' : '1px dashed #86efac' }}>
+                            <span style={{fontSize: '12px', fontWeight: 'bold', color: isEscuro ? '#86efac' : '#166534'}}>Qtd Bonificada:</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                               <button onClick={() => tratarInputBonificacao(Math.max(0, (parseInt(qtdBonificada) || 0) - 1))} style={{ width: '35px', height: '35px', fontSize: '18px', borderRadius: '8px', border: 'none', background: '#bbf7d0', color: '#166534' }}>-</button>
+                               <input type="number" value={qtdBonificada} onChange={(e) => tratarInputBonificacao(e.target.value)} style={{ width: '50px', height: '35px', fontSize: '16px', fontWeight: '900', textAlign: 'center', borderRadius: '8px', border: `1px solid #22c55e`, outline: 'none', color: '#166534', background: '#fff' }} />
+                               <button onClick={() => tratarInputBonificacao((parseInt(qtdBonificada) || 0) + 1)} style={{ width: '35px', height: '35px', fontSize: '18px', borderRadius: '8px', border: 'none', background: '#bbf7d0', color: '#166534' }}>+</button>
+                            </div>
+                         </div>
+                       )}
+                    </div>
+
+                    <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px' }}>
+                      {carrinhoSeguro.find(i => i.id === produtoExpandido.id) ? 'ATUALIZAR QUANTIDADE' : 'ADICIONAR AO CARRINHO'}
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: '25px' }}>
+                    <button disabled style={{ width: '100%', padding: '22px', background: isEscuro ? '#334155' : '#e2e8f0', color: isEscuro ? '#94a3b8' : '#94a3b8', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '13px' }}>
+                      🔒 {modoVisualizacao ? 'PEDIDO JÁ ENVIADO' : 'AGUARDANDO LIBERAÇÃO DE PREÇOS'}
+                    </button>
+                  </div>
+                )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL CARRINHO */}
+      {modalCarrinhoAberto && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100dvh', backgroundColor: configDesign.cores.fundoCards, zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ margin: 0, fontWeight: '900', color: configDesign.cores.textoForte }}>Meu Carrinho</h2>
+            <button onClick={() => { setModalCarrinhoAberto(false); setItemEditandoId(null); }} style={{ border: 'none', background: configDesign.cores.inputFundo, borderRadius: '50%', width: '40px', height: '40px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>✕</button>
+          </div>
+          
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+            {carrinhoSeguro.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '50px 20px', color: configDesign.cores.textoSuave, fontWeight: 'bold' }}>
+                Seu carrinho está vazio.
+              </div>
+            ) : (
+              carrinhoSeguro.map((item) => (
+                <div key={`cart-${item.id}`} style={{ padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  {itemEditandoId === item.id ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                       <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>-</button>
+                       <input type="number" value={item.quantidade || 1} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
+                       <button onClick={() => alterarQtdCart(item.id, 1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>+</button>
+                       <button onClick={() => setItemEditandoId(null)} style={{marginLeft: 'auto', background: configDesign.cores.sucesso, color: 'white', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold'}}>OK</button>
+                    </div>
+                  ) : (
+                    <div onClick={() => setItemEditandoId(item.id)} style={{ cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: '10px' }}>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria, fontSize: '15px'}}>{formatarQtdUnidade(item?.quantidade, item?.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
+                        <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item?.valorUnit)} / {item?.unidade_medida || 'UN'} • Toque para editar</div>
+                        {item?.qtd_bonificada > 0 && <div style={{ fontSize: '10px', color: configDesign.cores.sucesso, fontWeight: 'bold', marginTop: '2px' }}>🎁 {item.qtd_bonificada} item(ns) bonificado(s)</div>}
+                      </div>
+                      <div style={{ fontWeight: '900', color: configDesign.cores.textoForte, fontSize: '14px' }}>{formatarMoeda(item?.total)}</div>
+                    </div>
+                  )}
+                  {itemEditandoId !== item.id && ( <button onClick={() => setCarrinho(carrinhoSeguro.filter(i => i.id !== item.id))} style={{ color: configDesign.cores.alerta, border: 'none', background: 'none', fontWeight: 'bold', padding: '10px' }}>Remover</button> )}
+                </div>
+              ))
+            )}
+          </div>
+
+          <div style={{ padding: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral }}>
+            {carrinhoSeguro.length > 0 && <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: isEscuro ? '#450a0a' : '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900', marginBottom: '15px' }}>🗑️ ESVAZIAR CARRINHO</button>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontWeight: '900', fontSize: '18px', color: configDesign.cores.textoForte }}><span>Total Estimado:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
+            <button onClick={abrirRevisao} style={{ width: '100%', padding: '22px', background: carrinhoSeguro.length > 0 ? configDesign.cores.textoForte : configDesign.cores.borda, color: configDesign.cores.fundoGeral, borderRadius: '18px', fontWeight: '900', fontSize: '15px', border: 'none' }}>REVISAR E ENVIAR</button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL REVISÃO */}
+      {modalRevisaoAberto && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100dvh', backgroundColor: configDesign.cores.fundoGeral, zIndex: 3000, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <h3 style={{marginTop: 0, marginBottom: 0, textAlign: 'center', fontWeight: '900', color: configDesign.cores.textoForte}}>Confirmação do Pedido</h3>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+              {carrinhoSeguro.map((item) => (
+                  <div key={`rev-${item.id}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 0', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
+                      <div>
+                        <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria}}>{formatarQtdUnidade(item?.quantidade, item?.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
+                        <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item?.valorUnit)} / {item?.unidade_medida || 'UN'}</div>
+                        {item?.qtd_bonificada > 0 && <div style={{ fontSize: '10px', color: configDesign.cores.sucesso, fontWeight: 'bold', marginTop: '2px' }}>🎁 {item.qtd_bonificada} Bonificado(s)</div>}
+                      </div>
+                      <span style={{fontWeight: 'bold', color: configDesign.cores.textoSuave}}>{formatarMoeda(item?.total)}</span>
+                  </div>
+              ))}
+          </div>
+          <div style={{ padding: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoCards }}>
+             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '25px', fontWeight: '900', fontSize: '20px', color: configDesign.cores.textoForte }}><span>TOTAL FINAL:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
+             <button onClick={confirmarEnvio} disabled={enviandoPedido} style={{ width: '100%', padding: '20px', background: configDesign.cores.sucesso, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '16px' }}>{enviandoPedido ? 'ENVIANDO...' : 'CONFIRMAR ENVIO'}</button>
+             <button onClick={() => setModalRevisaoAberto(false)} style={{ width: '100%', background: 'none', border: 'none', marginTop: '15px', color: configDesign.cores.textoSuave, fontWeight: 'bold' }}>Voltar e editar carrinho</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
