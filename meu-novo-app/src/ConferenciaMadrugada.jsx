@@ -34,7 +34,6 @@ export default function ConferenciaMadrugada() {
     if (!silencioso) setCarregando(true);
     try {
       const { data: lojasData } = await supabase.from('lojas').select('*');
-      // 💡 Puxa APENAS os itens que foram comprados (atendido ou boleto)
       const { data: pedData } = await supabase.from('pedidos')
         .select('*')
         .eq('data_pedido', hoje)
@@ -52,7 +51,7 @@ export default function ConferenciaMadrugada() {
         const idLoja = extrairNum(p.loja_id);
         const lojaInfo = lojasDb.find(l => extrairNum(l.codigo_loja) === idLoja);
         const nomeLoja = lojaInfo ? lojaInfo.nome_fantasia.replace(/^\d+\s*-\s*/, '').trim().toUpperCase() : `LOJA ${idLoja}`;
-        const statusRec = p.status_recebimento || 'aguardando'; // aguardando, recebido, falta
+        const statusRec = p.status_recebimento || 'aguardando'; 
 
         metTotal++;
         if (statusRec === 'recebido') metRecebido++;
@@ -68,31 +67,29 @@ export default function ConferenciaMadrugada() {
         else if (statusRec === 'falta') mapaForn[fNome].faltas++;
         else mapaForn[fNome].aguardando++;
 
-        // Agrupa por produto dentro do fornecedor
         if (!mapaForn[fNome].itens[pNome]) {
             mapaForn[fNome].itens[pNome] = { 
                 nome: pNome, 
                 unidade: p.unidade_medida || 'UN', 
-                status_geral: statusRec, // Se as lojas tiverem status diferentes, a lógica abaixo ajusta
+                status_geral: statusRec, 
                 qtd_total: 0, 
                 lojas: [],
-                ids_pedidos: [] // Guarda os IDs para atualizar o banco de uma vez
+                ids_pedidos: [] 
             };
         }
 
         mapaForn[fNome].itens[pNome].qtd_total += Number(p.qtd_atendida || 0);
         mapaForn[fNome].itens[pNome].ids_pedidos.push(p.id);
         mapaForn[fNome].itens[pNome].lojas.push({
+            id_pedido: p.id, // 💡 GUARDA O ID DA LOJA ESPECÍFICA PARA ATUALIZAR SÓ ELA
             nome_loja: nomeLoja,
             qtd: Number(p.qtd_atendida || 0),
             status: statusRec
         });
 
-        // Atualiza status geral do item (Se uma loja tá pendente, o item tá pendente visualmente)
         if (statusRec === 'aguardando') mapaForn[fNome].itens[pNome].status_geral = 'aguardando';
       });
 
-      // Transforma em array e ordena
       const arrayFinal = Object.values(mapaForn).map(f => {
           f.itens = Object.values(f.itens).sort((a, b) => a.nome.localeCompare(b.nome));
           return f;
@@ -107,7 +104,7 @@ export default function ConferenciaMadrugada() {
 
   useEffect(() => { 
       carregarDados(); 
-      const radar = setInterval(() => carregarDados(true), 15000); // Atualiza a tela de casa a cada 15s
+      const radar = setInterval(() => carregarDados(true), 15000); 
       return () => clearInterval(radar);
   }, [carregarDados]);
 
@@ -115,14 +112,27 @@ export default function ConferenciaMadrugada() {
       setFornecedoresExpandidos(prev => ({ ...prev, [fornNome]: !prev[fornNome] }));
   };
 
-  // 💡 MOTOR DE ATUALIZAÇÃO RÁPIDA (Background Save)
+  // 💡 MOTOR DE ATUALIZAÇÃO RÁPIDA E INDIVIDUAL
   const registrarRecebimento = (ids_pedidos, novoStatus, fornecedorNome, nomeItem) => {
-      // 1. Atualiza a Tela na Hora (Sem loading para o usuário da madrugada)
+      // 1. Atualiza a Tela na Hora (Muda as cores e contadores sem recarregar)
       setDadosAgrupados(prev => prev.map(f => {
           if (f.fornecedor === fornecedorNome) {
               const novosItens = f.itens.map(i => {
                   if (i.nome === nomeItem) {
-                      return { ...i, status_geral: novoStatus, lojas: i.lojas.map(l => ({ ...l, status: novoStatus })) };
+                      const novasLojas = i.lojas.map(l => 
+                          ids_pedidos.includes(l.id_pedido) ? { ...l, status: novoStatus } : l
+                      );
+                      
+                      const allReceived = novasLojas.every(l => l.status === 'recebido');
+                      const allFalta = novasLojas.every(l => l.status === 'falta');
+                      const noneAguardando = novasLojas.every(l => l.status !== 'aguardando');
+                      
+                      let novoStatusGeral = 'aguardando';
+                      if (allReceived) novoStatusGeral = 'recebido';
+                      else if (allFalta) novoStatusGeral = 'falta';
+                      else if (noneAguardando) novoStatusGeral = 'concluido_parcial';
+
+                      return { ...i, status_geral: novoStatusGeral, lojas: novasLojas };
                   }
                   return i;
               });
@@ -143,7 +153,6 @@ export default function ConferenciaMadrugada() {
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: configDesign.geral.fontePadrao, paddingBottom: '120px', padding: '10px' }}>
       
-      {/* HEADER DE COMANDO */}
       <div style={{ backgroundColor: '#111', padding: '25px', borderRadius: '24px', color: 'white', marginBottom: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
@@ -154,7 +163,6 @@ export default function ConferenciaMadrugada() {
         </div>
       </div>
 
-      {/* TABS DE NAVEGAÇÃO */}
       <div style={{ display: 'flex', gap: '5px', marginBottom: '15px' }}>
         <button onClick={() => setAbaAtiva('operacional')} style={{ flex: 1, padding: '15px 10px', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '13px', cursor: 'pointer', backgroundColor: abaAtiva === 'operacional' ? configDesign.cores.primaria : '#fff', color: abaAtiva === 'operacional' ? '#fff' : configDesign.geral.corTextoSecundario }}>
           📦 OPERACIONAL (CEASA)
@@ -164,9 +172,6 @@ export default function ConferenciaMadrugada() {
         </button>
       </div>
 
-      {/* ========================================================================================= */}
-      {/* ABA 1: OPERACIONAL (VISÃO DE QUEM ESTÁ RECEBENDO A MERCADORIA) */}
-      {/* ========================================================================================= */}
       {abaAtiva === 'operacional' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
           
@@ -177,67 +182,87 @@ export default function ConferenciaMadrugada() {
           {dadosAgrupados.filter(f => f.fornecedor.toLowerCase().includes(busca.toLowerCase()) || f.itens.some(i => i.nome.toLowerCase().includes(busca.toLowerCase()))).map(f => {
              const isExpandido = fornecedoresExpandidos[f.fornecedor];
              
-             // Filtra apenas os itens que estão aguardando (esconde os já recebidos para limpar a tela)
-             const itensAguardando = f.itens.filter(i => i.status_geral === 'aguardando' && i.nome.toLowerCase().includes(busca.toLowerCase()));
-             
-             if (itensAguardando.length === 0 && !busca) return null; // Se o fornecedor já foi todo recebido, esconde ele.
+             // 💡 Conta quantas ENTREGAS (lojas) faltam conferir neste fornecedor
+             const qtdPendentes = f.itens.reduce((acc, item) => acc + item.lojas.filter(l => l.status === 'aguardando').length, 0);
+             const isFinalizado = qtdPendentes === 0;
 
              return (
-                <div key={f.fornecedor} style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '20px', boxShadow: configDesign.geral.sombraSuave, borderTop: `5px solid ${configDesign.cores.primaria}` }}>
+                <div key={f.fornecedor} style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '20px', boxShadow: configDesign.geral.sombraSuave, borderTop: isFinalizado ? `5px solid ${configDesign.cores.sucesso}` : `5px solid ${configDesign.cores.primaria}` }}>
                    
                    <div onClick={() => alternarFornecedor(f.fornecedor)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
                       <h3 style={{ margin: 0, color: '#111', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
                         🚚 {f.fornecedor} 
-                        <span style={{background: '#fefce8', color: '#b45309', fontSize: '11px', padding: '3px 8px', borderRadius: '8px'}}>{itensAguardando.length} pendentes</span>
+                        {isFinalizado ? (
+                           <span style={{background: '#dcfce7', color: '#166534', fontSize: '11px', padding: '3px 8px', borderRadius: '8px'}}>✅ Finalizado</span>
+                        ) : (
+                           <span style={{background: '#fefce8', color: '#b45309', fontSize: '11px', padding: '3px 8px', borderRadius: '8px'}}>{qtdPendentes} pendentes</span>
+                        )}
                       </h3>
                       <span style={{ color: '#ccc', transform: isExpandido ? 'rotate(90deg)' : 'none', transition: '0.2s', fontSize: '18px' }}>❯</span>
                    </div>
 
+                   {/* 💡 CONTEÚDO EXPANDIDO DO FORNECEDOR */}
                    {isExpandido && (
                      <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                        {itensAguardando.map(item => (
-                           <div key={item.nome} style={{ background: '#f8fafc', border: `1px solid ${configDesign.cores.borda}`, borderRadius: '12px', padding: '15px' }}>
-                              
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                                 <strong style={{ fontSize: '16px', color: '#111' }}>{formatarNomeItem(item.nome)}</strong>
-                                 <span style={{ background: '#111', color: '#fff', padding: '5px 10px', borderRadius: '8px', fontWeight: '900', fontSize: '15px' }}>
-                                    {item.qtd_total} <small style={{fontSize:'10px', color: '#aaa'}}>{item.unidade}</small>
-                                 </span>
-                              </div>
+                        {f.itens.filter(i => i.nome.toLowerCase().includes(busca.toLowerCase())).map(item => {
+                           const todasLojasConcluidas = item.lojas.every(l => l.status !== 'aguardando');
 
-                              {/* 💡 SEPARAÇÃO POR LOJA (Mostra pra onde vai cada caixa) */}
-                              {item.lojas.length > 1 && (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '15px' }}>
+                           return (
+                             <div key={item.nome} style={{ background: todasLojasConcluidas ? '#f0fdf4' : '#f8fafc', border: `1px solid ${todasLojasConcluidas ? '#86efac' : configDesign.cores.borda}`, borderRadius: '12px', padding: '15px', transition: '0.3s' }}>
+                                
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                                   <strong style={{ fontSize: '16px', color: '#111' }}>{formatarNomeItem(item.nome)}</strong>
+                                   <span style={{ background: '#111', color: '#fff', padding: '5px 10px', borderRadius: '8px', fontWeight: '900', fontSize: '15px' }}>
+                                      {item.qtd_total} <small style={{fontSize:'10px', color: '#aaa'}}>{item.unidade}</small>
+                                   </span>
+                                </div>
+
+                                {/* 💡 LISTA INDIVIDUAL DE CADA LOJA QUE RECEBERÁ ESTE ITEM */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                     {item.lojas.map((loja, idx) => (
-                                        <span key={idx} style={{ background: '#e2e8f0', color: '#334155', fontSize: '11px', fontWeight: 'bold', padding: '4px 8px', borderRadius: '6px' }}>
-                                            {loja.nome_loja}: {loja.qtd}
-                                        </span>
+                                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: loja.status === 'recebido' ? '#dcfce7' : (loja.status === 'falta' ? '#fef2f2' : '#fff'), border: loja.status === 'recebido' ? '1px solid #4ade80' : (loja.status === 'falta' ? '1px solid #f87171' : '1px solid #e2e8f0'), padding: '12px 15px', borderRadius: '10px', transition: '0.3s' }}>
+                                            
+                                            <div>
+                                                <span style={{ fontWeight: '900', fontSize: '14px', color: '#334155' }}>{loja.nome_loja}</span>
+                                                <span style={{ marginLeft: '10px', fontSize: '12px', background: '#e2e8f0', color: '#111', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold' }}>Qtd: {loja.qtd}</span>
+                                            </div>
+                                            
+                                            {/* BOTÕES POR LOJA */}
+                                            {loja.status === 'aguardando' ? (
+                                                <div style={{ display: 'flex', gap: '8px' }}>
+                                                    <button onClick={() => registrarRecebimento([loja.id_pedido], 'recebido', f.fornecedor, item.nome)} style={{ background: configDesign.cores.sucesso, color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', fontSize: '12px', boxShadow: '0 2px 5px rgba(34,197,94,0.3)' }}>✅ RECEBEU</button>
+                                                    <button onClick={() => registrarRecebimento([loja.id_pedido], 'falta', f.fornecedor, item.nome)} style={{ background: configDesign.cores.alerta, color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', fontSize: '12px', boxShadow: '0 2px 5px rgba(239,68,68,0.3)' }}>❌ FALTA</button>
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                                    <span style={{ fontSize: '13px', fontWeight: '900', color: loja.status === 'recebido' ? '#166534' : '#991b1b' }}>
+                                                        {loja.status === 'recebido' ? '✅ OK' : '❌ FALTOU'}
+                                                    </span>
+                                                    {/* 💡 BOTÃO MÁGICO DE VOLTAR ATRÁS */}
+                                                    <button onClick={() => registrarRecebimento([loja.id_pedido], 'aguardando', f.fornecedor, item.nome)} style={{ background: '#fff', color: '#64748b', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>↩️ DESFAZER</button>
+                                                </div>
+                                            )}
+
+                                        </div>
                                     ))}
                                 </div>
-                              )}
 
-                              {/* BOTÕES DE AÇÃO GIGANTES */}
-                              <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-                                 <button onClick={() => registrarRecebimento(item.ids_pedidos, 'recebido', f.fornecedor, item.nome)} style={{ flex: 2, background: configDesign.cores.sucesso, color: '#fff', border: 'none', padding: '15px', borderRadius: '12px', fontWeight: '900', fontSize: '14px', cursor: 'pointer' }}>
-                                    ✅ CHEGOU TUDO
-                                 </button>
-                                 <button onClick={() => registrarRecebimento(item.ids_pedidos, 'falta', f.fornecedor, item.nome)} style={{ flex: 1, background: '#fef2f2', color: configDesign.cores.alerta, border: `1px solid ${configDesign.cores.alerta}`, padding: '15px', borderRadius: '12px', fontWeight: '900', fontSize: '13px', cursor: 'pointer' }}>
-                                    ❌ FALTOU
-                                 </button>
-                              </div>
+                                {/* 💡 BOTÕES GLOBAIS DO ITEM (Se tiver mais de 1 loja e ainda tiver pendências) */}
+                                {!todasLojasConcluidas && item.lojas.length > 1 && (
+                                    <div style={{ display: 'flex', gap: '10px', marginTop: '15px', paddingTop: '15px', borderTop: '1px dashed #cbd5e1' }}>
+                                        <button onClick={() => registrarRecebimento(item.ids_pedidos, 'recebido', f.fornecedor, item.nome)} style={{ flex: 1, background: configDesign.cores.sucesso, color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: '900', fontSize: '12px', cursor: 'pointer' }}>✅ TUDO DESTA FRUTA CHEGOU</button>
+                                        <button onClick={() => registrarRecebimento(item.ids_pedidos, 'falta', f.fornecedor, item.nome)} style={{ background: '#fef2f2', color: configDesign.cores.alerta, border: `1px solid ${configDesign.cores.alerta}`, padding: '12px', borderRadius: '8px', fontWeight: '900', fontSize: '12px', cursor: 'pointer' }}>❌ FALTOU TUDO</button>
+                                    </div>
+                                )}
 
-                           </div>
-                        ))}
+                             </div>
+                           );
+                        })}
                      </div>
                    )}
                 </div>
              );
           })}
-          {dadosAgrupados.every(f => f.itens.every(i => i.status_geral !== 'aguardando')) && (
-             <div style={{ textAlign: 'center', padding: '40px', color: configDesign.cores.sucesso, backgroundColor: '#fff', borderRadius: '20px', fontWeight: '900', fontSize: '18px' }}>
-                 🎉 TUDO RECEBIDO! GALPÃO LIMPO!
-             </div>
-          )}
         </div>
       )}
 
