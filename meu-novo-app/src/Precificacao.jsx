@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 
 // ============================================================================
@@ -6,17 +6,30 @@ import { supabase } from './supabaseClient';
 // ============================================================================
 const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) => {
   const [preco, setPreco] = useState(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
-  const [pesoCaixa, setPesoCaixa] = useState(produto.peso_caixa || '');
+  
+  // 💡 ESTADOS DIVIDIDOS PARA NUMERO E UNIDADE
+  const [pesoCaixaNum, setPesoCaixaNum] = useState('');
+  const [pesoCaixaUnd, setPesoCaixaUnd] = useState('Kg');
   const [statusAviso, setStatusAviso] = useState('');
+  
+  // 🛡️ ESCUDO ANTI-RADAR: Impede o sistema de apagar o que você acabou de digitar
+  const ignorarRadar = useRef(false);
 
   useEffect(() => {
+    if (ignorarRadar.current) return; // Se acabou de salvar, ignora a atualização vinda do banco antigo
+
     setPreco(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
-    setPesoCaixa(produto.peso_caixa || '');
+    
+    if (produto.peso_caixa) {
+       setPesoCaixaNum(String(produto.peso_caixa).replace(/[^\d.,]/g, '').trim());
+       setPesoCaixaUnd(String(produto.peso_caixa).replace(/[\d.,\s]/g, '').trim() || 'Kg');
+    } else {
+       setPesoCaixaNum('');
+       setPesoCaixaUnd('Kg');
+    }
   }, [produto.preco, produto.peso_caixa]);
 
-  const dispararAutoSave = async (pValor, pPesoCaixa, acaoForcada = null) => {
-    setStatusAviso('⏳');
-    
+  const dispararAutoSave = (pValor, pPesoCaixaNum, pPesoCaixaUnd, acaoForcada = null) => {
     // 💡 FORMATADOR INTELIGENTE DE MOEDA (Sempre X,XX)
     let v = String(pValor || '').replace(/[^\d,.]/g, '').trim();
     if (v.includes('.') && !v.includes(',')) v = v.replace('.', ','); 
@@ -47,9 +60,22 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
       }
     }
 
+    let pesoCaixaFinal = '';
+    if (pPesoCaixaNum) {
+       pesoCaixaFinal = `${pPesoCaixaNum}${pPesoCaixaUnd}`;
+    }
+
+    // 🚀 TRAVA DE VELOCIDADE: Se não mudou absolutamente nada, não salva para não travar a tela!
+    if (!acaoForcada && precoFinal === produto.preco && pesoCaixaFinal === (produto.peso_caixa || '') && statusCalculado === produto.status_cotacao) {
+        return; 
+    }
+
+    setStatusAviso('⏳');
+    ignorarRadar.current = true; // Ativa o escudo anti-radar
+
     const payload = {
       preco: acaoForcada === 'sem_preco' || acaoForcada === 'falta' ? 'R$ 0,00' : precoFinal,
-      peso_caixa: pPesoCaixa,
+      peso_caixa: pesoCaixaFinal,
       status_cotacao: statusCalculado
     };
 
@@ -57,43 +83,45 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
       payload.preco_anterior = payload.preco;
     }
 
+    // 1º Atualiza a UI visual na hora (Não faz você esperar)
     aoSalvar(produto.id, payload);
 
-    const { error } = await supabase.from('produtos').update(payload).eq('id', produto.id);
-    if (!error) {
-      setStatusAviso('✅');
-      setTimeout(() => setStatusAviso(''), 2000);
-    } else {
-      setStatusAviso('❌');
-      console.error(error);
-    }
+    // 2º Bate no banco de dados em SEGUNDO PLANO (Background)
+    supabase.from('produtos').update(payload).eq('id', produto.id).then(({ error }) => {
+       if (!error) {
+         setStatusAviso('✅');
+         setTimeout(() => setStatusAviso(''), 2000);
+       } else {
+         setStatusAviso('❌');
+         console.error(error);
+       }
+       // Desativa o escudo após 10 segundos, tempo seguro para o banco já estar atualizado
+       setTimeout(() => { ignorarRadar.current = false; }, 10000);
+    });
   };
 
   const handleBlur = () => {
-    dispararAutoSave(preco, pesoCaixa);
+    dispararAutoSave(preco, pesoCaixaNum, pesoCaixaUnd);
   };
 
   const acaoRapida = (acao) => {
     if (acao === 'mantido') {
       const pAntigo = produto.preco_anterior && produto.preco_anterior !== 'R$ 0,00' ? produto.preco_anterior.replace('R$ ', '') : '';
       setPreco(pAntigo);
-      dispararAutoSave(pAntigo, pesoCaixa, 'mantido');
+      dispararAutoSave(pAntigo, pesoCaixaNum, pesoCaixaUnd, 'mantido');
     } else if (acao === 'sem_preco') {
       setPreco('');
-      dispararAutoSave('', pesoCaixa, 'sem_preco');
+      dispararAutoSave('', pesoCaixaNum, pesoCaixaUnd, 'sem_preco');
     } else if (acao === 'falta') {
       setPreco('');
-      dispararAutoSave('', pesoCaixa, 'falta');
+      dispararAutoSave('', pesoCaixaNum, pesoCaixaUnd, 'falta');
     }
   };
 
-  // 💡 Lógica para mostrar no input se é CX, SC, PCT...
-  const matchPeso = String(pesoCaixa).match(/^([A-Z]+)\s+(.+)$/);
-  const siglaMedidaVisual = matchPeso ? matchPeso[1] : 'CX';
-  const pesoVisual = matchPeso ? matchPeso[2] : pesoCaixa;
-
   return (
     <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '12px 15px', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', borderLeft: `5px solid ${corBorda}` }}>
+      
+      {/* CABEÇALHO DO ITEM */}
       <div onClick={() => abrirModal(produto)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '80%' }}>
           <div style={{ width: '35px', height: '35px', borderRadius: '6px', backgroundImage: `url(${produto.foto_url?.split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#f1f5f9' }} />
@@ -109,6 +137,7 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
         <div style={{ fontSize: '12px' }}>{statusAviso}</div>
       </div>
 
+      {/* INPUTS DIRETOS OTIMIZADOS */}
       <div style={{ display: 'flex', gap: '10px' }}>
         <div style={{ position: 'relative', flex: 1 }}>
           <span style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8', fontWeight: 'bold', fontSize: '11px' }}>R$</span>
@@ -123,22 +152,34 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
           />
         </div>
 
-        {produto.unidade_medida === 'KG' && (
-          <div style={{ position: 'relative', width: '100px' }}>
-            <input 
-              type="text" 
-              value={pesoVisual} 
-              onChange={e => setPesoCaixa(`${siglaMedidaVisual} ${e.target.value}`)} 
-              onBlur={handleBlur}
-              onKeyDown={e => e.key === 'Enter' && e.target.blur()}
-              placeholder="Ex: 20"
-              style={{ width: '100%', padding: '10px 30px 10px 10px', borderRadius: '8px', border: '1px solid #eab308', outline: 'none', fontWeight: 'bold', fontSize: '14px', backgroundColor: '#fefce8', boxSizing: 'border-box' }}
-            />
-            <span style={{ position: 'absolute', right: '10px', top: '10px', color: '#ca8a04', fontWeight: 'bold', fontSize: '11px' }}>Kg</span>
-          </div>
-        )}
+        {/* 💡 PESO DA CAIXA AGORA SEMPRE VISÍVEL E COM SELECT */}
+        <div style={{ display: 'flex', gap: '5px' }}>
+          <input 
+            type="text" 
+            value={pesoCaixaNum} 
+            onChange={e => setPesoCaixaNum(e.target.value)} 
+            onBlur={handleBlur}
+            onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+            placeholder="Ex: 20"
+            style={{ width: '55px', padding: '10px', borderRadius: '8px', border: '1px solid #eab308', outline: 'none', fontWeight: 'bold', fontSize: '14px', backgroundColor: '#fefce8', boxSizing: 'border-box', textAlign: 'center' }}
+          />
+          <select 
+            value={pesoCaixaUnd} 
+            onChange={e => {
+              setPesoCaixaUnd(e.target.value);
+              dispararAutoSave(preco, pesoCaixaNum, e.target.value); // Salva na hora que muda a unidade
+            }}
+            style={{ width: '55px', padding: '0 5px', borderRadius: '8px', border: '1px solid #eab308', outline: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: '#fefce8', cursor: 'pointer' }}
+          >
+            <option value="Kg">Kg</option>
+            <option value="g">g</option>
+            <option value="L">L</option>
+            <option value="ml">ml</option>
+          </select>
+        </div>
       </div>
 
+      {/* BOTÕES RÁPIDOS */}
       <div style={{ display: 'flex', gap: '5px', borderTop: '1px dashed #f1f5f9', paddingTop: '10px' }}>
         <button onClick={() => acaoRapida('mantido')} style={{ flex: 1, padding: '8px', background: '#fefce8', color: '#eab308', border: '1px solid #fef08a', borderRadius: '6px', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer' }}>🔒 MANTER</button>
         <button onClick={() => acaoRapida('sem_preco')} style={{ flex: 1, padding: '8px', background: '#fff7ed', color: '#f97316', border: '1px solid #fed7aa', borderRadius: '6px', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer' }}>⏸️ S/ PREÇO</button>
@@ -159,51 +200,24 @@ export default function Precificacao() {
   const [busca, setBusca] = useState('');
   const [carregando, setCarregando] = useState(true);
   
-  const categoriasPossiveis = ['TODOS', 'Frutas', 'Verduras & Fungos', 'Legumes', 'Raízes, Tubérculos & Grãos', 'Bandejados', 'Avulsos', 'Folhagens', 'Caixaria', 'BRADISBA', 'POTY COCOS', 'MEGA', 'Outros'];
-  const [categoriaFiltro, setCategoriaFiltro] = useState('TODOS');
-
   const [modalAberto, setModalAberto] = useState(false);
   const [prodModal, setProdModal] = useState(null);
-  
-  // 💡 ESTADO DO MODAL ATUALIZADO PARA SUPORTAR O TIPO DA MEDIDA FINAL
-  const [formModal, setFormModal] = useState({ preco: '', fornecedor: '', status: 'pendente', promocao: false, novidade: false, fotos_novas: [], unidade: 'UN', peso_caixa: '', tipo_medida_kg: 'CX' });
+  const [formModal, setFormModal] = useState({ preco: '', fornecedor: '', status: 'pendente', promocao: false, novidade: false, fotos_novas: [], unidade: 'UN', peso_caixa: '' });
+  const [unidadePesoExtra, setUnidadePesoExtra] = useState('Kg'); // Estado para a unidade do modal
   const [fazendoUpload, setFazendoUpload] = useState(false);
-
-  const [configCardAberto, setConfigCardAberto] = useState(false);
-  const [configuracoes, setConfiguracoes] = useState({ 
-    nao_funciona: false, 
-    is_feriado: false, 
-    data_teste: '' 
-  });
-  const [testeAtivo, setTesteAtivo] = useState(false);
 
   useEffect(() => { 
     carregarDados(); 
-    carregarConfiguracoes();
     const radar = setInterval(() => {
       carregarDados(true);
     }, 10000);
     return () => clearInterval(radar);
   }, []);
 
-  async function carregarConfiguracoes() {
-    try {
-      const { data, error } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
-      if (data && !error) {
-        setConfiguracoes({
-          nao_funciona: data.nao_funciona || false,
-          is_feriado: data.is_feriado || false,
-          data_teste: data.data_teste || ''
-        });
-        if (data.data_teste) setTesteAtivo(true);
-      }
-    } catch (e) { console.error(e); }
-  }
-
   async function carregarDados(silencioso = false) {
     if (!silencioso) setCarregando(true);
     try {
-      const { data: prodData } = await supabase.from('produtos').select('*').eq('status', true).order('nome', { ascending: true });
+      const { data: prodData } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
       
       if (prodData) {
         const produtosProntos = prodData.map(p => {
@@ -211,9 +225,11 @@ export default function Precificacao() {
           let novoPreco = p.preco;
           let atualizou = false;
 
-          if (!novoStatus || String(novoStatus).trim() === '') {
-              novoStatus = 'pendente';
-              atualizou = true;
+          const statusCheck = String(novoStatus || '').trim().toLowerCase();
+
+          if (statusCheck === '' || statusCheck === 'vermelho') {
+             novoStatus = 'pendente';
+             atualizou = true;
           }
 
           if (!novoPreco || novoPreco === '0' || String(novoPreco).trim() === '') {
@@ -233,31 +249,6 @@ export default function Precificacao() {
     finally { if (!silencioso) setCarregando(false); }
   }
 
-  const atualizarConfigBD = async (novosDados) => {
-    try {
-      await supabase.from('configuracoes').update(novosDados).eq('id', 1);
-      setConfiguracoes(prev => ({ ...prev, ...novosDados }));
-    } catch (e) { alert("Erro ao salvar configuração."); }
-  };
-
-  const aplicarTeste = async () => {
-    if (!configuracoes.data_teste) return alert("Escolha uma data no calendário primeiro.");
-    const partesData = configuracoes.data_teste.split('-'); 
-    const dataSelecionada = new Date(partesData[0], partesData[1] - 1, partesData[2]); 
-    const diaDaSemanaConvertido = dataSelecionada.getDay();
-
-    await atualizarConfigBD({ data_teste: configuracoes.data_teste, dia_semana_teste: diaDaSemanaConvertido });
-    setTesteAtivo(true);
-    alert("Teste aplicado! O app do cliente agora vai usar este dia como regra.");
-  };
-
-  const finalizarTeste = async () => {
-    await atualizarConfigBD({ data_teste: null, dia_semana_teste: null });
-    setConfiguracoes(prev => ({ ...prev, data_teste: '' }));
-    setTesteAtivo(false);
-    alert("Teste finalizado. O sistema voltou ao dia de hoje.");
-  };
-
   const isZerado = (preco) => !preco || preco === '0' || preco === '0,00' || String(preco).trim() === 'R$ 0,00' || String(preco).trim() === 'R$0,00';
 
   const listas = {
@@ -271,30 +262,35 @@ export default function Precificacao() {
   const qtdPendentes = listas.pendentes.length;
 
   const revisarItensOcultos = async () => {
-    if(!window.confirm("Isso vai resgatar TODOS os produtos marcados como 🔴 VERMELHO e jogar de volta para ⏳ PENDENTES (R$ 0,00) para você cotar. Confirma?")) return;
-    
     setCarregando(true);
     try {
-      const itensEmFalta = produtos.filter(p => p.status_cotacao === 'vermelho');
-      
-      if (itensEmFalta.length === 0) {
-          alert("✔️ Não há nenhum produto marcado como VERMELHO para revisar.");
-          return;
-      }
+      const { data: todos } = await supabase.from('produtos').select('*');
+      if (!todos) return;
 
-      let loteUpdates = itensEmFalta.map(p => ({
-         id: p.id,
-         status_cotacao: 'pendente',
-         preco: 'R$ 0,00'
-      }));
+      let loteUpdates = [];
+      const novaLista = todos.map(p => {
+        
+        const statusCheck = String(p.status_cotacao || '').trim().toLowerCase();
 
-      for (let i = 0; i < loteUpdates.length; i += 50) {
-        const lote = loteUpdates.slice(i, i + 50);
-        await supabase.from('produtos').upsert(lote);
+        if (statusCheck === 'vermelho' || statusCheck === '') {
+          const objAtualizado = { ...p, status_cotacao: 'pendente', preco: 'R$ 0,00' };
+          loteUpdates.push(objAtualizado);
+          return objAtualizado;
+        }
+        
+        return p;
+      });
+
+      if (loteUpdates.length > 0) {
+        for (let i = 0; i < loteUpdates.length; i += 50) {
+          const lote = loteUpdates.slice(i, i + 50);
+          await supabase.from('produtos').upsert(lote);
+        }
+        alert(`✅ REVISÃO CONCLUÍDA!\nResgatamos ${loteUpdates.length} produtos novos (que estavam como 'vermelho' ou sem status). Eles foram movidos para a aba PENDENTES.`);
+        setProdutos(novaLista);
+      } else {
+        alert("✔️ Nenhum produto novo ou com status 'vermelho' encontrado. Tudo nos conformes.");
       }
-      
-      alert(`✅ REVISÃO CONCLUÍDA!\n${loteUpdates.length} produtos retornaram para PENDENTES.`);
-      carregarDados();
       setAbaAtiva('pendentes');
     } catch (err) {
       alert("Erro na revisão: " + err.message);
@@ -363,17 +359,15 @@ export default function Precificacao() {
 
   const abrirEdicaoCompleta = (produto) => {
     setProdModal(produto);
-
-    // 💡 DESMEMBRANDO O PESO DA CAIXA SE ELE JÁ VIER COM SIGLA DO BANCO ("SC 20", "CX 15")
-    let pesoPuro = produto.peso_caixa || '';
-    let tipoMedida = 'CX';
-
-    const matchPeso = String(pesoPuro).match(/^([A-Z]+)\s+(.+)$/);
-    if (matchPeso) {
-        tipoMedida = matchPeso[1];
-        pesoPuro = matchPeso[2];
+    
+    let numeroExtraido = '';
+    let undExtraida = 'Kg';
+    if (produto.peso_caixa) {
+        numeroExtraido = String(produto.peso_caixa).replace(/[^\d.,]/g, '').trim();
+        undExtraida = String(produto.peso_caixa).replace(/[\d.,\s]/g, '').trim() || 'Kg';
     }
 
+    setUnidadePesoExtra(undExtraida);
     setFormModal({
       preco: produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '',
       fornecedor: produto.fornecedor || '', 
@@ -382,8 +376,7 @@ export default function Precificacao() {
       novidade: produto.novidade || false,
       fotos_novas: [],
       unidade: produto.unidade_medida || 'UN',
-      peso_caixa: pesoPuro,
-      tipo_medida_kg: tipoMedida // 💡 NOVO ESTADO
+      peso_caixa: numeroExtraido
     });
     setModalAberto(true);
   };
@@ -436,16 +429,21 @@ export default function Precificacao() {
     let statusCalc = formModal.status;
     if (statusCalc === 'pendente' && precoFinal !== 'R$ 0,00') statusCalc = 'ativo';
 
-    // 💡 JUNTA A SIGLA COM O PESO ANTES DE SALVAR (Ex: "SC 20", "CX 15")
-    let pesoCaixaFinal = formModal.peso_caixa;
-    if (formModal.unidade === 'KG' && formModal.peso_caixa) {
-        pesoCaixaFinal = `${formModal.tipo_medida_kg} ${formModal.peso_caixa}`;
+    const fotosAtuais = prodModal.foto_url ? String(prodModal.foto_url).split(',') : [];
+    const qtdFotos = fotosAtuais.length + formModal.fotos_novas.length;
+    if ((formModal.promocao || formModal.novidade) && qtdFotos === 0) {
+      return alert("⚠️ Adicione pelo menos uma foto para marcar como Promoção ou Novidade.");
     }
 
-    const fotosAtuais = prodModal.foto_url ? String(prodModal.foto_url).split(',') : [];
+    let pesoCaixaFinal = '';
+    const numLimpo = String(formModal.peso_caixa || '').replace(/[^\d.,]/g, '').trim();
+    if (numLimpo) {
+        pesoCaixaFinal = `${numLimpo}${unidadePesoExtra}`;
+    }
+
     const payload = {
       preco: precoFinal,
-      peso_caixa: pesoCaixaFinal, // 💡 SALVA O PESO JUNTO COM A SIGLA
+      peso_caixa: pesoCaixaFinal,
       status_cotacao: statusCalc,
       promocao: formModal.promocao,
       novidade: formModal.novidade,
@@ -476,17 +474,9 @@ export default function Precificacao() {
     { id: 'falta', nomeStr: 'FALTA', cor: '#ef4444', icone: '🚫', itens: listas.falta },
   ];
 
-  const listaDaAbaAtual = listas[abaAtiva] || [];
-  const produtosRenderizados = listaDaAbaAtual.filter(p => {
-      const bateuBusca = p.nome.toLowerCase().includes(busca.toLowerCase());
-      if (categoriaFiltro === 'TODOS') return bateuBusca;
-      return bateuBusca && (p.categoria === categoriaFiltro);
-  });
-
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px', padding: '10px' }}>
       
-      {/* 🎛️ HEADER DE COMANDO */}
       <div style={{ backgroundColor: '#111', padding: '25px', borderRadius: '24px', color: 'white', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
         
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -494,40 +484,15 @@ export default function Precificacao() {
             <h2 style={{ margin: 0, fontSize: '24px', fontWeight: '900' }}>💲 PRECIFICAÇÃO</h2>
             <p style={{ margin: '5px 0 0 0', color: '#94a3b8', fontSize: '13px' }}>Faltam <strong style={{color: '#ef4444', fontSize: '16px'}}>{qtdPendentes}</strong> itens.</p>
           </div>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <button onClick={() => setConfigCardAberto(!configCardAberto)} style={{ background: '#333', border: 'none', padding: '10px', borderRadius: '10px', cursor: 'pointer', fontSize: '20px' }}>⚙️</button>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <button onClick={revisarItensOcultos} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', boxShadow: '0 4px 10px rgba(59,130,246,0.3)' }}>
-                🔄 RESGATAR FALTAS
-              </button>
-              <button onClick={zerarCotacao} style={{ background: '#333', color: '#ef4444', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
-                🗑️ ZERAR COTAÇÃO
-              </button>
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <button onClick={revisarItensOcultos} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', boxShadow: '0 4px 10px rgba(59,130,246,0.3)' }}>
+              🔄 REVISAR ITENS NOVOS
+            </button>
+            <button onClick={zerarCotacao} style={{ background: '#333', color: '#ef4444', border: 'none', padding: '10px 15px', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
+              🗑️ ZERAR COTAÇÃO
+            </button>
           </div>
         </div>
-
-        {/* Card de Configurações Acoplado */}
-        {configCardAberto && (
-          <div style={{ background: '#222', padding: '20px', borderRadius: '15px', border: '1px solid #444', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                <button onClick={() => atualizarConfigBD({ nao_funciona: !configuracoes.nao_funciona })} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: configuracoes.nao_funciona ? '#ef4444' : '#22c55e', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>
-                  {configuracoes.nao_funciona ? '🚫 LOJA FECHADA' : '✅ LOJA ABERTA'}
-                </button>
-                <button onClick={() => atualizarConfigBD({ is_feriado: !configuracoes.is_feriado })} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: configuracoes.is_feriado ? '#eab308' : '#3b82f6', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>
-                  {configuracoes.is_feriado ? '🚩 É FERIADO' : '🏳️ DIA NORMAL'}
-                </button>
-             </div>
-             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#333', padding: '10px', borderRadius: '10px' }}>
-                <input type="date" value={configuracoes.data_teste} onChange={(e) => setConfiguracoes({...configuracoes, data_teste: e.target.value})} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: '#444', color: '#fff', outline: 'none' }} />
-                {!testeAtivo ? (
-                  <button onClick={aplicarTeste} style={{ padding: '10px 15px', background: '#eab308', color: '#111', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>TESTAR DATA</button>
-                ) : (
-                  <button onClick={finalizarTeste} style={{ padding: '10px 15px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>PARAR TESTE</button>
-                )}
-             </div>
-          </div>
-        )}
 
         <button onClick={finalizarCotacao} style={{ width: '100%', backgroundColor: '#22c55e', color: 'white', border: 'none', padding: '18px', borderRadius: '16px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 4px 15px rgba(34,197,94,0.3)' }}>
           🚀 FINALIZAR COTAÇÃO E ABRIR LOJA
@@ -535,7 +500,6 @@ export default function Precificacao() {
 
       </div>
 
-      {/* 📑 ABAS DE STATUS (PENDENTES, PRONTOS...) */}
       <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', overflowX: 'auto', paddingBottom: '5px', scrollbarWidth: 'none' }}>
         {CONFIG_ABAS.map(aba => (
           <button 
@@ -554,36 +518,12 @@ export default function Precificacao() {
         ))}
       </div>
 
-      {/* 💡 BARRA ROLÁVEL DE CATEGORIAS (FILTRO SUPERIOR) */}
-      <div style={{ display: 'flex', overflowX: 'auto', gap: '10px', paddingBottom: '15px', marginBottom: '10px', scrollbarWidth: 'none' }}>
-         {categoriasPossiveis.map(cat => (
-            <button 
-               key={cat} 
-               onClick={() => setCategoriaFiltro(cat)} 
-               style={{ 
-                  padding: '8px 16px', 
-                  borderRadius: '20px', 
-                  border: 'none', 
-                  backgroundColor: categoriaFiltro === cat ? '#111' : '#e2e8f0', 
-                  color: categoriaFiltro === cat ? '#fff' : '#475569', 
-                  fontWeight: 'bold', 
-                  fontSize: '11px', 
-                  cursor: 'pointer', 
-                  whiteSpace: 'nowrap' 
-               }}
-            >
-               {cat}
-            </button>
-         ))}
-      </div>
-
       <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '12px', display: 'flex', gap: '10px', marginBottom: '15px', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
         <span>🔍</span><input placeholder="Buscar item..." value={busca} onChange={e => setBusca(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
       </div>
 
-      {/* 📝 LISTA RENDERIZADA */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {produtosRenderizados.map(p => (
+        {listas[abaAtiva].filter(p => p.nome.toLowerCase().includes(busca.toLowerCase())).map(p => (
            <LinhaProduto 
              key={p.id} 
              produto={p} 
@@ -592,12 +532,11 @@ export default function Precificacao() {
              aoSalvar={handleAtualizarLista} 
            />
         ))}
-        {produtosRenderizados.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '16px' }}>Nenhum item atende aos filtros atuais.</div>
+        {listas[abaAtiva].length === 0 && (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '16px' }}>Nenhum item nesta aba.</div>
         )}
       </div>
 
-      {/* 🛠️ MODAL DE EDIÇÃO COMPLETA */}
       {modalAberto && prodModal && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-end', padding: '0' }}>
           <div style={{ backgroundColor: '#fff', width: '100%', maxWidth: '600px', borderRadius: '30px 30px 0 0', padding: '30px 25px', display: 'flex', flexDirection: 'column', maxHeight: '90vh', overflowY: 'auto' }}>
@@ -653,38 +592,32 @@ export default function Precificacao() {
                   <option value="SACO">SACO</option>
                 </select>
               </div>
+            </div>
 
-              {/* 💡 MUDANÇA: SELECIONAR A SIGLA SE FOR VENDIDO EM KG */}
-              {formModal.unidade === 'KG' && (
-                <div style={{ display: 'flex', gap: '5px' }}>
-                  <div style={{ width: '70px' }}>
-                     <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>TIPO</label>
-                     <select 
-                        value={formModal.tipo_medida_kg} 
-                        onChange={e => setFormModal({...formModal, tipo_medida_kg: e.target.value})}
-                        disabled={formModal.status === 'falta' || formModal.status === 'sem_preco'}
-                        style={{ width: '100%', padding: '15px 5px', borderRadius: '10px', border: '2px solid #fef08a', background: '#fefce8', color: '#ca8a04', outline: 'none', fontSize: '12px', fontWeight: 'bold', boxSizing: 'border-box', cursor: 'pointer' }}
-                     >
-                        <option value="CX">CX</option>
-                        <option value="SC">SC</option>
-                        <option value="PCT">PCT</option>
-                        <option value="BDJ">BDJ</option>
-                        <option value="MÇ">MÇ</option>
-                     </select>
-                  </div>
-                  
-                  <div style={{ width: '80px' }}>
-                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>PESO (Kg)</label>
-                    <input 
-                      type="text" value={formModal.peso_caixa} 
-                      placeholder="Ex: 20"
-                      onChange={e => setFormModal({...formModal, peso_caixa: e.target.value})} 
-                      disabled={formModal.status === 'falta' || formModal.status === 'sem_preco'}
-                      style={{ width: '100%', padding: '15px 10px', borderRadius: '10px', border: '2px solid #fef08a', background: '#fefce8', color: '#ca8a04', outline: 'none', fontSize: '14px', fontWeight: 'bold', boxSizing: 'border-box' }} 
-                    />
-                  </div>
-                </div>
-              )}
+            {/* 💡 INPUT PARA PESO SEMPRE VISÍVEL E COM ESCOLHA DE UNIDADE NO MODAL COMPLETO */}
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>PESO/TAMANHO DA EMBALAGEM (Opcional)</label>
+              <div style={{ display: 'flex', gap: '5px' }}>
+                 <input 
+                   disabled={formModal.status === 'falta' || formModal.status === 'sem_preco'}
+                   value={formModal.peso_caixa} 
+                   onChange={e => setFormModal({...formModal, peso_caixa: e.target.value})} 
+                   style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '2px solid #fef08a', background: '#fefce8', color: '#ca8a04', outline: 'none', fontSize: '14px', fontWeight: 'bold', boxSizing: 'border-box', flex: 1 }} 
+                   placeholder="Ex: 15, 20, 500..." 
+                 />
+                 <select 
+                   disabled={formModal.status === 'falta' || formModal.status === 'sem_preco'}
+                   value={unidadePesoExtra} 
+                   onChange={e => setUnidadePesoExtra(e.target.value)} 
+                   style={{ width: '80px', padding: '0 10px', borderRadius: '10px', border: '2px solid #fef08a', background: '#fefce8', color: '#ca8a04', outline: 'none', fontSize: '14px', fontWeight: 'bold', textAlign: 'center', cursor: 'pointer' }}
+                 >
+                    <option value="Kg">Kg</option>
+                    <option value="g">g</option>
+                    <option value="L">L</option>
+                    <option value="ml">ml</option>
+                 </select>
+              </div>
+              <small style={{display: 'block', marginTop: '5px', fontSize: '10px', color: '#999'}}>*Isso fará o app calcular o preço total multiplicando o valor base por essa quantidade.</small>
             </div>
 
             <div style={{ display: 'flex', gap: '15px', marginBottom: '25px', backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px' }}>
