@@ -38,7 +38,7 @@ export default function Usuarios() {
   const [listaLojas, setListaLojas] = useState([]); 
   const [busca, setBusca] = useState('');
   const [lojaDigitada, setLojaDigitada] = useState('');
-  const [lojaAtiva, setLojaAtiva] = useState(null); // Filtro de loja selecionada
+  const [lojaAtiva, setLojaAtiva] = useState(null); 
   
   const [mostrarSugestoesLoja, setMostrarSugestoesLoja] = useState(false);
   const [mostrarSugestoesNome, setMostrarSugestoesNome] = useState(false); 
@@ -46,7 +46,7 @@ export default function Usuarios() {
   const [usuarioAberto, setUsuarioAberto] = useState(null);
   const [editando, setEditando] = useState(false);
   
-  // 💡 ESTADO INICIAL: Incluindo 'id' para evitar duplicidade no salvamento
+  // 💡 ESTADO INICIAL COM ID: Fundamental para evitar cópias duplicadas
   const [dados, setDados] = useState({ 
     id: null, 
     nome: '', 
@@ -84,64 +84,70 @@ export default function Usuarios() {
   };
 
   const selecionarLoja = (loja) => {
-  // ... resto do seu código
-  
-  // Garanta que o idDaLoja seja salvo como String ou Número fixo
-  const idDaLoja = loja.codigo_loja; 
+    const nomeDaLoja = loja['Nome Fantasia'] || loja.nome_fantasia || loja.Nome_Fantasia || 'LOJA DESCONHECIDA';
+    const idDaLoja = loja.codigo_loja;
 
-  setDados({ 
-    ...dados, 
-    loja: nomeDaLoja, 
-    codigo: dados.id ? dados.codigo : `${prefixo}${proximoNumero}`, 
-    codigo_loja: idDaLoja // Mantenha o padrão que vem da tabela de lojas
-  });
-  
-  // ... resto da função
-};
+    if (!idDaLoja) {
+      alert("Erro V.I.R.T.U.S: Esta loja não possui um código ID cadastrado.");
+      return;
+    }
+    
+    // SÓ GERA NOVO CÓDIGO SE NÃO TIVER ID (CADASTRO NOVO)
+    if (!dados.id) {
+        const prefixo = String(idDaLoja).padStart(2, '0');
+        const usuariosDaLoja = usuarios.filter(u => String(u.codigo_loja) === String(idDaLoja));
+        const proximoNumero = (usuariosDaLoja.length + 1).toString().padStart(2, '0');
+        setDados({ ...dados, loja: nomeDaLoja, codigo: `${prefixo}${proximoNumero}`, codigo_loja: idDaLoja });
+    } else {
+        // Na edição, apenas troca a unidade mantendo o código de acesso e o ID original
+        setDados({ ...dados, loja: nomeDaLoja, codigo_loja: idDaLoja });
+    }
+
+    setLojaDigitada(nomeDaLoja);
+    setMostrarSugestoesLoja(false);
+  };
 
   async function salvar() {
-    if (!dados.nome.trim()) return alert("⚠️ V.I.R.T.U.S INFORMA: O campo NOME COMPLETO é obrigatório!");
-    if (!dados.loja.trim() || !dados.codigo) return alert("⚠️ V.I.R.T.U.S INFORMA: Selecione uma LOJA!");
-    if (!dados.senha.trim()) return alert("⚠️ V.I.R.T.U.S INFORMA: A SENHA é obrigatória!");
+    if (!dados.nome.trim()) return alert("⚠️ NOME é obrigatório!");
+    if (!dados.loja.trim()) return alert("⚠️ SELECIONE UMA LOJA!");
+    if (!dados.senha.trim()) return alert("⚠️ SENHA é obrigatória!");
 
-    // Upsert identifica pelo ID se deve atualizar ou criar
+    // O Supabase usa o campo 'id' para decidir entre UPDATE ou INSERT
     const { error } = await supabase.from('usuarios').upsert([dados]);
     
     if (!error) { 
-      alert("✅ Dados processados com sucesso pela V.I.R.T.U.S!"); 
+      alert("✅ V.I.R.T.U.S: Cadastro atualizado com sucesso!"); 
       setUsuarioAberto(null); 
       carregarDados(); 
     } else { 
-      alert("Erro no Banco de Dados: " + error.message); 
+      alert("Erro Crítico: " + error.message); 
     }
   }
 
   async function alternarStatus() {
-    if (!dados.codigo) return alert("Erro: Código não localizado.");
+    if (!dados.id) return alert("Erro: ID não localizado.");
     const novoStatus = !dados.status;
     if (window.confirm(novoStatus ? "REATIVAR acesso?" : "BLOQUEAR acesso?")) {
-      const { error } = await supabase.from('usuarios').update({ status: novoStatus }).eq('codigo', dados.codigo);
+      const { error } = await supabase.from('usuarios').update({ status: novoStatus }).eq('id', dados.id);
       if (!error) { setDados({ ...dados, status: novoStatus }); carregarDados(); }
     }
   }
 
-  // Ordenação e Filtragem
+  // 💡 LÓGICA DE ORDENAÇÃO E FILTRAGEM (CORREÇÃO DAS 3 PRIMEIRAS LOJAS)
   const lojasOrdenadas = [...listaLojas].sort((a, b) => 
-    String(a.codigo_loja).localeCompare(String(b.codigo_loja), undefined, { numeric: true })
+    Number(a.codigo_loja) - Number(b.codigo_loja)
   );
 
- // 💡 FILTRAGEM CORRIGIDA: Convertendo ambos para String para ignorar tipos e zeros à esquerda
-const usuariosExibidos = usuarios.filter(u => {
-  const matchesBusca = u.nome?.toLowerCase().includes(busca.toLowerCase());
-  
-  // Se não tiver loja selecionada, mostra todos. 
-  // Se tiver, converte ambos para String para garantir que "1" ou "01" sejam lidos iguais.
-  const matchesLoja = lojaAtiva !== null 
-    ? String(u.codigo_loja) === String(lojaAtiva) 
-    : true;
+  const usuariosExibidos = usuarios.filter(u => {
+    const matchesBusca = u.nome?.toLowerCase().includes(busca.toLowerCase());
+    
+    // Comparação numérica segura para evitar erro "01" vs 1
+    const matchesLoja = lojaAtiva !== null 
+      ? Number(u.codigo_loja) === Number(lojaAtiva) 
+      : true;
 
-  return matchesBusca && matchesLoja;
-});
+    return matchesBusca && matchesLoja;
+  });
 
   const lojasFiltradasModal = listaLojas.filter(l => {
     const nome = l['Nome Fantasia'] || l.nome_fantasia || l.Nome_Fantasia || '';
@@ -159,7 +165,7 @@ const usuariosExibidos = usuarios.filter(u => {
   return (
     <div style={{ width: '95%', maxWidth: '1000px', margin: '0 auto', fontFamily: design.geral.fonte, display: 'flex', flexDirection: 'column', gap: '25px', paddingBottom: '50px' }}>
       
-      {/* BARRA DE PESQUISA E BOTÃO NOVO */}
+      {/* HEADER E BUSCA */}
       <div style={{ display: 'flex', gap: '15px', marginTop: '20px' }}>
         <input placeholder="Procurar funcionário..." value={busca} onChange={e => setBusca(e.target.value)} style={{ flex: 1, padding: '18px', borderRadius: design.geral.raioBordaGlobal, border: 'none', boxShadow: design.geral.sombraPadrao, outline: 'none' }} />
         <button 
@@ -175,9 +181,9 @@ const usuariosExibidos = usuarios.filter(u => {
         </button>
       </div>
 
-      {/* SEÇÃO DE CARDS DAS LOJAS */}
+      {/* CARDS DE LOJAS (ORGANIZAÇÃO POR UNIDADE) */}
       <div>
-        <h3 style={{ fontSize: '11px', color: '#94a3b8', fontWeight: '900', marginBottom: '15px', letterSpacing: '1px' }}>FILTRAR POR UNIDADE</h3>
+        <h3 style={{ fontSize: '11px', color: '#94a3b8', fontWeight: '900', marginBottom: '15px', letterSpacing: '1px' }}>SELECIONE A UNIDADE</h3>
         <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '15px', scrollbarWidth: 'none' }}>
           <div 
             onClick={() => setLojaAtiva(null)}
@@ -189,11 +195,11 @@ const usuariosExibidos = usuarios.filter(u => {
               border: !lojaAtiva ? 'none' : '1px solid #e2e8f0'
             }}
           >
-            <strong style={{ fontSize: '11px' }}>TODAS</strong>
+            <strong style={{ fontSize: '11px' }}>VER TODAS</strong>
           </div>
 
           {lojasOrdenadas.map(loja => {
-            const ativo = lojaAtiva === loja.codigo_loja;
+            const ativo = Number(lojaAtiva) === Number(loja.codigo_loja);
             return (
               <div 
                 key={loja.codigo_loja}
@@ -206,9 +212,9 @@ const usuariosExibidos = usuarios.filter(u => {
                   border: ativo ? 'none' : '1px solid #e2e8f0'
                 }}
               >
-                <div style={{ fontSize: '9px', color: ativo ? design.botoes.primario : '#94a3b8', fontWeight: '900' }}>UNIDADE {loja.codigo_loja}</div>
+                <div style={{ fontSize: '9px', color: ativo ? design.botoes.primario : '#94a3b8', fontWeight: '900' }}>CÓD. {loja.codigo_loja}</div>
                 <div style={{ fontSize: '12px', fontWeight: '700', marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {loja['Nome Fantasia'] || loja.nome_fantasia}
+                    {loja['Nome Fantasia'] || loja.nome_fantasia || 'LOJA'}
                 </div>
               </div>
             );
@@ -216,7 +222,7 @@ const usuariosExibidos = usuarios.filter(u => {
         </div>
       </div>
 
-      {/* GRID DE USUÁRIOS */}
+      {/* LISTAGEM DE USUÁRIOS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
         {usuariosExibidos.map(u => (
           <div key={u.id || u.codigo} onClick={() => { setUsuarioAberto(u); setDados({ ...u }); setLojaDigitada(u.loja || ''); setEditando(false); }} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: design.geral.raioBordaGlobal, boxShadow: design.geral.sombraPadrao, display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', opacity: u.status !== false ? 1 : 0.6 }}>
@@ -230,7 +236,7 @@ const usuariosExibidos = usuarios.filter(u => {
         ))}
       </div>
 
-      {/* MODAL DE EDIÇÃO/CADASTRO */}
+      {/* MODAL */}
       {usuarioAberto && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: design.modal.overlay, zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(5px)' }}>
           <div style={{ backgroundColor: design.modal.fundo, width: '90%', maxWidth: '520px', padding: design.modal.padding, borderRadius: design.modal.raio, position: 'relative', maxHeight: '90vh', overflowY: 'auto' }}>
@@ -238,9 +244,8 @@ const usuariosExibidos = usuarios.filter(u => {
             <button onClick={() => setUsuarioAberto(null)} style={{ position: 'absolute', top: '25px', right: '25px', border: 'none', background: '#f5f5f5', width: '30px', height: '30px', borderRadius: '50%', cursor: 'pointer' }}>✕</button>
 
             <h2 style={{ color: design.modal.tituloCor, fontWeight: '900', marginBottom: '5px' }}>{usuarioAberto.novo ? 'NOVO CADASTRO' : 'PERFIL DO USUÁRIO'}</h2>
-            <p style={{fontSize: '11px', color: '#999', marginBottom: '20px'}}>STATUS: <b style={{color: dados.status !== false ? '#22c55e' : '#ef4444'}}>{dados.status !== false ? 'ACESSO LIBERADO' : 'BLOQUEADO'}</b></p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '20px' }}>
               <div style={cssGrupo}>
                 <div style={{ position: 'relative' }}>
                   <label style={cssLabel}>NOME COMPLETO *</label>
@@ -249,22 +254,21 @@ const usuariosExibidos = usuarios.filter(u => {
                     value={dados.nome} 
                     onChange={e => { setDados({...dados, nome: e.target.value.toUpperCase()}); setMostrarSugestoesNome(true); }} 
                     style={cssInput(!editando)} 
-                    placeholder="EX: JOÃO DA SILVA" 
                   />
                   {mostrarSugestoesNome && editando && usuariosFiltradosNome.length > 0 && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', marginTop: '5px' }}>
-                      <div style={{ padding: '10px', fontSize: '11px', color: '#f97316', fontWeight: 'bold', backgroundColor: '#fff7ed' }}>⚠️ Nome já cadastrado:</div>
+                    <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0' }}>
+                      <div style={{ padding: '10px', fontSize: '11px', color: '#f97316', fontWeight: 'bold' }}>Possível Duplicata:</div>
                       {usuariosFiltradosNome.map(u => (
-                        <div key={u.id} onClick={() => { setDados(u); setUsuarioAberto(u); setLojaDigitada(u.loja || ''); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px', fontWeight: 'bold' }}>
-                          {u.nome} <span style={{ color: '#999', fontSize: '10px' }}>(Loja: {u.loja})</span>
+                        <div key={u.id} onClick={() => { setDados(u); setUsuarioAberto(u); setLojaDigitada(u.loja || ''); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px' }}>
+                          {u.nome} ({u.loja})
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
                 <div>
-                  <label style={cssLabel}>TELEFONE (WHATSAPP)</label>
-                  <input disabled={!editando} value={dados.telefone} onChange={handleTelefoneChange} placeholder="(00) 00000-0000" style={cssInput(!editando)} />
+                  <label style={cssLabel}>TELEFONE</label>
+                  <input disabled={!editando} value={dados.telefone} onChange={handleTelefoneChange} style={cssInput(!editando)} />
                 </div>
               </div>
 
@@ -273,16 +277,15 @@ const usuariosExibidos = usuarios.filter(u => {
                   <label style={cssLabel}>UNIDADE DE TRABALHO *</label>
                   <input 
                     disabled={!editando}
-                    placeholder="BUSCAR LOJA..."
                     value={lojaDigitada}
                     onChange={(e) => { setLojaDigitada(e.target.value.toUpperCase()); setMostrarSugestoesLoja(true); }}
                     style={{ ...cssInput(!editando), borderColor: '#fed7aa' }}
                   />
                   {mostrarSugestoesLoja && editando && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0' }}>
+                    <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999 }}>
                       {lojasFiltradasModal.map(loja => (
-                        <div key={loja.codigo_loja} onClick={() => selecionarLoja(loja)} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px', fontWeight: 'bold' }}>
-                          {loja['Nome Fantasia'] || loja.nome_fantasia} (Cód: {loja.codigo_loja})
+                        <div key={loja.codigo_loja} onClick={() => selecionarLoja(loja)} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px' }}>
+                          {loja['Nome Fantasia'] || loja.nome_fantasia}
                         </div>
                       ))}
                     </div>
@@ -291,7 +294,7 @@ const usuariosExibidos = usuarios.filter(u => {
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                   <div>
-                    <label style={cssLabel}>CÓDIGO DE ACESSO</label>
+                    <label style={cssLabel}>CÓDIGO</label>
                     <input readOnly value={dados.codigo} style={{ ...cssInput(true), fontWeight: '900', color: design.botoes.primario, textAlign: 'center' }} />
                   </div>
                   <div>
@@ -302,23 +305,23 @@ const usuariosExibidos = usuarios.filter(u => {
               </div>
 
               <div style={cssGrupo}>
-                <label style={cssLabel}>NÍVEL DE PERMISSÃO *</label>
+                <label style={cssLabel}>PERMISSÃO *</label>
                 <select disabled={!editando} value={dados.perfil} onChange={e => setDados({...dados, perfil: e.target.value})} style={cssInput(!editando)}>
-                  <option value="operador">👤 OPERADOR (ACESSO LIMITADO)</option>
-                  <option value="admin">🛡️ ADMINISTRADOR (ACESSO TOTAL)</option>
+                  <option value="operador">👤 OPERADOR</option>
+                  <option value="admin">🛡️ ADMINISTRADOR</option>
                 </select>
               </div>
             </div>
 
             <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {editando ? (
-                <button onClick={salvar} style={{ height: design.botoes.altura, backgroundColor: design.botoes.primario, color: design.botoes.texto, borderRadius: design.botoes.raio, border: 'none', fontWeight: '900', cursor: 'pointer' }}>SALVAR NO SISTEMA</button>
+                <button onClick={salvar} style={{ height: design.botoes.altura, backgroundColor: design.botoes.primario, color: design.botoes.texto, borderRadius: design.botoes.raio, border: 'none', fontWeight: '900', cursor: 'pointer' }}>SALVAR ALTERAÇÕES</button>
               ) : (
                 <>
                   <button onClick={() => setEditando(true)} style={{ height: design.botoes.altura, backgroundColor: design.botoes.secundario, color: design.botoes.texto, borderRadius: design.botoes.raio, border: 'none', fontWeight: '900', cursor: 'pointer' }}>HABILITAR EDIÇÃO</button>
                   {!usuarioAberto.novo && (
-                    <button onClick={alternarStatus} style={{ height: '48px', background: 'none', border: `2px solid ${dados.status !== false ? '#ef4444' : '#22c55e'}`, color: dados.status !== false ? '#ef4444' : '#22c55e', borderRadius: design.botoes.raio, fontWeight: '900', cursor: 'pointer', fontSize: '13px' }}>
-                      {dados.status !== false ? 'BLOQUEAR USUÁRIO' : 'REATIVAR USUÁRIO'}
+                    <button onClick={alternarStatus} style={{ height: '48px', background: 'none', border: `2px solid ${dados.status !== false ? '#ef4444' : '#22c55e'}`, color: dados.status !== false ? '#ef4444' : '#22c55e', borderRadius: design.botoes.raio, fontWeight: '900', cursor: 'pointer' }}>
+                      {dados.status !== false ? 'BLOQUEAR ACESSO' : 'REATIVAR ACESSO'}
                     </button>
                   )}
                 </>
