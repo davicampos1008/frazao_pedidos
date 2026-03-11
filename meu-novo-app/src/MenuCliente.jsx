@@ -277,6 +277,13 @@ export default function MenuCliente({ usuario, tema }) {
   const edicaoLiberadaBD = listaEnviadaHoje?.some(item => item.liberado_edicao === true);
   const isAppTravado = !precosLiberados || (listaEnviadaHoje && !edicaoLiberadaBD);
 
+  // 💡 LÓGICA PARA VERIFICAR SE O ITEM É DA LISTA PADRÃO INDEPENDENTE DE COMO ESTÁ NO BANCO
+  const verificarSePadrao = (valorPadrao) => {
+    if (valorPadrao === true || valorPadrao === 'true') return true;
+    if (Array.isArray(valorPadrao) && valorPadrao.length > 0) return true;
+    return false;
+  };
+
   const abrirProduto = (p) => {
     setProdutoExpandido(p);
     const itemExistente = carrinhoSeguro.find(i => i.id === p.id);
@@ -365,8 +372,8 @@ export default function MenuCliente({ usuario, tema }) {
   const abrirRevisao = () => {
     if(carrinhoSeguro.length === 0) return;
 
-    // 💡 REMOVIDA: A lógica que olhava p.lista_padrao como array, voltando para a regra simples antiga.
-    const itensPadrao = produtos.filter(p => p.lista_padrao === true && p.status_cotacao !== 'falta' && p.status_cotacao !== 'sem_preco');
+    // 💡 ATUALIZADO: Agora usa a verificação universal de Lista Padrão
+    const itensPadrao = produtos.filter(p => verificarSePadrao(p.lista_padrao) && p.status_cotacao !== 'falta' && p.status_cotacao !== 'sem_preco');
     const itensFaltando = itensPadrao.filter(pPadrao => !carrinhoSeguro.some(c => c.id === pPadrao.id));
 
     if (itensFaltando.length > 0) {
@@ -479,7 +486,6 @@ export default function MenuCliente({ usuario, tema }) {
     } catch (err) { setErroSenha(err.message); } finally { setCarregandoSenha(false); }
   };
 
-  // 💡 LÓGICA DE MATEMÁTICA MOVIDA PARA FORA DO RETURN (Resolve o erro 1109 / 1005 do compilador)
   const infosVendaExpandido = produtoExpandido ? tratarInfosDeVenda(produtoExpandido) : null;
   const qtdFinalExp = parseInt(quantidade) || 1;
   const bonifFinalExp = temBonificacao ? (parseInt(qtdBonificada) || 0) : 0;
@@ -571,21 +577,25 @@ export default function MenuCliente({ usuario, tema }) {
           const termoBuscado = removerAcentos(buscaMenu.toLowerCase().trim());
           const nomeProduto = removerAcentos(p.nome.toLowerCase());
           
+          // 💡 ATUALIZADO: Aplica a verificação universal na filtragem também
+          const ehPadrao = verificarSePadrao(p.lista_padrao);
+          
           if (termoBuscado) {
             if (categoriaAtiva === '⭐ LISTA PADRÃO') {
-              return p.lista_padrao === true && nomeProduto.includes(termoBuscado);
+              return ehPadrao && nomeProduto.includes(termoBuscado);
             }
             return nomeProduto.includes(termoBuscado);
           }
 
           if (categoriaAtiva === 'TODOS') return true;
           if (categoriaAtiva === 'DESTAQUES') return p.promocao || p.novidade;
-          if (categoriaAtiva === '⭐ LISTA PADRÃO') return p.lista_padrao === true;
+          if (categoriaAtiva === '⭐ LISTA PADRÃO') return ehPadrao;
           
           return p.categoria && p.categoria.toUpperCase() === categoriaAtiva.replace(/[\u1000-\uFFFF]+/g, '').trim().toUpperCase();
         }).map(p => {
           const itemNoCarrinho = carrinhoSeguro.find(i => i.id === p.id);
           const infosVenda = tratarInfosDeVenda(p);
+          const ehPadrao = verificarSePadrao(p.lista_padrao);
           
           let corBorda = configDesign.cores.fundoCards;
           let selo = null;
@@ -615,7 +625,7 @@ export default function MenuCliente({ usuario, tema }) {
                <div style={{ height: categoriaAtiva === 'DESTAQUES' ? configDesign.cards.alturaImgDestaque : configDesign.cards.alturaImgPequena, borderRadius: '8px', backgroundImage: `url(${(p.foto_url || '').split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: configDesign.cores.inputFundo }} />
                <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
                  <strong style={{ fontSize: categoriaAtiva === 'DESTAQUES' ? '14px' : '11px', color: configDesign.cores.textoForte, lineHeight: '1.2', height: categoriaAtiva === 'DESTAQUES' ? 'auto' : '26px', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                   {p.nome} {p.lista_padrao && '⭐'}
+                   {p.nome} {ehPadrao && '⭐'}
                  </strong>
                  {infosVenda.isCaixa && <small style={{fontSize: '9px', color: configDesign.cores.textoSuave, marginTop: '2px'}}>{infosVenda.textoSecundario}</small>}
                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto', paddingTop: '5px' }}>
