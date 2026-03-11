@@ -48,9 +48,6 @@ export default function PlanilhaCompras() {
   const [copiadoGeral, setCopiadoGeral] = useState(null);
   const [copiadoLoja, setCopiadoLoja] = useState(null);
 
-  // 💡 ESTADO PARA CONTROLAR A QTD DE LOJAS NO PEDIDO GERAL
-  const [incluirQtdLojasGeral, setIncluirQtdLojasGeral] = useState(false);
-
   const [itensSelecionados, setItensSelecionados] = useState([]);
   const [nomeFornecedorLote, setNomeFornecedorLote] = useState('');
   
@@ -328,25 +325,6 @@ export default function PlanilhaCompras() {
 
   useEffect(() => { carregarDados(); }, [carregarDados]);
 
-  // 💡 NOVO: Atualização Automática em Tempo Real sem travar a tela
-  useEffect(() => {
-    const canalPlanilha = supabase
-      .channel('planilha_compras_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'pedidos' },
-        (payload) => {
-          // Atualiza silenciosamente as listas para todos que estiverem na tela
-          carregarDados(true);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(canalPlanilha);
-    };
-  }, [carregarDados]);
-
   // 💡 FUNÇÃO DO NOVO BOTÃO DE ATUALIZAR STATUS AO VIVO
   const atualizarAoVivo = () => {
     carregarDados(true); // true = silencioso (não mostra a tela de carregamento)
@@ -537,19 +515,14 @@ export default function PlanilhaCompras() {
     
     const mapaItensGerais = {};
 
-    // 💡 CONTA A QUANTIDADE DE LOJAS E AGRUPA OS ITENS
     Object.values(f.lojas).forEach(loja => {
       loja.itens.forEach(item => {
         const key = `${item.nome}`;
         if (!mapaItensGerais[key]) {
-          mapaItensGerais[key] = { ...item, qtd: 0, qtd_bonificada: 0, qtd_lojas: 0 };
+          mapaItensGerais[key] = { ...item, qtd: 0, qtd_bonificada: 0 };
         }
         mapaItensGerais[key].qtd += item.qtd;
         mapaItensGerais[key].qtd_bonificada += item.qtd_bonificada || 0;
-        
-        if (item.qtd > 0 || item.qtd_bonificada > 0) {
-            mapaItensGerais[key].qtd_lojas += 1;
-        }
       });
     });
 
@@ -560,10 +533,7 @@ export default function PlanilhaCompras() {
        const precoNum = tratarPrecoNum(i.valor_unit);
        const totalLinha = (i.qtd - (i.qtd_bonificada || 0)) * precoNum;
 
-       // 💡 VERIFICA SE DEVE INCLUIR A QUANTIDADE DE LOJAS
-       const sufixoLojas = incluirQtdLojasGeral ? ` (${i.qtd_lojas} LJ)` : '';
-
-       msg += `${i.qtd} ${nomeWhats}${sufixoLojas} - ${i.valor_unit} (Total: ${formatarMoeda(totalLinha)})`;
+       msg += `${i.qtd} ${nomeWhats} - ${i.valor_unit} (Total: ${formatarMoeda(totalLinha)})`;
        if (i.qtd_bonificada > 0) msg += ` (🎁 +${i.qtd_bonificada})`;
        msg += `\n`;
     });
@@ -828,6 +798,7 @@ export default function PlanilhaCompras() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-end' }}>
             
+            {/* 💡 NOVO BOTÃO DE ATUALIZAÇÃO MANUAL/AO VIVO */}
             <div style={{ display: 'flex', gap: '10px' }}>
               <button onClick={atualizarAoVivo} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '11px', boxShadow: '0 4px 15px rgba(59,130,246,0.4)' }}>
                 🔄 ATUALIZAR STATUS
@@ -1142,16 +1113,6 @@ export default function PlanilhaCompras() {
                              <option value="" disabled>Escolha a Loja Titular (Cabeçalho)...</option>
                              {Object.keys(f.lojas).map(nomeL => <option key={nomeL} value={nomeL}>{nomeL}</option>)}
                           </select>
-
-                          {/* 💡 NOVO: CHECKBOX DE INCLUIR QTD DE LOJAS */}
-                          <label style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', color: '#64748b', fontWeight: 'bold' }}>
-                             <input 
-                               type="checkbox" 
-                               checked={incluirQtdLojasGeral} 
-                               onChange={(e) => setIncluirQtdLojasGeral(e.target.checked)} 
-                             />
-                             Incluir quantidade de lojas que pediram o item?
-                          </label>
 
                           <button 
                               onClick={() => gerarPedidoGeral(f)} 
