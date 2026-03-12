@@ -65,13 +65,6 @@ export default function FechamentoLojas({ isEscuro }) {
   useEffect(() => {
     localStorage.setItem('virtus_fechamento_data', dataFiltro);
     carregar();
-
-    // 💡 NOVO: Atualização silenciosa a cada 2 segundos
-    const intervalo = setInterval(() => {
-      carregar(true);
-    }, 2000);
-
-    return () => clearInterval(intervalo);
   }, [dataFiltro]);
 
   const removerAcentos = (str) => String(str || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
@@ -109,9 +102,8 @@ export default function FechamentoLojas({ isEscuro }) {
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
   };
 
-  // 💡 NOVO: Adicionado parâmetro 'silencioso' para não mostrar a tela de loading no polling
-  async function carregar(silencioso = false) {
-    if (!silencioso) setCarregando(true);
+  async function carregar() {
+    setCarregando(true);
     try {
       const { data: lojasData } = await supabase.from('lojas').select('*');
       const { data: pedData } = await supabase.from('pedidos').select('*').eq('data_pedido', dataFiltro);
@@ -122,6 +114,9 @@ export default function FechamentoLojas({ isEscuro }) {
       const mapaLojas = {};
       const mapaForn = {};
 
+      // =======================================================================
+      // PARTE 1: ORGANIZAÇÃO DOS DADOS
+      // =======================================================================
       (pedData || []).forEach(p => {
         if (p.status_compra === 'pendente') {
             const idLoja = extrairNum(p.loja_id);
@@ -151,16 +146,15 @@ export default function FechamentoLojas({ isEscuro }) {
             return;
         }
 
-        // --- FORNECEDORES (NÃO MUDA NADA, USA CUSTO_UNIT) ---
+        // --- 💡 LÓGICA DE FORNECEDORES REFEITA E BLINDADA ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
           let fNomeOriginal = p.fornecedor_compra ? String(p.fornecedor_compra).toUpperCase() : 'SEM FORNECEDOR';
           if (fNomeOriginal.startsWith('ALERTA|')) fNomeOriginal = fNomeOriginal.replace('ALERTA|', '');
           
           const isBoleto = p.status_compra === 'boleto';
-          // 💡 SEPARAÇÃO AUTOMÁTICA DE BOLETOS
           const fNome = isBoleto ? `${fNomeOriginal} (BOLETO)` : fNomeOriginal;
           
-          let baseVal = p.custo_unit;
+          let baseVal = p.custo_unit; 
           let qtdBonifFornecedor = Number(p.qtd_bonificada) || 0;
           
           if (String(p.custo_unit).includes('BONIFICAÇÃO |')) {
@@ -168,11 +162,6 @@ export default function FechamentoLojas({ isEscuro }) {
           }
 
           const valNum = tratarPrecoNum(baseVal);
-          const baseValFormatado = valNum > 0 ? formatarMoeda(valNum) : baseVal; 
-          
-          const qtdCobradaForn = Math.max(0, p.qtd_atendida - qtdBonifFornecedor);
-          const totalItemFornCobrado = qtdCobradaForn * valNum;
-          const valorEconomizadoBonif = qtdBonifFornecedor * valNum;
 
           if (!mapaForn[fNome]) {
             const fInfo = buscarFornecedorSimilar(fNomeOriginal, fornData || []);
@@ -186,13 +175,11 @@ export default function FechamentoLojas({ isEscuro }) {
                totalBruto: 0,
                totalDescontoBonif: 0,
                qtdBonificadaGeral: 0,
+               itensRaw: {}, // Objeto intermediário para fundir perfeitamente
                itens: [], 
                lojasEnvolvidas: {},
-               statusPagamento: 'pendente',
-               notaFiscal: p.nota_fiscal || null // 💡 NOVO: Captura a nota fiscal se existir
+               statusPagamento: 'pendente' 
             };
-          } else if (!mapaForn[fNome].notaFiscal && p.nota_fiscal) {
-            mapaForn[fNome].notaFiscal = p.nota_fiscal; // 💡 NOVO: Atualiza a NF se algum item a tiver
           }
 
           const idLojaForn = extrairNum(p.loja_id);
@@ -201,43 +188,28 @@ export default function FechamentoLojas({ isEscuro }) {
           
           mapaForn[fNome].lojasEnvolvidas[nomeLojaForn] = lInfoForn || { nome_fantasia: nomeLojaForn, placa_caminhao: 'SEM PLACA' };
 
-          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => 
-              i.nomeItem === p.nome_produto && 
-              i.isBoleto === isBoleto && 
-              tratarPrecoNum(i.valUnit) === valNum
-          );
-
-          if (itemExistenteIndex >= 0) {
-              const itEx = mapaForn[fNome].itens[itemExistenteIndex];
-              itEx.qtd += p.qtd_atendida;
-              itEx.qtdBonificada += qtdBonifFornecedor;
-              itEx.totalCobrado += totalItemFornCobrado;
-              itEx.totalBonificado += valorEconomizadoBonif;
-          } else {
-              mapaForn[fNome].itens.push({ 
-                nomeItem: p.nome_produto, 
-                unidade: p.unidade_medida || 'UN',
-                qtd: p.qtd_atendida,
-                qtdBonificada: qtdBonifFornecedor,
-                valUnit: baseValFormatado, 
-                totalCobrado: totalItemFornCobrado,
-                totalBonificado: valorEconomizadoBonif,
-                isBoleto 
-              });
+          // 💡 Joga no Raw agrupando SÓ por nome (ignora preços diferentes do banco de dados)
+          const keyItem = `${p.nome_produto}_${isBoleto}`;
+          if (!mapaForn[fNome].itensRaw[keyItem]) {
+              mapaForn[fNome].itensRaw[keyItem] = {
+                  nomeItem: p.nome_produto,
+                  unidade: p.unidade_medida || 'UN',
+                  qtd: 0,
+                  qtdBonificada: 0,
+                  maxValNum: 0, // Salva o maior preço encontrado para usar como oficial
+                  isBoleto: isBoleto
+              };
           }
 
-          mapaForn[fNome].totalBruto += (totalItemFornCobrado + valorEconomizadoBonif);
-          mapaForn[fNome].totalDescontoBonif += valorEconomizadoBonif;
-          mapaForn[fNome].qtdBonificadaGeral += qtdBonifFornecedor;
-
-          if (isBoleto) {
-            mapaForn[fNome].totalBoleto += totalItemFornCobrado;
-          } else {
-            mapaForn[fNome].totalPix += totalItemFornCobrado;
+          const raw = mapaForn[fNome].itensRaw[keyItem];
+          raw.qtd += p.qtd_atendida;
+          raw.qtdBonificada += qtdBonifFornecedor;
+          if (valNum > raw.maxValNum) {
+              raw.maxValNum = valNum;
           }
         }
 
-        // --- LOJAS (AQUI PRIORIZAMOS O PRECO_VENDA PARA O FECHAMENTO) ---
+        // --- LOJAS (Mantém a lógica do preco_venda/média) ---
         const idLoja = extrairNum(p.loja_id);
         if (!idLoja || idLoja <= 1) return;
 
@@ -259,7 +231,6 @@ export default function FechamentoLojas({ isEscuro }) {
         let qtdDisplay = p.quantidade; 
         let qtdBonificada = Number(p.qtd_bonificada) || 0;
         
-        // 💡 Lógica de prioridade de preço para a loja (Usa a média se existir, senão usa o original)
         let unitParaLoja = p.preco_venda || p.custo_unit || 'R$ 0,00';
         let unitDisplay = unitParaLoja;
         let totalItem = 0;
@@ -361,6 +332,39 @@ export default function FechamentoLojas({ isEscuro }) {
         }
       });
 
+      // =======================================================================
+      // PARTE 2: FECHAR CÁLCULO FINAL DOS FORNECEDORES (Resolução do Bug)
+      // =======================================================================
+      Object.values(mapaForn).forEach(forn => {
+          Object.values(forn.itensRaw).forEach(raw => {
+              const qtdCobradaForn = Math.max(0, raw.qtd - raw.qtdBonificada);
+              const totalItemFornCobrado = qtdCobradaForn * raw.maxValNum;
+              const valorEconomizadoBonif = raw.qtdBonificada * raw.maxValNum;
+
+              forn.itens.push({
+                  nomeItem: raw.nomeItem,
+                  unidade: raw.unidade,
+                  qtd: raw.qtd,
+                  qtdBonificada: raw.qtdBonificada,
+                  valUnit: raw.maxValNum > 0 ? formatarMoeda(raw.maxValNum) : 'R$ 0,00',
+                  totalCobrado: totalItemFornCobrado,
+                  totalBonificado: valorEconomizadoBonif,
+                  isBoleto: raw.isBoleto
+              });
+
+              forn.totalBruto += (totalItemFornCobrado + valorEconomizadoBonif);
+              forn.totalDescontoBonif += valorEconomizadoBonif;
+              forn.qtdBonificadaGeral += raw.qtdBonificada;
+
+              if (raw.isBoleto) {
+                  forn.totalBoleto += totalItemFornCobrado;
+              } else {
+                  forn.totalPix += totalItemFornCobrado;
+              }
+          });
+          delete forn.itensRaw; 
+      });
+
       const arrayLojas = Object.values(mapaLojas).sort((a, b) => a.loja_id - b.loja_id);
       arrayLojas.forEach(loja => loja.itens.sort((a, b) => a.nome.localeCompare(b.nome)));
       setFechamentos(arrayLojas);
@@ -369,10 +373,9 @@ export default function FechamentoLojas({ isEscuro }) {
       arrayForn.forEach(f => f.itens.sort((a, b) => a.nomeItem.localeCompare(b.nomeItem)));
       setFornecedores(arrayForn);
 
-    } catch (err) { console.error(err); } finally { if (!silencioso) setCarregando(false); }
+    } catch (err) { console.error(err); } finally { setCarregando(false); }
   }
 
-  // 💡 FUNÇÃO PARA APLICAR VALOR MÉDIA (VENDA) SEM ALTERAR CUSTO
   const aplicarPrecoMedia = async () => {
     if(!itemMediaSelecionado || !valorMediaInput) return alert("Selecione o item e o valor.");
     
@@ -521,7 +524,7 @@ export default function FechamentoLojas({ isEscuro }) {
         const updatePayload = {
           qtd_atendida: Number(item.qtdEntregue) || 0,
           qtd_bonificada: Number(item.qtd_bonificada) || 0,
-          custo_unit: unitParaBanco, 
+          preco_venda: unitParaBanco, 
           status_compra: statusFinal
         };
         await supabase.from('pedidos').update(updatePayload).eq('id', item.id_pedido);
@@ -585,7 +588,6 @@ export default function FechamentoLojas({ isEscuro }) {
 
     const isMotorista = tipoImpressao?.startsWith('motorista');
 
-    // 💡 PDF CONFIG: Diferencia Motorista (Gigante/Exato) da Loja (Padrão/Multipage)
     const opt = isMotorista ? {
       margin:       0, 
       filename:     nomeArquivo,
@@ -642,7 +644,7 @@ export default function FechamentoLojas({ isEscuro }) {
     return true;
   });
 
-  if (carregando && fechamentos.length === 0) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif', color: themeText }}>🔄 Processando...</div>;
+  if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif', color: themeText }}>🔄 Processando...</div>;
 
   const renderTabelaDupla = (itensLoja, isMotorista) => {
     const half = Math.ceil(itensLoja.length / 2);
@@ -651,16 +653,14 @@ export default function FechamentoLojas({ isEscuro }) {
       rows.push({ left: itensLoja[i], right: itensLoja[i + half] });
     }
 
-    // 💡 ESTILOS LOJA (Padrão Original e Pequeno)
     const thStyleLoja = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontWeight: 'bold', fontSize: '11px', backgroundColor: '#e5e7eb', color: 'black' };
     const tdStyleLoja = { border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontSize: '12px', fontWeight: '900', color: 'black' };
     const tdDescLoja = { ...tdStyleLoja, textAlign: 'left', fontSize: '13px', wordBreak: 'break-word' }; 
 
-    // 💡 ESTILOS MOTORISTA (Dinâmico para preencher a folha sem estourar e sem esticar demais listas pequenas)
-    const maxRows = Math.max(half, 20); // Se a lista tiver menos de 20 linhas, simula ter 20 (Evita fontes gigantes)
+    const maxRows = Math.max(half, 20); 
     const availableHeight = 2500; 
     const calcFont = availableHeight / maxRows * 0.40;
-    const fontSizeMot = Math.max(18, Math.min(38, calcFont)); // Max 38px, Min 18px
+    const fontSizeMot = Math.max(18, Math.min(38, calcFont)); 
     const paddingMot = Math.max(6, Math.min(12, calcFont * 0.15));
 
     const thStyleMot = { border: '4px solid black', padding: `${paddingMot}px 10px`, textAlign: 'center', fontWeight: 'bold', fontSize: `${fontSizeMot * 0.85}px`, backgroundColor: '#e5e7eb', color: 'black' };
@@ -709,7 +709,6 @@ export default function FechamentoLojas({ isEscuro }) {
                   if (tDisp === 'BONIFIC.') corTotal = '#16a34a'; 
                }
 
-               // 💡 O MOTORISTA SÓ VÊ O QUE FOR "FALTA" (Boletos, bonificações e pendentes ficam em branco na coluna dele)
                if (isMotorista) {
                   if (!item.isFalta) {
                      uDisp = '';
@@ -753,35 +752,35 @@ export default function FechamentoLojas({ isEscuro }) {
       <div style={{ backgroundColor: themeBg, minHeight: '100vh', padding: '10px', fontFamily: 'Arial, sans-serif' }}>
         
         <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', backgroundColor: themeCard, padding: '15px', borderRadius: '8px', marginBottom: '20px', position: 'sticky', top: '10px', zIndex: 1000, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
-            
-            {bloquearExportacao && (
-              <div style={{ flex: '1 1 100%', background: '#fef2f2', color: '#ef4444', padding: '10px', borderRadius: '8px', border: '1px solid #fecaca', textAlign: 'center', fontWeight: 'bold', fontSize: '12px', marginBottom: '5px' }}>
-                 ⚠️ RESOLVA AS PENDÊNCIAS NA PLANILHA DE COMPRAS PARA LIBERAR O DOWNLOAD E O COMPARTILHAMENTO.
-              </div>
-            )}
+           
+           {bloquearExportacao && (
+             <div style={{ flex: '1 1 100%', background: '#fef2f2', color: '#ef4444', padding: '10px', borderRadius: '8px', border: '1px solid #fecaca', textAlign: 'center', fontWeight: 'bold', fontSize: '12px', marginBottom: '5px' }}>
+                ⚠️ RESOLVA AS PENDÊNCIAS NA PLANILHA DE COMPRAS PARA LIBERAR O DOWNLOAD E O COMPARTILHAMENTO.
+             </div>
+           )}
 
-            <button onClick={() => setModoVisualizacaoImp(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬅ VOLTAR</button>
-            
-            <div style={{ display: 'flex', gap: '10px', flex: '1 1 auto', flexWrap: 'wrap' }}>
-              <button onClick={() => processarPDF('preview', isMotGlobal ? null : lojaParaImprimir)} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>👁️ VISUALIZAR PDF</button>
+           <button onClick={() => setModoVisualizacaoImp(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬅ VOLTAR</button>
+           
+           <div style={{ display: 'flex', gap: '10px', flex: '1 1 auto', flexWrap: 'wrap' }}>
+             <button onClick={() => processarPDF('preview', isMotGlobal ? null : lojaParaImprimir)} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>👁️ VISUALIZAR PDF</button>
 
-              {!bloquearExportacao && !isMotGlobal && (
-                <button onClick={() => processarPDF('whatsapp', lojaParaImprimir)} style={{ background: '#25d366', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🟢 COMPARTILHAR WHATSAPP</button>
-              )}
-              
-              {!bloquearExportacao && (
-                <button onClick={() => processarPDF('baixar', isMotGlobal ? null : lojaParaImprimir)} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
-              )}
-            </div>
+             {!bloquearExportacao && !isMotGlobal && (
+               <button onClick={() => processarPDF('whatsapp', lojaParaImprimir)} style={{ background: '#25d366', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🟢 COMPARTILHAR WHATSAPP</button>
+             )}
+             
+             {!bloquearExportacao && (
+               <button onClick={() => processarPDF('baixar', isMotGlobal ? null : lojaParaImprimir)} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
+             )}
+           </div>
         </div>
 
         <div style={{ overflowX: 'auto', paddingBottom: '20px' }}>
             <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', width: isMotorista ? '2480px' : '100%', maxWidth: isMotorista ? 'none' : '850px', margin: '0 auto' }}>
-                
+               
                {lojasParaRenderizar.map((loja, idx) => (
                   <div key={loja.loja_id} className="print-break" style={isMotorista ? { 
                       width: '2480px', 
-                      height: '3450px', // Evita vazar da folha
+                      height: '3450px', 
                       padding: '80px', 
                       boxSizing: 'border-box', 
                       display: 'flex', 
@@ -845,7 +844,6 @@ export default function FechamentoLojas({ isEscuro }) {
             </div>
         </div>
 
-        {/* CSS PROTEGIDO: O CSS Dinâmico não quebra a visualização antiga */}
         <style>{`
           @media print {
             .no-print { display: none !important; }
@@ -1056,11 +1054,6 @@ export default function FechamentoLojas({ isEscuro }) {
                     {expandido && (
                       <div style={{ padding: '15px' }}>
                         
-                        {/* 💡 NOVO: INDICADOR DE NOTA FISCAL (Silencioso e Atualizado) */}
-                        <div style={{ marginBottom: '15px', padding: '10px', borderRadius: '8px', border: `1px solid ${forn.notaFiscal ? (isEscuro ? '#059669' : '#86efac') : (isEscuro ? '#b91c1c' : '#fecaca')}`, backgroundColor: forn.notaFiscal ? (isEscuro ? '#064e3b' : '#dcfce7') : (isEscuro ? '#450a0a' : '#fef2f2'), color: forn.notaFiscal ? (isEscuro ? '#34d399' : '#166534') : (isEscuro ? '#f87171' : '#ef4444'), fontWeight: 'bold', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            {forn.notaFiscal ? `✅ NOTA FISCAL: ${forn.notaFiscal}` : '⚠️ AGUARDANDO NOTA FISCAL...'}
-                        </div>
-
                         {!isBoletoOnly && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', border: `1px dashed ${themeBorder}`, padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
                             
