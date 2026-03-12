@@ -143,7 +143,7 @@ export default function FechamentoLojas({ isEscuro }) {
             return;
         }
 
-        // --- FORNECEDORES (NÃO MUDA NADA, USA CUSTO_UNIT) ---
+        // --- 💡 FORNECEDORES (SEMPRE USA O custo_unit ORIGINAL, IGNORANDO PREÇO_VENDA/MÉDIA) ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
           let fNomeOriginal = p.fornecedor_compra ? String(p.fornecedor_compra).toUpperCase() : 'SEM FORNECEDOR';
           if (fNomeOriginal.startsWith('ALERTA|')) fNomeOriginal = fNomeOriginal.replace('ALERTA|', '');
@@ -151,7 +151,8 @@ export default function FechamentoLojas({ isEscuro }) {
           const isBoleto = p.status_compra === 'boleto';
           const fNome = isBoleto ? `${fNomeOriginal} (BOLETO)` : fNomeOriginal;
           
-          let baseVal = p.custo_unit;
+          // FORÇADO A USAR O CUSTO BASE (Não é afetado por valores de média)
+          let baseVal = p.custo_unit; 
           let qtdBonifFornecedor = Number(p.qtd_bonificada) || 0;
           
           if (String(p.custo_unit).includes('BONIFICAÇÃO |')) {
@@ -161,6 +162,7 @@ export default function FechamentoLojas({ isEscuro }) {
           const valNum = tratarPrecoNum(baseVal);
           const baseValFormatado = valNum > 0 ? formatarMoeda(valNum) : baseVal; 
           
+          // Só calcula se a quantidade atendida for maior que a bonificada
           const qtdCobradaForn = Math.max(0, p.qtd_atendida - qtdBonifFornecedor);
           const totalItemFornCobrado = qtdCobradaForn * valNum;
           const valorEconomizadoBonif = qtdBonifFornecedor * valNum;
@@ -189,6 +191,7 @@ export default function FechamentoLojas({ isEscuro }) {
           
           mapaForn[fNome].lojasEnvolvidas[nomeLojaForn] = lInfoForn || { nome_fantasia: nomeLojaForn, placa_caminhao: 'SEM PLACA' };
 
+          // 💡 AGRUPAMENTO INTELIGENTE POR NOME, BOLETO E PREÇO (custo_unit)
           const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => 
               i.nomeItem === p.nome_produto && 
               i.isBoleto === isBoleto && 
@@ -247,7 +250,7 @@ export default function FechamentoLojas({ isEscuro }) {
         let qtdDisplay = p.quantidade; 
         let qtdBonificada = Number(p.qtd_bonificada) || 0;
         
-        // 💡 Lógica de prioridade de preço para a loja (Usa a média se existir, senão usa o original)
+        // Lógica de prioridade de preço para a loja (Usa a média/preco_venda se existir, senão usa o custo_unit original)
         let unitParaLoja = p.preco_venda || p.custo_unit || 'R$ 0,00';
         let unitDisplay = unitParaLoja;
         let totalItem = 0;
@@ -360,7 +363,6 @@ export default function FechamentoLojas({ isEscuro }) {
     } catch (err) { console.error(err); } finally { setCarregando(false); }
   }
 
-  // 💡 FUNÇÃO PARA APLICAR VALOR MÉDIA (VENDA) SEM ALTERAR O FORNECEDOR
   const aplicarPrecoMedia = async () => {
     if(!itemMediaSelecionado || !valorMediaInput) return alert("Selecione o item e o valor.");
     
@@ -372,7 +374,6 @@ export default function FechamentoLojas({ isEscuro }) {
 
     setCarregando(true);
     try {
-        // 💡 SALVA EXCLUSIVAMENTE NO PRECO_VENDA!
         const { error } = await supabase
             .from('pedidos')
             .update({ preco_venda: finalStr })
@@ -502,8 +503,6 @@ export default function FechamentoLojas({ isEscuro }) {
         }
 
         const statusFinal = item.isFalta ? 'falta' : item.isBoleto ? 'boleto' : 'atendido';
-        
-        // Mantém a regra do preco_venda caso altere algo específico na edição
         let unitParaBanco = item.precoEditado || item.precoOriginal;
         if(Number(item.qtd_bonificada) > 0) {
             unitParaBanco = `BONIFICAÇÃO | ${item.precoEditado}`;
