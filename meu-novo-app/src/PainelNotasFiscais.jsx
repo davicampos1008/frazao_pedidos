@@ -27,9 +27,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
   
   const [inputsNF, setInputsNF] = useState({});
   const [busca, setBusca] = useState('');
-  
-  // 💡 ESTADO PARA ALERTAS DE NOMES PARECIDOS
-  const [alertasNomesParecidos, setAlertasNomesParecidos] = useState([]);
 
   const [expandidoNF, setExpandidoNF] = useState(null);
   const [expandidoLoja, setExpandidoLoja] = useState(null);
@@ -64,7 +61,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
 
   async function carregarDados() {
     setCarregando(true);
-    setAlertasNomesParecidos([]); // Reseta alertas a cada carregamento
     
     try {
       const { data: fornData } = await supabase.from('fornecedores').select('*').order('nome_fantasia', { ascending: true });
@@ -81,68 +77,38 @@ export default function PainelNotasFiscais({ isEscuro }) {
       const pedidos = pedData || [];
       const lojas = lojasData || [];
 
-      // 💡 1. LÓGICA DE VERIFICAÇÃO E CRIAÇÃO AUTOMÁTICA DE FORNECEDORES
-      const nomesNosPedidos = [...new Set(pedidos.map(p => String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase()))];
-      const novosFornecedoresParaCriar = [];
-      const alertasTemp = [];
-
-      for (const nomePed of nomesNosPedidos) {
-          if (nomePed === 'DESCONHECIDO') continue;
-
-          const nomeNormalizadoPed = normalizarBusca(nomePed);
-          
-          // Verifica se já existe um cadastro exato
-          const existeExato = fornecedoresDB.find(f => normalizarBusca(f.nome_fantasia) === nomeNormalizadoPed);
-          
-          if (!existeExato) {
-              // Não tem exato. Vamos ver se tem parecido (um contendo o outro)
-              const parecido = fornecedoresDB.find(f => {
-                  const nomeNormalizadoDB = normalizarBusca(f.nome_fantasia);
-                  // Verifica se um nome está dentro do outro (ex: "Fabiana" dentro de "Fabiana Brocolis")
-                  return nomeNormalizadoPed.includes(nomeNormalizadoDB) || nomeNormalizadoDB.includes(nomeNormalizadoPed);
-              });
-
-              if (parecido) {
-                  // Achou parecido! Não cria automático. Dispara Alerta.
-                  alertasTemp.push(`Pedido para "${nomePed}", mas já existe "${parecido.nome_fantasia}" cadastrado.`);
-              } else {
-                  // Não tem exato e nem parecido. Cria automático.
-                  novosFornecedoresParaCriar.push({
-                      nome_fantasia: nomePed,
-                      tipo_chave_pix: 'CPF', // Padrão CPF
-                      status: true
-                  });
-              }
-          }
-      }
-
-      if (alertasTemp.length > 0) setAlertasNomesParecidos(alertasTemp);
-
-      // Se achou gente nova e segura para criar, manda pro banco
-      if (novosFornecedoresParaCriar.length > 0) {
-          const { data: criados } = await supabase.from('fornecedores').insert(novosFornecedoresParaCriar).select();
-          if (criados) {
-             fornecedoresDB = [...fornecedoresDB, ...criados];
-             setListaFornecedores(fornecedoresDB.sort((a,b) => a.nome_fantasia.localeCompare(b.nome_fantasia)));
-          }
-      }
-
-
-      // 2. AGRUPAR POR FORNECEDOR (Com mesclagem de itens idênticos)
+      // 1. AGRUPAR POR FORNECEDOR E VINCULAR CADASTROS
       const mapaForn = {};
       const initNFs = {};
       
       pedidos.forEach(p => {
         const fNome = String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase();
         
-        // 💡 Puxa o tipo do cadastro do banco atualizado
-        const infoFornBD = fornecedoresDB.find(f => normalizarBusca(f.nome_fantasia) === normalizarBusca(fNome));
-        const tipoPessoa = infoFornBD?.tipo_chave_pix === 'CNPJ' ? 'PJ' : 'PF';
-
         if (!mapaForn[fNome]) {
+          // 💡 LÓGICA DE VÍNCULO INTELIGENTE
+          const nomeNormalizadoPed = normalizarBusca(fNome);
+          const matches = fornecedoresDB.filter(f => {
+             const nomeNormalizadoDB = normalizarBusca(f.nome_fantasia);
+             return nomeNormalizadoPed.includes(nomeNormalizadoDB) || nomeNormalizadoDB.includes(nomeNormalizadoPed);
+          });
+
+          let statusCadastro = 'SEM_CADASTRO';
+          let infoFornBD = null;
+
+          if (matches.length === 1) {
+             infoFornBD = matches[0];
+             statusCadastro = 'LINKADO';
+          } else if (matches.length > 1) {
+             statusCadastro = 'COLISAO'; // Mais de um nome parecido
+          }
+
+          const tipoPessoa = infoFornBD?.tipo_chave_pix === 'CNPJ' ? 'PJ' : 'PF';
+
           mapaForn[fNome] = { 
               fornecedor: fNome, 
-              tipoPessoa: tipoPessoa, // 💡 Guarda o tipo
+              statusCadastro: statusCadastro,
+              dadosCadastro: infoFornBD,
+              tipoPessoa: tipoPessoa, 
               total: 0, 
               nota_fiscal: p.nota_fiscal || '', 
               itens: [] 
@@ -182,7 +148,7 @@ export default function PainelNotasFiscais({ isEscuro }) {
       setPedidosFornecedor(Object.values(mapaForn).sort((a,b) => a.fornecedor.localeCompare(b.fornecedor)));
       setInputsNF(initNFs);
 
-      // 3. AGRUPAR POR LOJA
+      // 2. AGRUPAR POR LOJA
       const mapaLoja = {};
       pedidos.forEach(p => {
         const idLoja = parseInt(String(p.loja_id).match(/\d+/)?.[0]);
@@ -353,17 +319,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
         <p style={{ margin: '5px 0 0 0', fontSize: '13px', color: configDesign.cores.textoSuave }}>Data Base: {dataBr}</p>
       </div>
 
-      {/* 💡 ALERTA DE NOMES PARECIDOS */}
-      {alertasNomesParecidos.length > 0 && (
-         <div style={{ background: '#fef2f2', border: `1px solid ${configDesign.cores.alerta}`, padding: '15px', borderRadius: '15px', marginBottom: '20px' }}>
-            <h4 style={{ margin: '0 0 10px 0', color: configDesign.cores.alerta }}>⚠️ ATENÇÃO: DUPLICIDADE DETECTADA</h4>
-            <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#991b1b' }}>Os seguintes fornecedores foram informados nos pedidos, mas possuem nomes <b>MUITO PARECIDOS</b> com fornecedores que já existem. O sistema bloqueou a criação automática para evitar erros na Nota Fiscal. Altere o nome no pedido ou cadastre manualmente:</p>
-            <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#991b1b', fontWeight: 'bold' }}>
-               {alertasNomesParecidos.map((alerta, i) => <li key={i}>{alerta}</li>)}
-            </ul>
-         </div>
-      )}
-
       {/* TABS PRINCIPAIS */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', overflowX: 'auto', paddingBottom: '5px' }}>
         <button onClick={() => setAbaAtiva('pedidos_nf')} style={{ flexShrink: 0, padding: '12px 20px', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', backgroundColor: abaAtiva === 'pedidos_nf' ? configDesign.cores.primaria : configDesign.cores.fundoCards, color: abaAtiva === 'pedidos_nf' ? '#fff' : configDesign.cores.textoSuave }}>
@@ -412,11 +367,18 @@ export default function PainelNotasFiscais({ isEscuro }) {
                       <h3 style={{ margin: 0, color: isEscuro ? '#fff' : '#111', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                         🏢 {f.fornecedor} 
                         
-                        {/* 💡 SELO DE PESSOA FÍSICA OU JURÍDICA */}
-                        {f.tipoPessoa === 'PJ' ? (
+                        {/* 💡 SELO INTELIGENTE DE CADASTRO (PJ, PF, SEM CADASTRO OU CONFLITO) */}
+                        {f.statusCadastro === 'LINKADO' && f.tipoPessoa === 'PJ' && (
                             <span style={{fontSize: '9px', background: '#3b82f6', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>PESSOA JURÍDICA</span>
-                        ) : (
-                            <span style={{fontSize: '9px', background: '#64748b', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>PESSOA FÍSICA</span>
+                        )}
+                        {f.statusCadastro === 'LINKADO' && f.tipoPessoa === 'PF' && (
+                            <span style={{fontSize: '9px', background: '#f97316', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>PESSOA FÍSICA</span>
+                        )}
+                        {f.statusCadastro === 'SEM_CADASTRO' && (
+                            <span style={{fontSize: '9px', background: '#ef4444', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>🔴 SEM CADASTRO</span>
+                        )}
+                        {f.statusCadastro === 'COLISAO' && (
+                            <span style={{fontSize: '9px', background: '#eab308', color: '#111', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>⚠️ MÚLTIPLOS CADASTRADOS</span>
                         )}
 
                         {isConcluido && <span style={{fontSize: '10px', background: configDesign.cores.sucesso, color: '#fff', padding: '3px 8px', borderRadius: '6px'}}>NF: {f.nota_fiscal}</span>}
@@ -429,6 +391,28 @@ export default function PainelNotasFiscais({ isEscuro }) {
 
                     {isExpandido && (
                       <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: `1px solid ${corStatus}50` }}>
+                        
+                        {/* 💡 DADOS DO FORNECEDOR PUXADOS DIRETAMENTE PARA CÁ */}
+                        {f.statusCadastro === 'LINKADO' && (
+                          <div style={{ background: isEscuro ? '#14532d' : '#dcfce7', padding: '15px', borderRadius: '12px', color: isEscuro ? '#86efac' : '#166534', border: `1px solid ${configDesign.cores.sucesso}`, marginBottom: '15px', fontSize: '12px' }}>
+                             <strong style={{color: configDesign.cores.textoForte}}>Chave PIX:</strong> <span style={{fontWeight: 'bold'}}>{f.dadosCadastro.chave_pix || 'Não cadastrada'}</span> ({f.dadosCadastro.tipo_chave_pix || 'N/A'})
+                             <br/>
+                             <strong style={{color: configDesign.cores.textoForte}}>Titular PIX:</strong> {f.dadosCadastro.nome_titular_pix || 'Não informado'}
+                             <br/>
+                             <strong style={{color: configDesign.cores.textoForte}}>CNPJ/CPF:</strong> {f.dadosCadastro.cnpj_cpf || 'Não informado'}
+                          </div>
+                        )}
+                        {f.statusCadastro === 'SEM_CADASTRO' && (
+                           <div style={{ background: '#fef2f2', padding: '15px', borderRadius: '12px', color: '#991b1b', border: '1px solid #fecaca', marginBottom: '15px', fontSize: '12px', fontWeight: 'bold' }}>
+                              ⚠️ Este fornecedor não possui cadastro no sistema. Vá na aba "Dados dos Fornecedores", crie o cadastro dele, e os dados de PIX e NF aparecerão aqui automaticamente.
+                           </div>
+                        )}
+                        {f.statusCadastro === 'COLISAO' && (
+                           <div style={{ background: '#fffbeb', padding: '15px', borderRadius: '12px', color: '#b45309', border: '1px solid #fde68a', marginBottom: '15px', fontSize: '12px', fontWeight: 'bold' }}>
+                              ⚠️ O sistema encontrou 2 ou mais fornecedores com nomes muito parecidos no banco de dados. Edite o cadastro para um nome exato para vincular as informações.
+                           </div>
+                        )}
+
                         <div style={{ background: configDesign.cores.fundoCards, padding: '15px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '15px', border: `1px solid ${configDesign.cores.borda}` }}>
                           <h4 style={{ margin: '0 0 10px 0', fontSize: '12px', color: configDesign.cores.textoSuave }}>ITENS DO PEDIDO</h4>
                           {f.itens.map((item, idx) => (
@@ -439,8 +423,8 @@ export default function PainelNotasFiscais({ isEscuro }) {
                           ))}
                         </div>
 
-                        {/* ÁREA DE LANÇAMENTO DA NOTA FISCAL (SÓ PARA PJ) */}
-                        {f.tipoPessoa === 'PJ' ? (
+                        {/* ÁREA DE LANÇAMENTO DA NOTA FISCAL */}
+                        {f.statusCadastro === 'LINKADO' && f.tipoPessoa === 'PJ' ? (
                             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: configDesign.cores.fundoGeral, padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}` }}>
                               <div style={{ flex: 1 }}>
                                   <label style={{ display: 'block', fontSize: '10px', fontWeight: 'bold', color: configDesign.cores.textoSuave, marginBottom: '5px' }}>NÚMERO DA NOTA FISCAL</label>
@@ -456,11 +440,11 @@ export default function PainelNotasFiscais({ isEscuro }) {
                                   {isConcluido ? '🔄 ATUALIZAR NF' : '💾 SALVAR NF'}
                               </button>
                             </div>
-                        ) : (
+                        ) : f.statusCadastro === 'LINKADO' && f.tipoPessoa === 'PF' ? (
                             <div style={{ textAlign: 'center', padding: '15px', background: '#f1f5f9', color: '#64748b', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
                                 🚫 Fornecedor Pessoa Física não emite Nota Fiscal.
                             </div>
-                        )}
+                        ) : null}
                       </div>
                     )}
                   </div>
