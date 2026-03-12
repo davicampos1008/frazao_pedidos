@@ -180,11 +180,17 @@ export default function FechamentoLojas({ isEscuro }) {
                itensRaw: {}, 
                itens: [], 
                lojasEnvolvidas: {},
-               statusPagamento: 'pendente',
+               statusPagamento: p.status_pagamento || 'pendente', // 💡 ALTERADO AQUI: Lê do banco o status de pagamento
                notaFiscal: p.nota_fiscal || null 
             };
-          } else if (!mapaForn[fNome].notaFiscal && p.nota_fiscal) {
-            mapaForn[fNome].notaFiscal = p.nota_fiscal; 
+          } else {
+            // 💡 ALTERADO AQUI: Garante que atualiza se achar a nota ou se algum item do fornecedor estiver pago
+            if (!mapaForn[fNome].notaFiscal && p.nota_fiscal) {
+              mapaForn[fNome].notaFiscal = p.nota_fiscal; 
+            }
+            if (p.status_pagamento === 'pago') {
+              mapaForn[fNome].statusPagamento = 'pago';
+            }
           }
 
           const idLojaForn = extrairNum(p.loja_id);
@@ -563,16 +569,33 @@ export default function FechamentoLojas({ isEscuro }) {
     carregar();
   };
 
-  const alternarStatusPagamento = (nomeForn) => {
+  // 💡 ALTERADO AQUI: Função que envia o status para o Supabase
+  const alternarStatusPagamento = async (nomeForn) => {
+    const fornecedorAtual = fornecedores.find(f => f.nome === nomeForn);
+    if (!fornecedorAtual) return;
+
+    const novoStatus = fornecedorAtual.statusPagamento === 'pago' ? 'pendente' : 'pago';
+    const nomeLimpo = nomeForn.replace(' (BOLETO)', ''); // Tira o boleto do nome para o filtro
+
+    // 1. Atualiza a tela primeiro para não dar delay pro usuário
     setFornecedores(prev => prev.map(f => {
       if (f.nome === nomeForn) {
-        const novoStatus = f.statusPagamento === 'pago' ? 'pendente' : 'pago';
-        // Se mudou para pago, fecha o card
-        if(novoStatus === 'pago') setFornExpandido(null);
+        if(novoStatus === 'pago') setFornExpandido(null); // Fecha se pagou
         return { ...f, statusPagamento: novoStatus };
       }
       return f;
     }));
+
+    // 2. Salva o status no banco de dados para os pedidos deste fornecedor no dia selecionado
+    try {
+      await supabase
+        .from('pedidos')
+        .update({ status_pagamento: novoStatus })
+        .eq('data_pedido', dataFiltro)
+        .ilike('fornecedor_compra', `%${nomeLimpo}%`);
+    } catch (err) {
+      console.error("Erro ao salvar status de pagamento:", err);
+    }
   };
 
   const copiarPixFornecedor = (chave, fNome) => {
