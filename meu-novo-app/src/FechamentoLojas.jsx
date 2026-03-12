@@ -114,6 +114,9 @@ export default function FechamentoLojas({ isEscuro }) {
       const mapaLojas = {};
       const mapaForn = {};
 
+      // =======================================================================
+      // PARTE 1: ORGANIZAÇÃO DOS DADOS
+      // =======================================================================
       (pedData || []).forEach(p => {
         if (p.status_compra === 'pendente') {
             const idLoja = extrairNum(p.loja_id);
@@ -143,7 +146,7 @@ export default function FechamentoLojas({ isEscuro }) {
             return;
         }
 
-        // --- 💡 FORNECEDORES (USA EXATAMENTE O CUSTO BASE REAL) ---
+        // --- 💡 FORNECEDORES (USA EXATAMENTE O CUSTO BASE REAL E SEPARA PREÇOS DIFERENTES) ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
           let fNomeOriginal = p.fornecedor_compra ? String(p.fornecedor_compra).toUpperCase() : 'SEM FORNECEDOR';
           if (fNomeOriginal.startsWith('ALERTA|')) fNomeOriginal = fNomeOriginal.replace('ALERTA|', '');
@@ -151,6 +154,7 @@ export default function FechamentoLojas({ isEscuro }) {
           const isBoleto = p.status_compra === 'boleto';
           const fNome = isBoleto ? `${fNomeOriginal} (BOLETO)` : fNomeOriginal;
           
+          // FORÇADO A USAR O CUSTO BASE (Não é afetado por valores de média na loja)
           let baseVal = p.custo_unit; 
           let qtdBonifFornecedor = Number(p.qtd_bonificada) || 0;
           
@@ -159,11 +163,6 @@ export default function FechamentoLojas({ isEscuro }) {
           }
 
           const valNum = tratarPrecoNum(baseVal);
-          const baseValFormatado = valNum > 0 ? formatarMoeda(valNum) : baseVal; 
-          
-          const qtdCobradaForn = Math.max(0, p.qtd_atendida - qtdBonifFornecedor);
-          const totalItemFornCobrado = qtdCobradaForn * valNum;
-          const valorEconomizadoBonif = qtdBonifFornecedor * valNum;
 
           if (!mapaForn[fNome]) {
             const fInfo = buscarFornecedorSimilar(fNomeOriginal, fornData || []);
@@ -177,6 +176,7 @@ export default function FechamentoLojas({ isEscuro }) {
                totalBruto: 0,
                totalDescontoBonif: 0,
                qtdBonificadaGeral: 0,
+               itensRaw: {}, // Objeto intermediário para fundir
                itens: [], 
                lojasEnvolvidas: {},
                statusPagamento: 'pendente' 
@@ -189,41 +189,23 @@ export default function FechamentoLojas({ isEscuro }) {
           
           mapaForn[fNome].lojasEnvolvidas[nomeLojaForn] = lInfoForn || { nome_fantasia: nomeLojaForn, placa_caminhao: 'SEM PLACA' };
 
-          // 💡 AGRUPA POR NOME E POR CUSTO EXATO (Mantém preços diferentes separados!)
-          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => 
-              i.nomeItem === p.nome_produto && 
-              i.isBoleto === isBoleto && 
-              tratarPrecoNum(i.valUnit) === valNum
-          );
-
-          if (itemExistenteIndex >= 0) {
-              const itEx = mapaForn[fNome].itens[itemExistenteIndex];
-              itEx.qtd += p.qtd_atendida;
-              itEx.qtdBonificada += qtdBonifFornecedor;
-              itEx.totalCobrado += totalItemFornCobrado;
-              itEx.totalBonificado += valorEconomizadoBonif;
-          } else {
-              mapaForn[fNome].itens.push({ 
-                nomeItem: p.nome_produto, 
-                unidade: p.unidade_medida || 'UN',
-                qtd: p.qtd_atendida,
-                qtdBonificada: qtdBonifFornecedor,
-                valUnit: baseValFormatado, 
-                totalCobrado: totalItemFornCobrado,
-                totalBonificado: valorEconomizadoBonif,
-                isBoleto 
-              });
+          // 💡 CHAVE ÚNICA: Nome + Preço Custo + Boleto. Se o preço for diferente, cria linha nova!
+          const keyItem = `${p.nome_produto}_${valNum}_${isBoleto}`;
+          
+          if (!mapaForn[fNome].itensRaw[keyItem]) {
+              mapaForn[fNome].itensRaw[keyItem] = {
+                  nomeItem: p.nome_produto,
+                  unidade: p.unidade_medida || 'UN',
+                  qtd: 0,
+                  qtdBonificada: 0,
+                  valNum: valNum, // Salva o preço específico exato
+                  isBoleto: isBoleto
+              };
           }
 
-          mapaForn[fNome].totalBruto += (totalItemFornCobrado + valorEconomizadoBonif);
-          mapaForn[fNome].totalDescontoBonif += valorEconomizadoBonif;
-          mapaForn[fNome].qtdBonificadaGeral += qtdBonifFornecedor;
-
-          if (isBoleto) {
-            mapaForn[fNome].totalBoleto += totalItemFornCobrado;
-          } else {
-            mapaForn[fNome].totalPix += totalItemFornCobrado;
-          }
+          const raw = mapaForn[fNome].itensRaw[keyItem];
+          raw.qtd += p.qtd_atendida;
+          raw.qtdBonificada += qtdBonifFornecedor;
         }
 
         // --- LOJAS (AQUI PRIORIZAMOS O PRECO_VENDA/MÉDIA PARA O FECHAMENTO) ---
@@ -350,6 +332,39 @@ export default function FechamentoLojas({ isEscuro }) {
         }
       });
 
+      // =======================================================================
+      // PARTE 2: FECHAR CÁLCULO FINAL DOS FORNECEDORES (Resolução Final)
+      // =======================================================================
+      Object.values(mapaForn).forEach(forn => {
+          Object.values(forn.itensRaw).forEach(raw => {
+              const qtdCobradaForn = Math.max(0, raw.qtd - raw.qtdBonificada);
+              const totalItemFornCobrado = qtdCobradaForn * raw.valNum;
+              const valorEconomizadoBonif = raw.qtdBonificada * raw.valNum;
+
+              forn.itens.push({
+                  nomeItem: raw.nomeItem,
+                  unidade: raw.unidade,
+                  qtd: raw.qtd,
+                  qtdBonificada: raw.qtdBonificada,
+                  valUnit: raw.valNum > 0 ? formatarMoeda(raw.valNum) : 'R$ 0,00',
+                  totalCobrado: totalItemFornCobrado,
+                  totalBonificado: valorEconomizadoBonif,
+                  isBoleto: raw.isBoleto
+              });
+
+              forn.totalBruto += (totalItemFornCobrado + valorEconomizadoBonif);
+              forn.totalDescontoBonif += valorEconomizadoBonif;
+              forn.qtdBonificadaGeral += raw.qtdBonificada;
+
+              if (raw.isBoleto) {
+                  forn.totalBoleto += totalItemFornCobrado;
+              } else {
+                  forn.totalPix += totalItemFornCobrado;
+              }
+          });
+          delete forn.itensRaw; 
+      });
+
       const arrayLojas = Object.values(mapaLojas).sort((a, b) => a.loja_id - b.loja_id);
       arrayLojas.forEach(loja => loja.itens.sort((a, b) => a.nome.localeCompare(b.nome)));
       setFechamentos(arrayLojas);
@@ -373,7 +388,7 @@ export default function FechamentoLojas({ isEscuro }) {
 
     setCarregando(true);
     try {
-        // 💡 SALVA EXCLUSIVAMENTE NO PRECO_VENDA!
+        // SALVA EXCLUSIVAMENTE NO PRECO_VENDA!
         const { error } = await supabase
             .from('pedidos')
             .update({ preco_venda: finalStr })
