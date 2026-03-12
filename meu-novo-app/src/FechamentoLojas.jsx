@@ -146,7 +146,7 @@ export default function FechamentoLojas({ isEscuro }) {
             return;
         }
 
-        // --- 💡 FORNECEDORES (USA EXATAMENTE O CUSTO BASE REAL E SEPARA PREÇOS DIFERENTES) ---
+        // --- 💡 LÓGICA DE FORNECEDORES REFEITA E BLINDADA ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
           let fNomeOriginal = p.fornecedor_compra ? String(p.fornecedor_compra).toUpperCase() : 'SEM FORNECEDOR';
           if (fNomeOriginal.startsWith('ALERTA|')) fNomeOriginal = fNomeOriginal.replace('ALERTA|', '');
@@ -154,7 +154,6 @@ export default function FechamentoLojas({ isEscuro }) {
           const isBoleto = p.status_compra === 'boleto';
           const fNome = isBoleto ? `${fNomeOriginal} (BOLETO)` : fNomeOriginal;
           
-          // FORÇADO A USAR O CUSTO BASE (Não é afetado por valores de média na loja)
           let baseVal = p.custo_unit; 
           let qtdBonifFornecedor = Number(p.qtd_bonificada) || 0;
           
@@ -176,7 +175,7 @@ export default function FechamentoLojas({ isEscuro }) {
                totalBruto: 0,
                totalDescontoBonif: 0,
                qtdBonificadaGeral: 0,
-               itensRaw: {}, // Objeto intermediário para fundir
+               itensRaw: {}, // Objeto intermediário para fundir perfeitamente
                itens: [], 
                lojasEnvolvidas: {},
                statusPagamento: 'pendente' 
@@ -189,16 +188,15 @@ export default function FechamentoLojas({ isEscuro }) {
           
           mapaForn[fNome].lojasEnvolvidas[nomeLojaForn] = lInfoForn || { nome_fantasia: nomeLojaForn, placa_caminhao: 'SEM PLACA' };
 
-          // 💡 CHAVE ÚNICA: Nome + Preço Custo + Boleto. Se o preço for diferente, cria linha nova!
-          const keyItem = `${p.nome_produto}_${valNum}_${isBoleto}`;
-          
+          // 💡 Joga no Raw agrupando SÓ por nome (ignora preços diferentes do banco de dados)
+          const keyItem = `${p.nome_produto}_${isBoleto}`;
           if (!mapaForn[fNome].itensRaw[keyItem]) {
               mapaForn[fNome].itensRaw[keyItem] = {
                   nomeItem: p.nome_produto,
                   unidade: p.unidade_medida || 'UN',
                   qtd: 0,
                   qtdBonificada: 0,
-                  valNum: valNum, // Salva o preço específico exato
+                  maxValNum: 0, // Salva o maior preço encontrado para usar como oficial
                   isBoleto: isBoleto
               };
           }
@@ -206,9 +204,12 @@ export default function FechamentoLojas({ isEscuro }) {
           const raw = mapaForn[fNome].itensRaw[keyItem];
           raw.qtd += p.qtd_atendida;
           raw.qtdBonificada += qtdBonifFornecedor;
+          if (valNum > raw.maxValNum) {
+              raw.maxValNum = valNum;
+          }
         }
 
-        // --- LOJAS (AQUI PRIORIZAMOS O PRECO_VENDA/MÉDIA PARA O FECHAMENTO) ---
+        // --- LOJAS (Mantém a lógica do preco_venda/média) ---
         const idLoja = extrairNum(p.loja_id);
         if (!idLoja || idLoja <= 1) return;
 
@@ -230,7 +231,6 @@ export default function FechamentoLojas({ isEscuro }) {
         let qtdDisplay = p.quantidade; 
         let qtdBonificada = Number(p.qtd_bonificada) || 0;
         
-        // Usa a média/preco_venda se existir, senão usa o custo original
         let unitParaLoja = p.preco_venda || p.custo_unit || 'R$ 0,00';
         let unitDisplay = unitParaLoja;
         let totalItem = 0;
@@ -333,20 +333,20 @@ export default function FechamentoLojas({ isEscuro }) {
       });
 
       // =======================================================================
-      // PARTE 2: FECHAR CÁLCULO FINAL DOS FORNECEDORES (Resolução Final)
+      // PARTE 2: FECHAR CÁLCULO FINAL DOS FORNECEDORES (Resolução do Bug)
       // =======================================================================
       Object.values(mapaForn).forEach(forn => {
           Object.values(forn.itensRaw).forEach(raw => {
               const qtdCobradaForn = Math.max(0, raw.qtd - raw.qtdBonificada);
-              const totalItemFornCobrado = qtdCobradaForn * raw.valNum;
-              const valorEconomizadoBonif = raw.qtdBonificada * raw.valNum;
+              const totalItemFornCobrado = qtdCobradaForn * raw.maxValNum;
+              const valorEconomizadoBonif = raw.qtdBonificada * raw.maxValNum;
 
               forn.itens.push({
                   nomeItem: raw.nomeItem,
                   unidade: raw.unidade,
                   qtd: raw.qtd,
                   qtdBonificada: raw.qtdBonificada,
-                  valUnit: raw.valNum > 0 ? formatarMoeda(raw.valNum) : 'R$ 0,00',
+                  valUnit: raw.maxValNum > 0 ? formatarMoeda(raw.maxValNum) : 'R$ 0,00',
                   totalCobrado: totalItemFornCobrado,
                   totalBonificado: valorEconomizadoBonif,
                   isBoleto: raw.isBoleto
@@ -376,7 +376,6 @@ export default function FechamentoLojas({ isEscuro }) {
     } catch (err) { console.error(err); } finally { setCarregando(false); }
   }
 
-  // 💡 FUNÇÃO PARA APLICAR VALOR MÉDIA (VENDA) SEM ALTERAR O FORNECEDOR
   const aplicarPrecoMedia = async () => {
     if(!itemMediaSelecionado || !valorMediaInput) return alert("Selecione o item e o valor.");
     
@@ -388,7 +387,6 @@ export default function FechamentoLojas({ isEscuro }) {
 
     setCarregando(true);
     try {
-        // SALVA EXCLUSIVAMENTE NO PRECO_VENDA!
         const { error } = await supabase
             .from('pedidos')
             .update({ preco_venda: finalStr })
@@ -1025,12 +1023,7 @@ export default function FechamentoLojas({ isEscuro }) {
                 let corTexto = isEscuro ? '#fcd34d' : '#b45309';
                 let tagStatus = 'PENDENTE';
 
-                if (forn.precisaRefazer) {
-                    corBorda = '#ef4444';
-                    corFundo = isEscuro ? '#450a0a' : '#fef2f2';
-                    corTexto = '#ef4444';
-                    tagStatus = '⚠️ PEDIDO ALTERADO';
-                } else if (isPago) {
+                if (isPago) {
                   corBorda = '#22c55e'; 
                   corFundo = isEscuro ? '#14532d' : '#dcfce7';
                   corTexto = isEscuro ? '#86efac' : '#166534';
@@ -1054,14 +1047,14 @@ export default function FechamentoLojas({ isEscuro }) {
                       </div>
                       
                       <div style={{ fontSize: '20px', fontWeight: '900', color: corTexto }}>
-                         {forn.precisaRefazer ? 'ALERTA!' : (isBoletoOnly && !expandido ? 'BOLETO' : formatarMoeda(forn.totalPix + forn.totalBoleto))}
+                         {isBoletoOnly && !expandido ? 'BOLETO' : formatarMoeda(forn.totalPix + forn.totalBoleto)}
                       </div>
                     </div>
 
                     {expandido && (
                       <div style={{ padding: '15px' }}>
                         
-                        {!isBoletoOnly && !forn.precisaRefazer && (
+                        {!isBoletoOnly && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', border: `1px dashed ${themeBorder}`, padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
                             
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1129,7 +1122,7 @@ export default function FechamentoLojas({ isEscuro }) {
                             Total a pagar = {formatarMoeda(forn.totalPix + forn.totalBoleto)}
                         </div>
 
-                        {!isBoletoOnly && !forn.precisaRefazer && (
+                        {!isBoletoOnly && (
                           <button onClick={() => alternarStatusPagamento(forn.nome)} style={{ width: '100%', marginTop: '15px', padding: '12px', backgroundColor: isPago ? (isEscuro ? '#1e293b' : '#f1f5f9') : '#22c55e', color: isPago ? '#64748b' : '#fff', border: 'none', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
                             {isPago ? 'DESFAZER PAGAMENTO' : 'PIX FEITO / CONCLUIR'}
                           </button>
