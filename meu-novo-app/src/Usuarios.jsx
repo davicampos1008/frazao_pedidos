@@ -305,8 +305,7 @@ export default function Usuarios() {
                 <select disabled={!editando} value={dados.perfil} onChange={e => setDados({...dados, perfil: e.target.value})} style={cssInput(!editando)}>
                   <option value="operador">👤 OPERADOR (App de Pedidos)</option>
                   <option value="admin">🛡️ ADMINISTRADOR (Acesso Total)</option>
-                  <option value="faturista">🧾 SETOR FISCAL (Apenas Notas Fiscais)</option>
-                  <option value="auxiliar">👁️ AUXILIAR (Ver tudo, Edita apenas Notas Fiscais)</option>
+                  <option value="faturista">🧾 AUX. FISCAL (Apenas leitura e edição de NFs)</option>
                 </select>
               </div>
             </div>
