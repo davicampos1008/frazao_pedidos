@@ -12,6 +12,7 @@ import Listas from './Listas';
 import PlanilhaCompras from './PlanilhaCompras';
 import FechamentoLojas from './FechamentoLojas';
 import PainelNotasFiscais from './PainelNotasFiscais';
+import FechamentoCliente from './FechamentoCliente';
 import ConferenciaMadrugada from './ConferenciaMadrugada'; // 💡 IMPORT NOVO
 
 function App() {

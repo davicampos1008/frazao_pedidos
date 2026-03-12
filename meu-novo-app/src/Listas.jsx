@@ -2,15 +2,33 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
 export default function Listas() {
+  // 💡 LÓGICA DE DATA FIXA E SELECIONÁVEL
+  const obterDataLocal = () => {
+    const data = new Date();
+    const tzOffset = data.getTimezoneOffset() * 60000;
+    return new Date(data.getTime() - tzOffset).toISOString().split('T')[0];
+  };
+
+  const [dataFiltro, setDataFiltro] = useState(() => {
+    return localStorage.getItem('virtus_listas_data') || obterDataLocal();
+  });
+  const dataBr = dataFiltro.split('-').reverse().join('/');
+
+  useEffect(() => {
+    localStorage.setItem('virtus_listas_data', dataFiltro);
+    carregarDados();
+  }, [dataFiltro]);
+
   const [lojas, setLojas] = useState([]);
   const [pedidosDia, setPedidosDia] = useState([]);
+  const [produtosBd, setProdutosBd] = useState([]); // 💡 NOVO: Guarda os produtos do sistema para a barra de pesquisa
   const [modalAberto, setModalAberto] = useState(null);
   const [carregando, setCarregando] = useState(true);
 
-  const dataAtual = new Date();
-  const hojeBanco = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}-${String(dataAtual.getDate()).padStart(2, '0')}`;
+  // 💡 ESTADOS PARA EDIÇÃO DA LISTA
+  const [editandoLista, setEditandoLista] = useState(false);
+  const [listaEditada, setListaEditada] = useState({});
 
-  // 💡 CORREÇÃO: Lê o zero perfeitamente
   const extrairNum = (valor) => {
     if (valor === null || valor === undefined) return null;
     const apenasNumeros = String(valor).replace(/\D/g, ''); 
@@ -26,11 +44,11 @@ export default function Listas() {
     try {
       setCarregando(true);
       const { data: dLojas } = await supabase.from('lojas').select('*').order('nome_fantasia', { ascending: true });
-      const { data: dPedidos } = await supabase.from('pedidos').select('*').eq('data_pedido', hojeBanco);
+      const { data: dPedidos } = await supabase.from('pedidos').select('*').eq('data_pedido', dataFiltro); 
+      const { data: dProdutos } = await supabase.from('produtos').select('nome'); // 💡 NOVO: Puxa os produtos do sistema
       
       const lojasDb = dLojas || [];
       
-      // 💡 GARANTE QUE A LOJA FRAZÃO (TESTE) CÓDIGO 00 EXISTE NO ARRAY
       const temFrazao = lojasDb.some(l => extrairNum(l.codigo_loja) === 0);
       if (!temFrazao) {
         lojasDb.unshift({ id: 99999, codigo_loja: '00', nome_fantasia: 'FRAZÃO (TESTE)' });
@@ -38,17 +56,15 @@ export default function Listas() {
 
       setLojas(lojasDb);
       setPedidosDia(dPedidos || []);
+      setProdutosBd(dProdutos || []); // 💡 Salva os produtos para a pesquisa
     } catch (err) { console.error("Erro:", err); } 
     finally { setCarregando(false); }
   }
-
-  useEffect(() => { carregarDados(); }, []);
 
   const obterSomaTotal = () => {
     const mapa = {};
     pedidosDia.forEach(p => {
       const idLoja = extrairNum(p.loja_id);
-      // 💡 ACEITA A LOJA ZERO (00) NA SOMA
       if (idLoja !== null && idLoja >= 0 && p.liberado_edicao !== true) { 
         const nome = String(p.nome_produto || "Sem Nome").toUpperCase();
         if (!mapa[nome]) mapa[nome] = { nome, total: 0, unidade: p.unidade_medida || "UN", lojasQuePediram: new Set() };
@@ -60,7 +76,6 @@ export default function Listas() {
   };
 
   const listaConsolidada = obterSomaTotal();
-  // Mantemos a barra de progresso ignorando a Frazão para não bugar a meta diária
   const idsQueEnviaramProgresso = pedidosDia.filter(p => p.liberado_edicao !== true).map(p => extrairNum(p.loja_id)).filter(id => id !== null && id > 0);
 
   const totalLojasValidas = lojas.filter(l => extrairNum(l.codigo_loja) > 0).length;
@@ -69,7 +84,7 @@ export default function Listas() {
 
   const copiarResumoGeral = () => {
     if (listaConsolidada.length === 0) return alert("Nenhum pedido recebido ainda.");
-    const cabecalho = "*FRAZÃO FRUTAS & CIA - RESUMO GERAL* 📋\nData: " + dataAtual.toLocaleDateString('pt-BR');
+    const cabecalho = "*FRAZÃO FRUTAS & CIA - RESUMO GERAL* 📋\nData: " + dataBr; 
     const corpo = listaConsolidada.map(i => `- ${i.total} ${i.unidade} : ${formatarNomeItem(i.nome)} *(em ${i.qtdLojas} loja${i.qtdLojas > 1 ? 's' : ''})*`).join('\n');
     navigator.clipboard.writeText(`${cabecalho}\n\n${corpo}`);
     alert("✅ Resumo copiado!");
@@ -90,11 +105,11 @@ export default function Listas() {
       try {
         await supabase.from('pedidos')
           .update({ solicitou_refazer: false, liberado_edicao: true })
-          .eq('data_pedido', hojeBanco)
+          .eq('data_pedido', dataFiltro) 
           .eq('loja_id', extrairNum(modalAberto.codigo_loja));
           
         alert("✅ Loja liberada! A lista voltou pro carrinho deles.");
-        setModalAberto(null);
+        fecharModal();
         carregarDados();
       } catch (err) {
         alert("Erro: " + err.message);
@@ -109,11 +124,11 @@ export default function Listas() {
       try {
         await supabase.from('pedidos')
           .update({ liberado_edicao: false })
-          .eq('data_pedido', hojeBanco)
+          .eq('data_pedido', dataFiltro) 
           .eq('loja_id', extrairNum(modalAberto.codigo_loja));
           
         alert("🔒 Edição cancelada! A lista foi trancada e o pedido voltou ao normal.");
-        setModalAberto(null);
+        fecharModal();
         carregarDados();
       } catch (err) {
         alert("Erro: " + err.message);
@@ -128,17 +143,61 @@ export default function Listas() {
       try {
         await supabase.from('pedidos')
           .delete()
-          .eq('data_pedido', hojeBanco)
+          .eq('data_pedido', dataFiltro) 
           .eq('loja_id', extrairNum(modalAberto.codigo_loja));
           
         alert("🗑️ Lista apagada com sucesso!");
-        setModalAberto(null);
+        fecharModal();
         carregarDados();
       } catch (err) {
         alert("Erro ao apagar: " + err.message);
         setCarregando(false);
       }
     }
+  };
+
+  // 💡 ATIVA A EDIÇÃO LOCAL 
+  const iniciarEdicaoLocal = () => {
+    const mapData = {};
+    const lojaAbertaPedidos = modalAberto ? pedidosDia.filter(p => extrairNum(p.loja_id) === extrairNum(modalAberto.codigo_loja)) : [];
+    lojaAbertaPedidos.forEach(p => {
+      mapData[p.id] = {
+        quantidade: p.quantidade,
+        nome: String(p.nome || p.nome_produto || "")
+      };
+    });
+    setListaEditada(mapData);
+    setEditandoLista(true);
+  };
+
+  // 💡 SALVA A EDIÇÃO LOCAL APENAS NO PEDIDO ESPECÍFICO (.eq('id', idPedido))
+  const salvarEdicaoLocal = async () => {
+    setCarregando(true);
+    try {
+      const promessas = [];
+      for (const idPedido of Object.keys(listaEditada)) {
+        promessas.push(
+          supabase.from('pedidos')
+          .update({ 
+              quantidade: Number(listaEditada[idPedido].quantidade),
+              nome_produto: listaEditada[idPedido].nome.toUpperCase() 
+          })
+          .eq('id', idPedido) // 💡 GARANTIA DE ISOLAMENTO: Só altera a ID desse pedido, de mais ninguém
+        );
+      }
+      await Promise.all(promessas);
+      alert("✅ Lista atualizada com sucesso!");
+      setEditandoLista(false);
+      carregarDados();
+    } catch (err) {
+      alert("Erro ao salvar: " + err.message);
+      setCarregando(false);
+    }
+  };
+
+  const fecharModal = () => {
+    setModalAberto(null);
+    setEditandoLista(false);
   };
 
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Carregando painel...</div>;
@@ -150,10 +209,33 @@ export default function Listas() {
   return (
     <div style={{ width: '95%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px' }}>
       
-      <div style={{ backgroundColor: '#111', padding: '20px', borderRadius: '20px', color: 'white', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* 💡 DATALIST DE PRODUTOS PARA A BARRA DE PESQUISA */}
+      <datalist id="lista-produtos">
+        {produtosBd.map((p, i) => (
+          <option key={i} value={p.nome} />
+        ))}
+      </datalist>
+
+      <div style={{ backgroundColor: '#111', padding: '20px', borderRadius: '20px', color: 'white', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
         <div>
           <h2 style={{margin: 0, fontSize: '18px'}}>📋 PAINEL DE CONFERÊNCIA</h2>
-          <span style={{fontSize: '11px', color: '#999'}}>Data: {dataAtual.toLocaleDateString('pt-BR')}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
+            <span style={{ color: '#94a3b8', fontSize: '13px' }}>Data:</span>
+            <input 
+              type="date" 
+              value={dataFiltro} 
+              onChange={(e) => setDataFiltro(e.target.value)}
+              style={{ background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '6px', padding: '4px 8px', fontSize: '13px', outline: 'none', cursor: 'pointer' }}
+            />
+            {dataFiltro !== obterDataLocal() && (
+              <button 
+                onClick={() => setDataFiltro(obterDataLocal())} 
+                style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                🗓️ VOLTAR PARA HOJE
+              </button>
+            )}
+          </div>
         </div>
         <button onClick={carregarDados} style={{background: '#333', border: 'none', color: '#fff', padding: '10px 15px', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold'}}>🔄</button>
       </div>
@@ -192,7 +274,6 @@ export default function Listas() {
       <h3 style={{ marginLeft: '10px', color: '#333' }}>Status das Filiais</h3>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '15px' }}>
         
-        {/* 💡 ACEITA A LOJA ZERO (FRAZÃO) NA LISTA DE CARDS */}
         {lojas.filter(l => extrairNum(l.codigo_loja) >= 0).map(loja => {
           const idDestaLoja = extrairNum(loja.codigo_loja);
           const pedidosDaLoja = pedidosDia.filter(p => extrairNum(p.loja_id) === idDestaLoja);
@@ -236,23 +317,55 @@ export default function Listas() {
                 <h3 style={{ margin: 0, fontSize: '18px' }}>{modalAberto.nome_fantasia}</h3>
                 <span style={{fontSize: '11px', color: '#22c55e', fontWeight: 'bold'}}>RESPONSÁVEL: {lojaAbertaPedidos[0]?.nome_usuario || 'Operador'}</span>
               </div>
-              <button onClick={() => setModalAberto(null)} style={{ border: 'none', background: '#e2e8f0', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
+              <button onClick={fecharModal} style={{ border: 'none', background: '#e2e8f0', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
             </div>
             
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
               {lojaAbertaPedidos.map((item, i) => (
-                <div key={i} style={{ padding: '12px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{fontSize: '14px', fontWeight: 'bold'}}>{formatarNomeItem(String(item.nome || item.nome_produto || ""))}</span>
-                  <span style={{background: '#111', color: '#fff', padding: '4px 10px', borderRadius: '8px', fontWeight: '900', fontSize: '14px'}}>
-                    {item.quantidade} <small style={{fontSize:'10px', color: '#aaa'}}>{item.unidade || item.unidade_medida}</small>
-                  </span>
+                <div key={item.id} style={{ padding: '12px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                  
+                  {/* 💡 BARRA DE PESQUISA COM OS PRODUTOS DO SISTEMA */}
+                  {editandoLista ? (
+                    <>
+                      <input 
+                        list="lista-produtos"
+                        placeholder="Pesquisar produto..."
+                        type="text" 
+                        value={listaEditada[item.id]?.nome || ''} 
+                        onChange={(e) => setListaEditada({...listaEditada, [item.id]: { ...listaEditada[item.id], nome: e.target.value }})} 
+                        style={{ flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '13px', textTransform: 'uppercase' }} 
+                      />
+                      <input 
+                        type="number" 
+                        value={listaEditada[item.id]?.quantidade !== undefined ? listaEditada[item.id].quantidade : item.quantidade} 
+                        onChange={(e) => setListaEditada({...listaEditada, [item.id]: { ...listaEditada[item.id], quantidade: e.target.value }})} 
+                        style={{ width: '60px', padding: '8px', textAlign: 'center', borderRadius: '8px', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '14px' }} 
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <span style={{fontSize: '14px', fontWeight: 'bold'}}>{formatarNomeItem(String(item.nome || item.nome_produto || ""))}</span>
+                      <span style={{background: '#111', color: '#fff', padding: '4px 10px', borderRadius: '8px', fontWeight: '900', fontSize: '14px'}}>
+                        {item.quantidade} <small style={{fontSize:'10px', color: '#aaa'}}>{item.unidade || item.unidade_medida}</small>
+                      </span>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
 
             <div style={{ padding: '20px', borderTop: '1px solid #eee', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               
-              {lojaAbertaJaLiberada ? (
+              {editandoLista ? (
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={salvarEdicaoLocal} style={{ flex: 1, padding: '15px', backgroundColor: '#22c55e', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
+                    💾 SALVAR
+                  </button>
+                  <button onClick={() => setEditandoLista(false)} style={{ flex: 1, padding: '15px', backgroundColor: '#64748b', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
+                    ❌ CANCELAR
+                  </button>
+                </div>
+              ) : lojaAbertaJaLiberada ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div style={{textAlign: 'center', padding: '10px', color: '#2563eb', fontWeight: 'bold', fontSize: '12px', backgroundColor: '#eff6ff', borderRadius: '12px'}}>
                     A loja está com a lista destrancada no aplicativo deles.
@@ -269,6 +382,10 @@ export default function Listas() {
                     </div>
                   )}
                   
+                  <button onClick={iniciarEdicaoLocal} style={{ width: '100%', padding: '15px', backgroundColor: '#111', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
+                    ✏️ EDITAR ITENS (NÓS MESMOS)
+                  </button>
+
                   <button onClick={liberarLojaParaRefazer} style={{ width: '100%', padding: '15px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
                     🔓 DEVOLVER PARA O CARRINHO (EDITAR)
                   </button>
