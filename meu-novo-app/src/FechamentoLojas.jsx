@@ -65,6 +65,13 @@ export default function FechamentoLojas({ isEscuro }) {
   useEffect(() => {
     localStorage.setItem('virtus_fechamento_data', dataFiltro);
     carregar();
+
+    // 💡 NOVO: Atualização silenciosa a cada 2 segundos
+    const intervalo = setInterval(() => {
+      carregar(true);
+    }, 2000);
+
+    return () => clearInterval(intervalo);
   }, [dataFiltro]);
 
   const removerAcentos = (str) => String(str || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
@@ -102,8 +109,9 @@ export default function FechamentoLojas({ isEscuro }) {
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
   };
 
-  async function carregar() {
-    setCarregando(true);
+  // 💡 NOVO: Parâmetro silencioso adicionado
+  async function carregar(silencioso = false) {
+    if (!silencioso) setCarregando(true);
     try {
       const { data: lojasData } = await supabase.from('lojas').select('*');
       const { data: pedData } = await supabase.from('pedidos').select('*').eq('data_pedido', dataFiltro);
@@ -178,8 +186,11 @@ export default function FechamentoLojas({ isEscuro }) {
                itensRaw: {}, // Objeto intermediário para fundir perfeitamente
                itens: [], 
                lojasEnvolvidas: {},
-               statusPagamento: 'pendente' 
+               statusPagamento: 'pendente',
+               notaFiscal: p.nota_fiscal || null // 💡 NOVO: Inicializa a NF se tiver
             };
+          } else if (!mapaForn[fNome].notaFiscal && p.nota_fiscal) {
+            mapaForn[fNome].notaFiscal = p.nota_fiscal; // 💡 NOVO: Atualiza a NF se algum item do fornecedor tiver
           }
 
           const idLojaForn = extrairNum(p.loja_id);
@@ -231,6 +242,7 @@ export default function FechamentoLojas({ isEscuro }) {
         let qtdDisplay = p.quantidade; 
         let qtdBonificada = Number(p.qtd_bonificada) || 0;
         
+        // 💡 Lógica de prioridade de preço para a loja (Usa a média se existir, senão usa o original)
         let unitParaLoja = p.preco_venda || p.custo_unit || 'R$ 0,00';
         let unitDisplay = unitParaLoja;
         let totalItem = 0;
@@ -373,9 +385,10 @@ export default function FechamentoLojas({ isEscuro }) {
       arrayForn.forEach(f => f.itens.sort((a, b) => a.nomeItem.localeCompare(b.nomeItem)));
       setFornecedores(arrayForn);
 
-    } catch (err) { console.error(err); } finally { setCarregando(false); }
+    } catch (err) { console.error(err); } finally { if (!silencioso) setCarregando(false); }
   }
 
+  // 💡 FUNÇÃO PARA APLICAR VALOR MÉDIA (VENDA) SEM ALTERAR CUSTO
   const aplicarPrecoMedia = async () => {
     if(!itemMediaSelecionado || !valorMediaInput) return alert("Selecione o item e o valor.");
     
@@ -387,6 +400,7 @@ export default function FechamentoLojas({ isEscuro }) {
 
     setCarregando(true);
     try {
+        // 💡 SALVA EXCLUSIVAMENTE NO PRECO_VENDA!
         const { error } = await supabase
             .from('pedidos')
             .update({ preco_venda: finalStr })
@@ -516,6 +530,8 @@ export default function FechamentoLojas({ isEscuro }) {
         }
 
         const statusFinal = item.isFalta ? 'falta' : item.isBoleto ? 'boleto' : 'atendido';
+        
+        // Mantém a regra do preco_venda caso altere algo específico na edição
         let unitParaBanco = item.precoEditado || item.precoOriginal;
         if(Number(item.qtd_bonificada) > 0) {
             unitParaBanco = `BONIFICAÇÃO | ${item.precoEditado}`;
@@ -644,7 +660,7 @@ export default function FechamentoLojas({ isEscuro }) {
     return true;
   });
 
-  if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif', color: themeText }}>🔄 Processando...</div>;
+  if (carregando && fechamentos.length === 0) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif', color: themeText }}>🔄 Processando...</div>;
 
   const renderTabelaDupla = (itensLoja, isMotorista) => {
     const half = Math.ceil(itensLoja.length / 2);
@@ -752,31 +768,31 @@ export default function FechamentoLojas({ isEscuro }) {
       <div style={{ backgroundColor: themeBg, minHeight: '100vh', padding: '10px', fontFamily: 'Arial, sans-serif' }}>
         
         <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', backgroundColor: themeCard, padding: '15px', borderRadius: '8px', marginBottom: '20px', position: 'sticky', top: '10px', zIndex: 1000, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
-           
-           {bloquearExportacao && (
-             <div style={{ flex: '1 1 100%', background: '#fef2f2', color: '#ef4444', padding: '10px', borderRadius: '8px', border: '1px solid #fecaca', textAlign: 'center', fontWeight: 'bold', fontSize: '12px', marginBottom: '5px' }}>
-                ⚠️ RESOLVA AS PENDÊNCIAS NA PLANILHA DE COMPRAS PARA LIBERAR O DOWNLOAD E O COMPARTILHAMENTO.
-             </div>
-           )}
+            
+            {bloquearExportacao && (
+              <div style={{ flex: '1 1 100%', background: '#fef2f2', color: '#ef4444', padding: '10px', borderRadius: '8px', border: '1px solid #fecaca', textAlign: 'center', fontWeight: 'bold', fontSize: '12px', marginBottom: '5px' }}>
+                 ⚠️ RESOLVA AS PENDÊNCIAS NA PLANILHA DE COMPRAS PARA LIBERAR O DOWNLOAD E O COMPARTILHAMENTO.
+              </div>
+            )}
 
-           <button onClick={() => setModoVisualizacaoImp(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬅ VOLTAR</button>
-           
-           <div style={{ display: 'flex', gap: '10px', flex: '1 1 auto', flexWrap: 'wrap' }}>
-             <button onClick={() => processarPDF('preview', isMotGlobal ? null : lojaParaImprimir)} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>👁️ VISUALIZAR PDF</button>
+            <button onClick={() => setModoVisualizacaoImp(false)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬅ VOLTAR</button>
+            
+            <div style={{ display: 'flex', gap: '10px', flex: '1 1 auto', flexWrap: 'wrap' }}>
+              <button onClick={() => processarPDF('preview', isMotGlobal ? null : lojaParaImprimir)} style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>👁️ VISUALIZAR PDF</button>
 
-             {!bloquearExportacao && !isMotGlobal && (
-               <button onClick={() => processarPDF('whatsapp', lojaParaImprimir)} style={{ background: '#25d366', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🟢 COMPARTILHAR WHATSAPP</button>
-             )}
-             
-             {!bloquearExportacao && (
-               <button onClick={() => processarPDF('baixar', isMotGlobal ? null : lojaParaImprimir)} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
-             )}
-           </div>
+              {!bloquearExportacao && !isMotGlobal && (
+                <button onClick={() => processarPDF('whatsapp', lojaParaImprimir)} style={{ background: '#25d366', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>🟢 COMPARTILHAR WHATSAPP</button>
+              )}
+              
+              {!bloquearExportacao && (
+                <button onClick={() => processarPDF('baixar', isMotGlobal ? null : lojaParaImprimir)} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto' }}>⬇️ BAIXAR PDF</button>
+              )}
+            </div>
         </div>
 
         <div style={{ overflowX: 'auto', paddingBottom: '20px' }}>
             <div id="area-impressao" className="print-section" style={{ backgroundColor: 'white', color: 'black', width: isMotorista ? '2480px' : '100%', maxWidth: isMotorista ? 'none' : '850px', margin: '0 auto' }}>
-               
+                
                {lojasParaRenderizar.map((loja, idx) => (
                   <div key={loja.loja_id} className="print-break" style={isMotorista ? { 
                       width: '2480px', 
@@ -1053,6 +1069,11 @@ export default function FechamentoLojas({ isEscuro }) {
 
                     {expandido && (
                       <div style={{ padding: '15px' }}>
+
+                        {/* 💡 NOVO: INDICADOR DE NOTA FISCAL DENTRO DO CARD EXPANDIDO */}
+                        <div style={{ marginBottom: '15px', padding: '10px', borderRadius: '8px', border: `1px solid ${forn.notaFiscal ? (isEscuro ? '#059669' : '#86efac') : (isEscuro ? '#b91c1c' : '#fecaca')}`, backgroundColor: forn.notaFiscal ? (isEscuro ? '#064e3b' : '#dcfce7') : (isEscuro ? '#450a0a' : '#fef2f2'), color: forn.notaFiscal ? (isEscuro ? '#34d399' : '#166534') : (isEscuro ? '#f87171' : '#ef4444'), fontWeight: 'bold', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {forn.notaFiscal ? `✅ NOTA FISCAL: ${forn.notaFiscal}` : '⚠️ AGUARDANDO NOTA FISCAL...'}
+                        </div>
                         
                         {!isBoletoOnly && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', border: `1px dashed ${themeBorder}`, padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
