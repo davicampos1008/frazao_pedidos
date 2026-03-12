@@ -68,6 +68,11 @@ export default function PlanilhaCompras() {
   const [mensagensCopiadas, setMensagensCopiadas] = useState([]);
   const [notificacoes, setNotificacoes] = useState([]);
 
+  // 💡 NOVOS ESTADOS PARA AS NOVAS FUNÇÕES
+  const [fornecedoresOficiais, setFornecedoresOficiais] = useState([]); // Para a Datalist ter todos os cadastrados
+  const [editandoNomeForn, setEditandoNomeForn] = useState(null);
+  const [novoNomeForn, setNovoNomeForn] = useState('');
+
   useEffect(() => {
     if (!window.html2pdf) {
       const script = document.createElement('script');
@@ -128,10 +133,45 @@ export default function PlanilhaCompras() {
     setMensagensCopiadas(prev => prev.includes(id) ? prev : [...prev, id]);
   };
 
+  // 💡 NOVA FUNÇÃO: CANCELAR ITEM ÚNICO
+  const cancelarItemUnico = async (idPedido, nomeItem) => {
+    if (!window.confirm(`Deseja cancelar apenas o item "${nomeItem}"? Ele voltará para os PENDENTES.`)) return;
+    setCarregando(true);
+    await supabase.from('pedidos').update({
+      status_compra: 'pendente',
+      fornecedor_compra: '',
+      custo_unit: '',
+      qtd_atendida: 0,
+      qtd_bonificada: 0
+    }).eq('id', idPedido);
+    carregarDados();
+  };
+
+  // 💡 NOVA FUNÇÃO: SALVAR NOVO NOME DE FORNECEDOR EM TODOS OS PEDIDOS DELE NO DIA
+  const salvarNovoNomeFornecedor = async (nomeAntigo) => {
+    if (!novoNomeForn.trim()) return;
+    setCarregando(true);
+    const { data: pedidosParaAtualizar } = await supabase.from('pedidos').select('id, fornecedor_compra').eq('data_pedido', dataFiltro);
+    const promessas = [];
+    (pedidosParaAtualizar || []).forEach(p => {
+      let fName = String(p.fornecedor_compra || '').toUpperCase().replace('ALERTA|', '').trim();
+      if (fName === nomeAntigo) {
+        promessas.push(supabase.from('pedidos').update({ fornecedor_compra: novoNomeForn.toUpperCase().trim() }).eq('id', p.id));
+      }
+    });
+    await Promise.all(promessas);
+    setEditandoNomeForn(null);
+    carregarDados();
+  };
+
   const carregarDados = useCallback(async (silencioso = false) => {
     if (!silencioso) setCarregando(true);
     try {
       const { data: fornData } = await supabase.from('fornecedores').select('*').order('nome_fantasia', { ascending: true });
+      
+      // 💡 NOVO: Salva os fornecedores do banco para alimentar a Datalist
+      setFornecedoresOficiais(fornData || []);
+
       const { data: lojasData } = await supabase.from('lojas').select('*');
       
       const lojasDb = lojasData || [];
@@ -764,6 +804,11 @@ export default function PlanilhaCompras() {
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px', padding: '10px' }}>
       
+      {/* 💡 NOVA DATALIST GLOBAL COM O BANCO DE DADOS */}
+      <datalist id="lista-fornecedores">
+        {fornecedoresOficiais.map(f => <option key={f.id} value={f.nome_fantasia || f.nome_completo} />)}
+      </datalist>
+
       <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 99999, display: 'flex', flexDirection: 'column', gap: '10px', width: '90%', maxWidth: '400px' }}>
         {notificacoes.map(notif => (
           <div key={notif.id} style={{ background: notif.tipo === 'alerta' ? '#ef4444' : (notif.tipo === 'info' ? '#3b82f6' : '#22c55e'), color: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', fontSize: '13px' }}>
@@ -798,7 +843,6 @@ export default function PlanilhaCompras() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-end' }}>
             
-            {/* 💡 NOVO BOTÃO DE ATUALIZAÇÃO MANUAL/AO VIVO */}
             <div style={{ display: 'flex', gap: '10px' }}>
               <button onClick={atualizarAoVivo} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '11px', boxShadow: '0 4px 15px rgba(59,130,246,0.4)' }}>
                 🔄 ATUALIZAR STATUS
@@ -836,10 +880,6 @@ export default function PlanilhaCompras() {
           📦 RESUMO ITENS
         </button>
       </div>
-
-      <datalist id="lista-fornecedores">
-        {fornecedoresBd.map(f => <option key={f.id} value={f.nome} />)}
-      </datalist>
 
       {abaAtiva === 'pendentes' && (
         <>
@@ -906,6 +946,7 @@ export default function PlanilhaCompras() {
                   <button onClick={() => setItensSelecionados([])} style={{ background: 'none', border: 'none', color: '#ef4444', fontWeight: 'bold' }}>Limpar</button>
                </div>
                <div style={{ display: 'flex', gap: '10px' }}>
+                  {/* 💡 INPUT DATALIST ADICIONADO AQUI */}
                   <input list="lista-fornecedores" placeholder="Nome do Fornecedor..." value={nomeFornecedorLote} onChange={e => setNomeFornecedorLote(e.target.value)} style={{ flex: 1, padding: '15px', borderRadius: '12px', border: '2px solid #e2e8f0', outline: 'none', textTransform: 'uppercase', fontWeight: 'bold' }} />
                   <button onClick={criarGrupoFornecedor} style={{ background: '#8b5cf6', color: '#fff', border: 'none', padding: '0 20px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>AGRUPAR</button>
                </div>
@@ -1051,7 +1092,10 @@ export default function PlanilhaCompras() {
               const expandido = fornExpandido === f.nome;
               const temAlerta = f.precisaRefazer;
               
-              let estiloBorda = '6px solid #111';
+              // 💡 NOVO: Verifica se o fornecedor atual tem cadastro no banco
+              const temCadastro = fornecedoresOficiais.some(oficial => (oficial.nome_fantasia || '').toUpperCase() === f.nome || (oficial.nome_completo || '').toUpperCase() === f.nome);
+              
+              let estiloBorda = temCadastro ? '6px solid #111' : '6px solid #ef4444'; // Altera a borda se não tiver cadastro
               let iconeTopo = '';
               let corH3 = '#111';
 
@@ -1070,9 +1114,23 @@ export default function PlanilhaCompras() {
               return (
                 <div key={idx} style={{ backgroundColor: '#fff', borderRadius: '20px', padding: '20px', boxShadow: '0 5px 15px rgba(0,0,0,0.05)', borderTop: estiloBorda, transition: '0.3s' }}>
                   
-                  <div onClick={() => setFornExpandido(expandido ? null : f.nome)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-                    <h3 style={{ margin: 0, fontSize: '16px', color: corH3, textTransform: 'uppercase', display: 'flex', gap: '10px', alignItems: 'center' }}>
-                        🏢 {f.nome} 
+                  {/* 💡 NOVO: Lógica de Edição do Nome do Fornecedor direto no H3 */}
+                  <div onClick={() => { if(editandoNomeForn !== f.nome) setFornExpandido(expandido ? null : f.nome) }} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: editandoNomeForn === f.nome ? 'default' : 'pointer' }}>
+                    <h3 style={{ margin: 0, fontSize: '16px', color: corH3, textTransform: 'uppercase', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        🏢 
+                        {editandoNomeForn === f.nome ? (
+                          <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                            <input list="lista-fornecedores" value={novoNomeForn} onChange={e => setNovoNomeForn(e.target.value)} style={{ padding: '4px', fontSize: '12px', borderRadius: '4px', border: '1px solid #ccc', outline: 'none' }} onClick={e => e.stopPropagation()} />
+                            <button onClick={(e) => { e.stopPropagation(); salvarNovoNomeFornecedor(f.nome); }} style={{ background: '#22c55e', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontWeight: 'bold' }}>OK</button>
+                            <button onClick={(e) => { e.stopPropagation(); setEditandoNomeForn(null); }} style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontWeight: 'bold' }}>X</button>
+                          </div>
+                        ) : (
+                          <>
+                            {f.nome} 
+                            <button onClick={(e) => { e.stopPropagation(); setEditandoNomeForn(f.nome); setNovoNomeForn(f.nome); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }} title="Editar Fornecedor">✏️</button>
+                            {!temCadastro && <span style={{ background: '#ef4444', color: '#fff', fontSize: '9px', padding: '3px 6px', borderRadius: '4px', fontWeight: 'bold' }}>⚠️ SEM CADASTRO</span>}
+                          </>
+                        )}
                         {iconeTopo && <span style={{fontSize: '10px', background: temAlerta ? '#fef2f2' : '#dcfce7', padding: '4px 8px', borderRadius: '6px', color: temAlerta ? '#ef4444' : '#166534'}}>{iconeTopo}</span>}
                     </h3>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -1143,6 +1201,8 @@ export default function PlanilhaCompras() {
                                       {item.qtd_bonificada > 0 && (
                                         <span style={{ fontSize: '9px', background: '#dcfce7', color: '#166534', padding: '2px 5px', borderRadius: '4px', fontWeight: 'bold' }}>🎁 +{item.qtd_bonificada}</span>
                                       )}
+                                      {/* 💡 NOVO: BOTÃO DE CANCELAR APENAS ESTE ITEM */}
+                                      <button onClick={() => cancelarItemUnico(item.id_pedido, item.nome)} style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#ef4444', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '10px' }} title="Cancelar este item">✖</button>
                                     </div>
                                   </div>
                                 ))}
@@ -1398,6 +1458,7 @@ export default function PlanilhaCompras() {
             <div style={{ display: 'grid', gridTemplateColumns: abaModal === 'fracionado' ? '2fr 1fr' : '1fr', gap: '15px', marginBottom: '15px' }}>
               <div>
                 <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>FORNECEDOR</label>
+                {/* 💡 INPUT DATALIST ADICIONADO AQUI NO MODAL */}
                 <input list="lista-fornecedores" placeholder="Ex: Zé das Frutas..." value={dadosCompra.fornecedor} onChange={(e) => setDadosCompra({...dadosCompra, fornecedor: e.target.value})} disabled={dadosCompra.isFaltaGeral} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box', backgroundColor: dadosCompra.isFaltaGeral ? '#f1f5f9' : '#f8fafc' }} />
               </div>
               
