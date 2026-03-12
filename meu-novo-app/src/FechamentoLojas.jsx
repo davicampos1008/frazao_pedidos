@@ -109,7 +109,6 @@ export default function FechamentoLojas({ isEscuro }) {
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
   };
 
-  // 💡 NOVO: Parâmetro silencioso adicionado
   async function carregar(silencioso = false) {
     if (!silencioso) setCarregando(true);
     try {
@@ -154,7 +153,7 @@ export default function FechamentoLojas({ isEscuro }) {
             return;
         }
 
-        // --- 💡 LÓGICA DE FORNECEDORES REFEITA E BLINDADA ---
+        // --- FORNECEDORES REFEITA E BLINDADA ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
           let fNomeOriginal = p.fornecedor_compra ? String(p.fornecedor_compra).toUpperCase() : 'SEM FORNECEDOR';
           if (fNomeOriginal.startsWith('ALERTA|')) fNomeOriginal = fNomeOriginal.replace('ALERTA|', '');
@@ -183,14 +182,14 @@ export default function FechamentoLojas({ isEscuro }) {
                totalBruto: 0,
                totalDescontoBonif: 0,
                qtdBonificadaGeral: 0,
-               itensRaw: {}, // Objeto intermediário para fundir perfeitamente
+               itensRaw: {}, 
                itens: [], 
                lojasEnvolvidas: {},
                statusPagamento: 'pendente',
-               notaFiscal: p.nota_fiscal || null // 💡 NOVO: Inicializa a NF se tiver
+               notaFiscal: p.nota_fiscal || null 
             };
           } else if (!mapaForn[fNome].notaFiscal && p.nota_fiscal) {
-            mapaForn[fNome].notaFiscal = p.nota_fiscal; // 💡 NOVO: Atualiza a NF se algum item do fornecedor tiver
+            mapaForn[fNome].notaFiscal = p.nota_fiscal; 
           }
 
           const idLojaForn = extrairNum(p.loja_id);
@@ -199,7 +198,6 @@ export default function FechamentoLojas({ isEscuro }) {
           
           mapaForn[fNome].lojasEnvolvidas[nomeLojaForn] = lInfoForn || { nome_fantasia: nomeLojaForn, placa_caminhao: 'SEM PLACA' };
 
-          // 💡 Joga no Raw agrupando SÓ por nome (ignora preços diferentes do banco de dados)
           const keyItem = `${p.nome_produto}_${isBoleto}`;
           if (!mapaForn[fNome].itensRaw[keyItem]) {
               mapaForn[fNome].itensRaw[keyItem] = {
@@ -207,7 +205,7 @@ export default function FechamentoLojas({ isEscuro }) {
                   unidade: p.unidade_medida || 'UN',
                   qtd: 0,
                   qtdBonificada: 0,
-                  maxValNum: 0, // Salva o maior preço encontrado para usar como oficial
+                  maxValNum: 0, 
                   isBoleto: isBoleto
               };
           }
@@ -242,7 +240,6 @@ export default function FechamentoLojas({ isEscuro }) {
         let qtdDisplay = p.quantidade; 
         let qtdBonificada = Number(p.qtd_bonificada) || 0;
         
-        // 💡 Lógica de prioridade de preço para a loja (Usa a média se existir, senão usa o original)
         let unitParaLoja = p.preco_venda || p.custo_unit || 'R$ 0,00';
         let unitDisplay = unitParaLoja;
         let totalItem = 0;
@@ -345,7 +342,7 @@ export default function FechamentoLojas({ isEscuro }) {
       });
 
       // =======================================================================
-      // PARTE 2: FECHAR CÁLCULO FINAL DOS FORNECEDORES (Resolução do Bug)
+      // PARTE 2: FECHAR CÁLCULO FINAL DOS FORNECEDORES
       // =======================================================================
       Object.values(mapaForn).forEach(forn => {
           Object.values(forn.itensRaw).forEach(raw => {
@@ -383,12 +380,22 @@ export default function FechamentoLojas({ isEscuro }) {
 
       const arrayForn = Object.values(mapaForn).sort((a, b) => a.nome.localeCompare(b.nome));
       arrayForn.forEach(f => f.itens.sort((a, b) => a.nomeItem.localeCompare(b.nomeItem)));
-      setFornecedores(arrayForn);
+      
+      // 💡 PRESERVA O ESTADO DE "PAGO" AO ATUALIZAR EM SEGUNDO PLANO
+      setFornecedores(prev => {
+          if (!prev || prev.length === 0) return arrayForn;
+          return arrayForn.map(novoForn => {
+              const antigo = prev.find(p => p.nome === novoForn.nome);
+              if (antigo) {
+                  novoForn.statusPagamento = antigo.statusPagamento;
+              }
+              return novoForn;
+          });
+      });
 
     } catch (err) { console.error(err); } finally { if (!silencioso) setCarregando(false); }
   }
 
-  // 💡 FUNÇÃO PARA APLICAR VALOR MÉDIA (VENDA) SEM ALTERAR CUSTO
   const aplicarPrecoMedia = async () => {
     if(!itemMediaSelecionado || !valorMediaInput) return alert("Selecione o item e o valor.");
     
@@ -400,7 +407,6 @@ export default function FechamentoLojas({ isEscuro }) {
 
     setCarregando(true);
     try {
-        // 💡 SALVA EXCLUSIVAMENTE NO PRECO_VENDA!
         const { error } = await supabase
             .from('pedidos')
             .update({ preco_venda: finalStr })
@@ -530,8 +536,6 @@ export default function FechamentoLojas({ isEscuro }) {
         }
 
         const statusFinal = item.isFalta ? 'falta' : item.isBoleto ? 'boleto' : 'atendido';
-        
-        // Mantém a regra do preco_venda caso altere algo específico na edição
         let unitParaBanco = item.precoEditado || item.precoOriginal;
         if(Number(item.qtd_bonificada) > 0) {
             unitParaBanco = `BONIFICAÇÃO | ${item.precoEditado}`;
@@ -1145,7 +1149,7 @@ export default function FechamentoLojas({ isEscuro }) {
 
                         {!isBoletoOnly && (
                           <button onClick={() => alternarStatusPagamento(forn.nome)} style={{ width: '100%', marginTop: '15px', padding: '12px', backgroundColor: isPago ? (isEscuro ? '#1e293b' : '#f1f5f9') : '#22c55e', color: isPago ? '#64748b' : '#fff', border: 'none', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
-                            {isPago ? 'DESFAZER PAGAMENTO' : 'PIX FEITO / CONCLUIR'}
+                            {isPago ? 'REPARAR (VOLTAR PARA PENDENTES)' : 'PIX FEITO / CONCLUIR'}
                           </button>
                         )}
                       </div>
