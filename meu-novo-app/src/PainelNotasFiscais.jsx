@@ -73,6 +73,7 @@ export default function PainelNotasFiscais({ isEscuro }) {
     return parseFloat(precoCln.replaceAll('.', '').replace(',', '.')) || 0;
   };
 
+  // 💡 CORREÇÃO: LÓGICA MAIS INTELIGENTE PARA VINCULAR FORNECEDORES PARECIDOS
   const buscarFornecedorSimilar = (nomeBusca, listaBd) => {
       if (!nomeBusca || nomeBusca === 'DESCONHECIDO') return null;
       const normBusca = normalizarBusca(nomeBusca);
@@ -84,6 +85,20 @@ export default function PainelNotasFiscais({ isEscuro }) {
           const normDB = normalizarBusca(f.nome_fantasia);
           return normDB.includes(normBusca) || normBusca.includes(normDB);
       });
+      if (match) return match;
+
+      // Se falhar, tenta achar pela PRIMEIRA palavra chave (Ex: "AMANDA BDG" se liga com "AMANDA BANDEJADOS")
+      const nomeLimpo = nomeBusca.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+      const primeiraPalavraBusca = nomeLimpo.split(/\s+/)[0];
+
+      if (primeiraPalavraBusca && primeiraPalavraBusca.length > 2) {
+          match = listaBd.find(f => {
+              if(!f.nome_fantasia) return false;
+              const dbLimpo = f.nome_fantasia.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+              const dbPrimeiraPalavra = dbLimpo.split(/\s+/)[0];
+              return primeiraPalavraBusca === dbPrimeiraPalavra;
+          });
+      }
 
       return match || null;
   };
@@ -108,7 +123,13 @@ export default function PainelNotasFiscais({ isEscuro }) {
       const pedidos = pedData || [];
       const lojas = lojasData || [];
 
-      const nomesNosPedidos = [...new Set(pedidos.map(p => String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase()))];
+      // 💡 CORREÇÃO: Limpando a flag de "ALERTA|" logo de cara para não criar lixo no banco
+      const nomesNosPedidos = [...new Set(pedidos.map(p => {
+          let nome = String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase();
+          if (nome.startsWith('ALERTA|')) nome = nome.replace('ALERTA|', '');
+          return nome;
+      }))];
+      
       const novosFornecedoresParaCriar = [];
 
       for (const nomePed of nomesNosPedidos) {
@@ -136,16 +157,15 @@ export default function PainelNotasFiscais({ isEscuro }) {
       const initNFs = {};
       
       pedidos.forEach(p => {
-        const fNomeOriginal = String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase();
+        let fNomeOriginal = String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase();
+        if (fNomeOriginal.startsWith('ALERTA|')) fNomeOriginal = fNomeOriginal.replace('ALERTA|', '');
         
         const infoFornBD = buscarFornecedorSimilar(fNomeOriginal, fornecedoresDB);
-        
         const fNomeOficial = infoFornBD ? infoFornBD.nome_fantasia.toUpperCase() : fNomeOriginal;
         
         let tipoPessoa = 'SEM_CADASTRO';
         let doc = '';
 
-        // 💡 MAPEAMENTO ATUALIZADO (usando "documento")
         if (infoFornBD && infoFornBD.documento) {
             doc = infoFornBD.documento;
             const tipoDoc = String(infoFornBD.tipo_documento || '').toUpperCase().trim();
@@ -167,9 +187,15 @@ export default function PainelNotasFiscais({ isEscuro }) {
               dadosCadastrais: infoFornBD || null, 
               total: 0, 
               nota_fiscal: p.nota_fiscal || '', 
-              itens: [] 
+              itens: [],
+              ids_pedidos: [] // 💡 AQUI GARANTE QUE TODAS AS LINHAS DA TABELA SERÃO ATUALIZADAS
           };
           if (p.nota_fiscal) initNFs[fNomeOficial] = p.nota_fiscal;
+        }
+
+        // Salva os IDs dos pedidos deste fornecedor
+        if (p.id && !mapaForn[fNomeOficial].ids_pedidos.includes(p.id)) {
+            mapaForn[fNomeOficial].ids_pedidos.push(p.id);
         }
 
         const valNum = tratarPrecoNum(p.custo_unit);
@@ -275,16 +301,21 @@ export default function PainelNotasFiscais({ isEscuro }) {
     return () => clearInterval(intervalo);
   }, [dataFiltro]);
 
+  // 💡 CORREÇÃO: Salvando diretamente usando o array de IDs mapeado
   const salvarNotaFiscal = async (fornecedorNome) => {
     const numeroNF = inputsNF[fornecedorNome] || '';
     if (!numeroNF.trim()) return alert("Digite o número da Nota Fiscal antes de salvar.");
+
+    const fornAtual = pedidosFornecedor.find(f => f.fornecedor === fornecedorNome);
+    if (!fornAtual || !fornAtual.ids_pedidos || fornAtual.ids_pedidos.length === 0) {
+        return alert("Não foi possível identificar os pedidos para salvar a NF.");
+    }
 
     setCarregando(true);
     try {
       const { error } = await supabase.from('pedidos')
         .update({ nota_fiscal: numeroNF })
-        .eq('data_pedido', dataFiltro) 
-        .eq('fornecedor_compra', fornecedorNome);
+        .in('id', fornAtual.ids_pedidos); // 🔥 ISSO RESOLVE O PROBLEMA DE NÃO SALVAR A NF
       
       if (error) throw error;
       
@@ -297,16 +328,20 @@ export default function PainelNotasFiscais({ isEscuro }) {
     }
   };
 
-  // 💡 NOVA FUNÇÃO: APAGAR NOTA FISCAL
+  // 💡 CORREÇÃO: Apagando diretamente usando o array de IDs mapeado
   const apagarNotaFiscal = async (fornecedorNome) => {
     if (!window.confirm(`Tem certeza que deseja apagar a Nota Fiscal do fornecedor ${fornecedorNome} e devolver para os pendentes?`)) return;
+
+    const fornAtual = pedidosFornecedor.find(f => f.fornecedor === fornecedorNome);
+    if (!fornAtual || !fornAtual.ids_pedidos || fornAtual.ids_pedidos.length === 0) {
+        return alert("Não foi possível identificar os pedidos para apagar a NF.");
+    }
 
     setCarregando(true);
     try {
       const { error } = await supabase.from('pedidos')
         .update({ nota_fiscal: null })
-        .eq('data_pedido', dataFiltro) 
-        .eq('fornecedor_compra', fornecedorNome);
+        .in('id', fornAtual.ids_pedidos); // 🔥 ISSO RESOLVE O PROBLEMA DE NÃO APAGAR A NF
       
       if (error) throw error;
       
@@ -605,7 +640,7 @@ export default function PainelNotasFiscais({ isEscuro }) {
                       
                       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
                          <button onClick={() => setLojaImpressao(l.loja)} style={{ background: configDesign.cores.primaria, color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>
-                           📄 VER PDF
+                            📄 VER PDF
                          </button>
                       </div>
 
