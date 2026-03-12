@@ -85,24 +85,41 @@ export default function PainelNotasFiscais({ isEscuro }) {
         const fNome = String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase();
         
         if (!mapaForn[fNome]) {
-          // 💡 LÓGICA DE VÍNCULO INTELIGENTE
+          // 💡 LÓGICA DE VÍNCULO CORRIGIDA: Olha pro Fantasia E pro Completo
           const nomeNormalizadoPed = normalizarBusca(fNome);
-          const matches = fornecedoresDB.filter(f => {
-             const nomeNormalizadoDB = normalizarBusca(f.nome_fantasia);
-             return nomeNormalizadoPed.includes(nomeNormalizadoDB) || nomeNormalizadoDB.includes(nomeNormalizadoPed);
-          });
-
-          let statusCadastro = 'SEM_CADASTRO';
+          
           let infoFornBD = null;
+          let statusCadastro = 'SEM_CADASTRO';
 
-          if (matches.length === 1) {
-             infoFornBD = matches[0];
-             statusCadastro = 'LINKADO';
-          } else if (matches.length > 1) {
-             statusCadastro = 'COLISAO'; // Mais de um nome parecido
+          // Tenta busca exata primeiro
+          let match = fornecedoresDB.find(f => 
+             normalizarBusca(f.nome_fantasia) === nomeNormalizadoPed || 
+             normalizarBusca(f.nome_completo) === nomeNormalizadoPed
+          );
+
+          // Se não achar exato, tenta por similaridade
+          if (!match) {
+             const matches = fornecedoresDB.filter(f => {
+                 const nF = normalizarBusca(f.nome_fantasia);
+                 const nC = normalizarBusca(f.nome_completo);
+                 return (nF && (nomeNormalizadoPed.includes(nF) || nF.includes(nomeNormalizadoPed))) || 
+                        (nC && (nomeNormalizadoPed.includes(nC) || nC.includes(nomeNormalizadoPed)));
+             });
+             
+             if (matches.length === 1) {
+                 match = matches[0];
+             } else if (matches.length > 1) {
+                 statusCadastro = 'COLISAO';
+             }
           }
 
-          const tipoPessoa = infoFornBD?.tipo_chave_pix === 'CNPJ' ? 'PJ' : 'PF';
+          if (match) {
+             infoFornBD = match;
+             statusCadastro = 'LINKADO';
+          }
+
+          // 💡 CORREÇÃO: Define PJ/PF pelo 'tipo_documento', não pela chave PIX
+          const tipoPessoa = infoFornBD?.tipo_documento === 'CNPJ' ? 'PJ' : 'PF';
 
           mapaForn[fNome] = { 
               fornecedor: fNome, 
