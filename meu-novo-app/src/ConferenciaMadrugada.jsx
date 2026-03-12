@@ -7,6 +7,23 @@ export default function ConferenciaMadrugada() {
     cores: { primaria: '#f97316', sucesso: '#22c55e', alerta: '#ef4444', aviso: '#eab308' }
   };
 
+  // 💡 NOVA LÓGICA DE DATA FIXA E SELECIONÁVEL
+  const obterDataLocal = () => {
+    const data = new Date();
+    const tzOffset = data.getTimezoneOffset() * 60000;
+    return new Date(data.getTime() - tzOffset).toISOString().split('T')[0];
+  };
+
+  const [dataFiltro, setDataFiltro] = useState(() => {
+    return localStorage.getItem('virtus_conferencia_data') || obterDataLocal();
+  });
+  const dataBr = dataFiltro.split('-').reverse().join('/');
+
+  useEffect(() => {
+    localStorage.setItem('virtus_conferencia_data', dataFiltro);
+  }, [dataFiltro]);
+  // 💡 FIM DA LÓGICA DE DATA
+
   const [abaAtiva, setAbaAtiva] = useState('operacional');
   const [carregando, setCarregando] = useState(true);
   const [busca, setBusca] = useState('');
@@ -17,9 +34,6 @@ export default function ConferenciaMadrugada() {
   
   // 💡 Controle dos inputs de quantidade parcial
   const [qtdEditando, setQtdEditando] = useState({});
-
-  const hoje = new Date().toLocaleDateString('en-CA');
-  const dataBr = new Date().toLocaleDateString('pt-BR');
 
   const extrairNum = (valor) => {
     if (valor === null || valor === undefined) return null;
@@ -44,7 +58,7 @@ export default function ConferenciaMadrugada() {
       const { data: lojasData } = await supabase.from('lojas').select('*');
       const { data: pedData } = await supabase.from('pedidos')
         .select('*')
-        .eq('data_pedido', hoje)
+        .eq('data_pedido', dataFiltro) // 💡 Modificado de 'hoje' para 'dataFiltro'
         .in('status_compra', ['atendido', 'boleto']);
       
       const pedidos = pedData || [];
@@ -99,7 +113,7 @@ export default function ConferenciaMadrugada() {
 
     } catch (err) { console.error(err); }
     finally { if (!silencioso) setCarregando(false); }
-  }, [hoje]);
+  }, [dataFiltro]); // 💡 Modificado de 'hoje' para 'dataFiltro'
 
   // 💡 Efeito Inteligente que atualiza as métricas instantaneamente sempre que os dados mudam
   useEffect(() => {
@@ -204,7 +218,26 @@ export default function ConferenciaMadrugada() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '900' }}>🔦 CONFERÊNCIA DE MADRUGADA</h2>
-            <p style={{ margin: '5px 0 0 0', color: '#94a3b8', fontSize: '13px' }}>Data Base: {dataBr}</p>
+            
+            {/* 💡 NOVO: Seletor de Data Fixo */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
+              <span style={{ color: '#94a3b8', fontSize: '13px' }}>Data Base:</span>
+              <input 
+                type="date" 
+                value={dataFiltro} 
+                onChange={(e) => setDataFiltro(e.target.value)}
+                style={{ background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '6px', padding: '4px 8px', fontSize: '13px', outline: 'none', cursor: 'pointer' }}
+              />
+              {dataFiltro !== obterDataLocal() && (
+                <button 
+                  onClick={() => setDataFiltro(obterDataLocal())} 
+                  style={{ background: configDesign.cores.primaria, color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  🗓️ VOLTAR PARA HOJE
+                </button>
+              )}
+            </div>
+
           </div>
           <button onClick={() => carregarDados()} style={{background: '#333', border: 'none', color: '#fff', padding: '12px 15px', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold'}}>🔄 ATUALIZAR</button>
         </div>
