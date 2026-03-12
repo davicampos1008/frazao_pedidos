@@ -80,7 +80,6 @@ export default function Usuarios() {
     setDados({ ...dados, telefone: formatarTelefone(e.target.value) });
   };
 
-  // 💡 CORRIGIDO: Seleção de loja via Dropdown garantindo o vínculo e geração do código
   const handleSelectLoja = (e) => {
     const idDaLoja = e.target.value;
     const lojaSelecionada = listaLojas.find(l => String(l.codigo_loja) === String(idDaLoja));
@@ -99,7 +98,6 @@ export default function Usuarios() {
     }
   };
 
-  // 💡 CORRIGIDO: Payload estruturado para não enviar IDs vazios
   async function salvar() {
     if (!dados.nome.trim()) return alert("⚠️ NOME é obrigatório!");
     if (!dados.codigo_loja) return alert("⚠️ SELECIONE UMA LOJA!");
@@ -119,7 +117,6 @@ export default function Usuarios() {
         codigo_loja: dados.codigo_loja
     };
 
-    // Só envia o ID se for uma edição, caso contrário o banco gera um novo.
     if (dados.id) {
         payload.id = dados.id;
     }
@@ -276,7 +273,6 @@ export default function Usuarios() {
               <div style={{ ...cssGrupo, borderColor: '#ffedd5', backgroundColor: '#fff7ed' }}>
                 <div style={{ position: 'relative' }}>
                   <label style={cssLabel}>UNIDADE DE TRABALHO *</label>
-                  {/* 💡 CORREÇÃO: Dropdown nativo garante o vínculo da ID da loja e elimina erros de digitação */}
                   <select 
                     disabled={!editando}
                     value={dados.codigo_loja || ''}
@@ -305,10 +301,12 @@ export default function Usuarios() {
               </div>
 
               <div style={cssGrupo}>
-                <label style={cssLabel}>PERMISSÃO *</label>
+                <label style={cssLabel}>PERMISSÃO / CARGO *</label>
                 <select disabled={!editando} value={dados.perfil} onChange={e => setDados({...dados, perfil: e.target.value})} style={cssInput(!editando)}>
-                  <option value="operador">👤 OPERADOR</option>
-                  <option value="admin">🛡️ ADMINISTRADOR</option>
+                  <option value="operador">👤 OPERADOR (App de Pedidos)</option>
+                  <option value="admin">🛡️ ADMINISTRADOR (Acesso Total)</option>
+                  <option value="faturista">🧾 SETOR FISCAL (Apenas Notas Fiscais)</option>
+                  <option value="auxiliar">👁️ AUXILIAR (Ver tudo, Edita apenas Notas Fiscais)</option>
                 </select>
               </div>
             </div>
