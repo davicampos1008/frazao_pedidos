@@ -85,19 +85,16 @@ export default function PainelNotasFiscais({ isEscuro }) {
         const fNome = String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase();
         
         if (!mapaForn[fNome]) {
-          // 💡 LÓGICA DE VÍNCULO CORRIGIDA: Olha pro Fantasia E pro Completo
           const nomeNormalizadoPed = normalizarBusca(fNome);
           
           let infoFornBD = null;
           let statusCadastro = 'SEM_CADASTRO';
 
-          // Tenta busca exata primeiro
           let match = fornecedoresDB.find(f => 
              normalizarBusca(f.nome_fantasia) === nomeNormalizadoPed || 
              normalizarBusca(f.nome_completo) === nomeNormalizadoPed
           );
 
-          // Se não achar exato, tenta por similaridade
           if (!match) {
              const matches = fornecedoresDB.filter(f => {
                  const nF = normalizarBusca(f.nome_fantasia);
@@ -118,7 +115,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
              statusCadastro = 'LINKADO';
           }
 
-          // 💡 CORREÇÃO: Define PJ/PF pelo 'tipo_documento', não pela chave PIX
           const tipoPessoa = infoFornBD?.tipo_documento === 'CNPJ' ? 'PJ' : 'PF';
 
           mapaForn[fNome] = { 
@@ -384,7 +380,7 @@ export default function PainelNotasFiscais({ isEscuro }) {
                       <h3 style={{ margin: 0, color: isEscuro ? '#fff' : '#111', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                         🏢 {f.fornecedor} 
                         
-                        {/* 💡 SELO INTELIGENTE DE CADASTRO (PJ, PF, SEM CADASTRO OU CONFLITO) */}
+                        {/* 💡 SELO INTELIGENTE DE CADASTRO */}
                         {f.statusCadastro === 'LINKADO' && f.tipoPessoa === 'PJ' && (
                             <span style={{fontSize: '9px', background: '#3b82f6', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>PESSOA JURÍDICA</span>
                         )}
@@ -409,7 +405,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
                     {isExpandido && (
                       <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: `1px solid ${corStatus}50` }}>
                         
-                        {/* 💡 DADOS DO FORNECEDOR PUXADOS DIRETAMENTE PARA CÁ */}
                         {f.statusCadastro === 'LINKADO' && (
                           <div style={{ background: isEscuro ? '#14532d' : '#dcfce7', padding: '15px', borderRadius: '12px', color: isEscuro ? '#86efac' : '#166534', border: `1px solid ${configDesign.cores.sucesso}`, marginBottom: '15px', fontSize: '12px' }}>
                              <strong style={{color: configDesign.cores.textoForte}}>Chave PIX:</strong> <span style={{fontWeight: 'bold'}}>{f.dadosCadastro.chave_pix || 'Não cadastrada'}</span> ({f.dadosCadastro.tipo_chave_pix || 'N/A'})
@@ -421,7 +416,7 @@ export default function PainelNotasFiscais({ isEscuro }) {
                         )}
                         {f.statusCadastro === 'SEM_CADASTRO' && (
                            <div style={{ background: '#fef2f2', padding: '15px', borderRadius: '12px', color: '#991b1b', border: '1px solid #fecaca', marginBottom: '15px', fontSize: '12px', fontWeight: 'bold' }}>
-                              ⚠️ Este fornecedor não possui cadastro no sistema. Vá na aba "Dados dos Fornecedores", crie o cadastro dele, e os dados de PIX e NF aparecerão aqui automaticamente.
+                              ⚠️ Este fornecedor não possui cadastro no sistema. Vá na aba "Dados dos Fornecedores", crie o cadastro dele, e os dados de PIX aparecerão aqui.
                            </div>
                         )}
                         {f.statusCadastro === 'COLISAO' && (
@@ -440,28 +435,28 @@ export default function PainelNotasFiscais({ isEscuro }) {
                           ))}
                         </div>
 
-                        {/* ÁREA DE LANÇAMENTO DA NOTA FISCAL */}
-                        {f.statusCadastro === 'LINKADO' && f.tipoPessoa === 'PJ' ? (
-                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: configDesign.cores.fundoGeral, padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}` }}>
-                              <div style={{ flex: 1 }}>
-                                  <label style={{ display: 'block', fontSize: '10px', fontWeight: 'bold', color: configDesign.cores.textoSuave, marginBottom: '5px' }}>NÚMERO DA NOTA FISCAL</label>
-                                  <input 
-                                    type="text" 
-                                    value={inputsNF[f.fornecedor] !== undefined ? inputsNF[f.fornecedor] : (f.nota_fiscal || '')} 
-                                    onChange={(e) => setInputsNF({...inputsNF, [f.fornecedor]: e.target.value})} 
-                                    placeholder="Ex: NF-123456" 
-                                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, outline: 'none', background: configDesign.cores.fundoCards, color: configDesign.cores.textoForte, fontWeight: 'bold', boxSizing: 'border-box' }}
-                                  />
-                              </div>
-                              <button onClick={() => salvarNotaFiscal(f.fornecedor)} style={{ background: isConcluido ? '#111' : configDesign.cores.primaria, color: '#fff', border: 'none', padding: '0 20px', height: '42px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', marginTop: '18px' }}>
-                                  {isConcluido ? '🔄 ATUALIZAR NF' : '💾 SALVAR NF'}
-                              </button>
-                            </div>
-                        ) : f.statusCadastro === 'LINKADO' && f.tipoPessoa === 'PF' ? (
-                            <div style={{ textAlign: 'center', padding: '15px', background: '#f1f5f9', color: '#64748b', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
-                                🚫 Fornecedor Pessoa Física não emite Nota Fiscal.
-                            </div>
-                        ) : null}
+                        {/* 💡 ÁREA DE LANÇAMENTO DA NOTA FISCAL */}
+                        {f.statusCadastro === 'LINKADO' && f.tipoPessoa === 'PJ' && (
+                           <div style={{ background: '#3b82f6', color: '#fff', padding: '15px', borderRadius: '12px', textAlign: 'center', fontWeight: '900', fontSize: '14px', textTransform: 'uppercase', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)' }}>
+                              🏢 ATENÇÃO: FORNECEDOR PESSOA JURÍDICA
+                           </div>
+                        )}
+                        
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: configDesign.cores.fundoGeral, padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, marginTop: '10px' }}>
+                          <div style={{ flex: 1 }}>
+                              <label style={{ display: 'block', fontSize: '10px', fontWeight: 'bold', color: configDesign.cores.textoSuave, marginBottom: '5px' }}>NÚMERO DA NOTA FISCAL</label>
+                              <input 
+                                type="text" 
+                                value={inputsNF[f.fornecedor] !== undefined ? inputsNF[f.fornecedor] : (f.nota_fiscal || '')} 
+                                onChange={(e) => setInputsNF({...inputsNF, [f.fornecedor]: e.target.value})} 
+                                placeholder="Ex: NF-123456" 
+                                style={{ width: '100%', padding: '12px', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, outline: 'none', background: configDesign.cores.fundoCards, color: configDesign.cores.textoForte, fontWeight: 'bold', boxSizing: 'border-box' }}
+                              />
+                          </div>
+                          <button onClick={() => salvarNotaFiscal(f.fornecedor)} style={{ background: isConcluido ? '#111' : configDesign.cores.primaria, color: '#fff', border: 'none', padding: '0 20px', height: '42px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', marginTop: '18px' }}>
+                              {isConcluido ? '🔄 ATUALIZAR NF' : '💾 SALVAR NF'}
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
