@@ -114,6 +114,9 @@ export default function FechamentoLojas({ isEscuro }) {
       const mapaLojas = {};
       const mapaForn = {};
 
+      // =======================================================================
+      // PARTE 1: ORGANIZAÇÃO DOS DADOS
+      // =======================================================================
       (pedData || []).forEach(p => {
         if (p.status_compra === 'pendente') {
             const idLoja = extrairNum(p.loja_id);
@@ -143,7 +146,7 @@ export default function FechamentoLojas({ isEscuro }) {
             return;
         }
 
-        // --- 💡 FORNECEDORES (SEMPRE USA O custo_unit ORIGINAL, IGNORANDO PREÇO_VENDA/MÉDIA) ---
+        // --- 💡 LÓGICA DE FORNECEDORES REFEITA E BLINDADA ---
         if (p.status_compra === 'atendido' || p.status_compra === 'boleto') {
           let fNomeOriginal = p.fornecedor_compra ? String(p.fornecedor_compra).toUpperCase() : 'SEM FORNECEDOR';
           if (fNomeOriginal.startsWith('ALERTA|')) fNomeOriginal = fNomeOriginal.replace('ALERTA|', '');
@@ -151,7 +154,6 @@ export default function FechamentoLojas({ isEscuro }) {
           const isBoleto = p.status_compra === 'boleto';
           const fNome = isBoleto ? `${fNomeOriginal} (BOLETO)` : fNomeOriginal;
           
-          // FORÇADO A USAR O CUSTO BASE (Não é afetado por valores de média)
           let baseVal = p.custo_unit; 
           let qtdBonifFornecedor = Number(p.qtd_bonificada) || 0;
           
@@ -160,12 +162,6 @@ export default function FechamentoLojas({ isEscuro }) {
           }
 
           const valNum = tratarPrecoNum(baseVal);
-          const baseValFormatado = valNum > 0 ? formatarMoeda(valNum) : baseVal; 
-          
-          // Só calcula se a quantidade atendida for maior que a bonificada
-          const qtdCobradaForn = Math.max(0, p.qtd_atendida - qtdBonifFornecedor);
-          const totalItemFornCobrado = qtdCobradaForn * valNum;
-          const valorEconomizadoBonif = qtdBonifFornecedor * valNum;
 
           if (!mapaForn[fNome]) {
             const fInfo = buscarFornecedorSimilar(fNomeOriginal, fornData || []);
@@ -179,6 +175,7 @@ export default function FechamentoLojas({ isEscuro }) {
                totalBruto: 0,
                totalDescontoBonif: 0,
                qtdBonificadaGeral: 0,
+               itensRaw: {}, // Objeto intermediário para fundir perfeitamente
                itens: [], 
                lojasEnvolvidas: {},
                statusPagamento: 'pendente' 
@@ -191,44 +188,28 @@ export default function FechamentoLojas({ isEscuro }) {
           
           mapaForn[fNome].lojasEnvolvidas[nomeLojaForn] = lInfoForn || { nome_fantasia: nomeLojaForn, placa_caminhao: 'SEM PLACA' };
 
-          // 💡 AGRUPAMENTO INTELIGENTE POR NOME, BOLETO E PREÇO (custo_unit)
-          const itemExistenteIndex = mapaForn[fNome].itens.findIndex(i => 
-              i.nomeItem === p.nome_produto && 
-              i.isBoleto === isBoleto && 
-              tratarPrecoNum(i.valUnit) === valNum
-          );
-
-          if (itemExistenteIndex >= 0) {
-              const itEx = mapaForn[fNome].itens[itemExistenteIndex];
-              itEx.qtd += p.qtd_atendida;
-              itEx.qtdBonificada += qtdBonifFornecedor;
-              itEx.totalCobrado += totalItemFornCobrado;
-              itEx.totalBonificado += valorEconomizadoBonif;
-          } else {
-              mapaForn[fNome].itens.push({ 
-                nomeItem: p.nome_produto, 
-                unidade: p.unidade_medida || 'UN',
-                qtd: p.qtd_atendida,
-                qtdBonificada: qtdBonifFornecedor,
-                valUnit: baseValFormatado, 
-                totalCobrado: totalItemFornCobrado,
-                totalBonificado: valorEconomizadoBonif,
-                isBoleto 
-              });
+          // 💡 Joga no Raw agrupando SÓ por nome (ignora preços diferentes do banco de dados)
+          const keyItem = `${p.nome_produto}_${isBoleto}`;
+          if (!mapaForn[fNome].itensRaw[keyItem]) {
+              mapaForn[fNome].itensRaw[keyItem] = {
+                  nomeItem: p.nome_produto,
+                  unidade: p.unidade_medida || 'UN',
+                  qtd: 0,
+                  qtdBonificada: 0,
+                  maxValNum: 0, // Salva o maior preço encontrado para usar como oficial
+                  isBoleto: isBoleto
+              };
           }
 
-          mapaForn[fNome].totalBruto += (totalItemFornCobrado + valorEconomizadoBonif);
-          mapaForn[fNome].totalDescontoBonif += valorEconomizadoBonif;
-          mapaForn[fNome].qtdBonificadaGeral += qtdBonifFornecedor;
-
-          if (isBoleto) {
-            mapaForn[fNome].totalBoleto += totalItemFornCobrado;
-          } else {
-            mapaForn[fNome].totalPix += totalItemFornCobrado;
+          const raw = mapaForn[fNome].itensRaw[keyItem];
+          raw.qtd += p.qtd_atendida;
+          raw.qtdBonificada += qtdBonifFornecedor;
+          if (valNum > raw.maxValNum) {
+              raw.maxValNum = valNum;
           }
         }
 
-        // --- LOJAS (AQUI PRIORIZAMOS O PRECO_VENDA PARA O FECHAMENTO) ---
+        // --- LOJAS (Mantém a lógica do preco_venda/média) ---
         const idLoja = extrairNum(p.loja_id);
         if (!idLoja || idLoja <= 1) return;
 
@@ -250,7 +231,6 @@ export default function FechamentoLojas({ isEscuro }) {
         let qtdDisplay = p.quantidade; 
         let qtdBonificada = Number(p.qtd_bonificada) || 0;
         
-        // 💡 Lógica de prioridade de preço para a loja (Usa a média/preco_venda se existir, senão usa o custo_unit original)
         let unitParaLoja = p.preco_venda || p.custo_unit || 'R$ 0,00';
         let unitDisplay = unitParaLoja;
         let totalItem = 0;
@@ -352,6 +332,39 @@ export default function FechamentoLojas({ isEscuro }) {
         }
       });
 
+      // =======================================================================
+      // PARTE 2: FECHAR CÁLCULO FINAL DOS FORNECEDORES (Resolução do Bug)
+      // =======================================================================
+      Object.values(mapaForn).forEach(forn => {
+          Object.values(forn.itensRaw).forEach(raw => {
+              const qtdCobradaForn = Math.max(0, raw.qtd - raw.qtdBonificada);
+              const totalItemFornCobrado = qtdCobradaForn * raw.maxValNum;
+              const valorEconomizadoBonif = raw.qtdBonificada * raw.maxValNum;
+
+              forn.itens.push({
+                  nomeItem: raw.nomeItem,
+                  unidade: raw.unidade,
+                  qtd: raw.qtd,
+                  qtdBonificada: raw.qtdBonificada,
+                  valUnit: raw.maxValNum > 0 ? formatarMoeda(raw.maxValNum) : 'R$ 0,00',
+                  totalCobrado: totalItemFornCobrado,
+                  totalBonificado: valorEconomizadoBonif,
+                  isBoleto: raw.isBoleto
+              });
+
+              forn.totalBruto += (totalItemFornCobrado + valorEconomizadoBonif);
+              forn.totalDescontoBonif += valorEconomizadoBonif;
+              forn.qtdBonificadaGeral += raw.qtdBonificada;
+
+              if (raw.isBoleto) {
+                  forn.totalBoleto += totalItemFornCobrado;
+              } else {
+                  forn.totalPix += totalItemFornCobrado;
+              }
+          });
+          delete forn.itensRaw; 
+      });
+
       const arrayLojas = Object.values(mapaLojas).sort((a, b) => a.loja_id - b.loja_id);
       arrayLojas.forEach(loja => loja.itens.sort((a, b) => a.nome.localeCompare(b.nome)));
       setFechamentos(arrayLojas);
@@ -363,7 +376,6 @@ export default function FechamentoLojas({ isEscuro }) {
     } catch (err) { console.error(err); } finally { setCarregando(false); }
   }
 
-  // 💡 FUNÇÃO PARA APLICAR VALOR MÉDIA (VENDA) SEM ALTERAR O FORNECEDOR
   const aplicarPrecoMedia = async () => {
     if(!itemMediaSelecionado || !valorMediaInput) return alert("Selecione o item e o valor.");
     
@@ -375,7 +387,6 @@ export default function FechamentoLojas({ isEscuro }) {
 
     setCarregando(true);
     try {
-        // 💡 SALVA EXCLUSIVAMENTE NO PRECO_VENDA!
         const { error } = await supabase
             .from('pedidos')
             .update({ preco_venda: finalStr })
@@ -979,7 +990,7 @@ export default function FechamentoLojas({ isEscuro }) {
                                 </div>
                               </div>
                             </div>
-                         );
+                         )
                       })}
                     </div>
                   </div>
@@ -1000,132 +1011,129 @@ export default function FechamentoLojas({ isEscuro }) {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '15px' }}>
-            {fornecedores.filter(f => {
-              const isPago = f.statusPagamento === 'pago';
-              const isBoletoOnly = f.totalPix === 0 && f.totalBoleto > 0;
-              if (abaForn === 'pendentes') return !isPago && !isBoletoOnly;
-              if (abaForn === 'finalizados') return isPago && !isBoletoOnly;
-              if (abaForn === 'boletos') return isBoletoOnly;
-              return true;
-            }).map((forn, idx) => {
-              const isPago = forn.statusPagamento === 'pago';
-              const isBoletoOnly = forn.totalPix === 0 && forn.totalBoleto > 0;
-              
-              let corBorda = '#fcd34d'; 
-              let corFundo = isEscuro ? '#451a03' : '#fffbeb';
-              let corTexto = isEscuro ? '#fcd34d' : '#b45309';
-              let tagStatus = 'PENDENTE';
+            {fornecedoresExibidos.length === 0 ? (
+              <p style={{ gridColumn: '1/-1', textAlign: 'center', color: '#666', backgroundColor: themeCard, padding: '40px', borderRadius: '16px' }}>Nenhum fornecedor nesta categoria para este dia.</p>
+            ) : (
+              fornecedoresExibidos.map((forn, idx) => {
+                const isPago = forn.statusPagamento === 'pago';
+                const isBoletoOnly = forn.totalPix === 0 && forn.totalBoleto > 0;
+                
+                let corBorda = '#fcd34d'; 
+                let corFundo = isEscuro ? '#451a03' : '#fffbeb';
+                let corTexto = isEscuro ? '#fcd34d' : '#b45309';
+                let tagStatus = 'PENDENTE';
 
-              if (isPago) {
-                corBorda = '#22c55e'; 
-                corFundo = isEscuro ? '#14532d' : '#dcfce7';
-                corTexto = isEscuro ? '#86efac' : '#166534';
-                tagStatus = 'PAGO ✅';
-              } else if (isBoletoOnly) {
-                corBorda = '#60a5fa'; 
-                corFundo = isEscuro ? '#1e3a8a' : '#eff6ff';
-                corTexto = isEscuro ? '#93c5fd' : '#1d4ed8';
-                tagStatus = 'BOLETO 📄';
-              }
+                if (isPago) {
+                  corBorda = '#22c55e'; 
+                  corFundo = isEscuro ? '#14532d' : '#dcfce7';
+                  corTexto = isEscuro ? '#86efac' : '#166534';
+                  tagStatus = 'PAGO ✅';
+                } else if (isBoletoOnly) {
+                  corBorda = '#60a5fa'; 
+                  corFundo = isEscuro ? '#1e3a8a' : '#eff6ff';
+                  corTexto = isEscuro ? '#93c5fd' : '#1d4ed8';
+                  tagStatus = 'BOLETO 📄';
+                }
 
-              const expandido = fornExpandido === forn.nome;
+                const expandido = fornExpandido === forn.nome;
 
-              return (
-                <div key={idx} style={{ backgroundColor: themeCard, borderRadius: '16px', border: `2px solid ${corBorda}`, overflow: 'hidden', boxShadow: '0 4px 10px rgba(0,0,0,0.03)', opacity: isPago ? 0.9 : 1, transition: '0.3s' }}>
-                  
-                  <div onClick={() => setFornExpandido(expandido ? null : forn.nome)} style={{ padding: '15px', backgroundColor: corFundo, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <h3 style={{ margin: 0, fontSize: '13px', color: corTexto, textTransform: 'uppercase', fontWeight: '900' }}>{forn.nome}</h3>
-                      <span style={{ fontSize: '9px', fontWeight: '900', color: corTexto, padding: '3px 8px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.2)' }}>{tagStatus}</span>
-                    </div>
+                return (
+                  <div key={idx} style={{ backgroundColor: themeCard, borderRadius: '16px', border: `2px solid ${corBorda}`, overflow: 'hidden', boxShadow: '0 4px 10px rgba(0,0,0,0.03)', opacity: isPago ? 0.9 : 1, transition: '0.3s' }}>
                     
-                    <div style={{ fontSize: '20px', fontWeight: '900', color: corTexto }}>
-                       {isBoletoOnly && !expandido ? 'BOLETO' : formatarMoeda(forn.totalPix + forn.totalBoleto)}
-                    </div>
-                  </div>
-
-                  {expandido && (
-                    <div style={{ padding: '15px' }}>
-                      
-                      {!isBoletoOnly && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', border: `1px dashed ${themeBorder}`, padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
-                          
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div>
-                               <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>Chave PIX:</span>
-                               <strong style={{ fontSize: '12px', color: themeText }}>{forn.chavePix || 'Não cadastrada'}</strong>
-                            </div>
-                            {forn.chavePix && forn.chavePix !== 'Não cadastrada' && (
-                               <button onClick={() => copiarPixFornecedor(forn.chavePix, forn.nome)} style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>COPIAR PIX</button>
-                            )}
-                          </div>
-
-                          {forn.telefone && (
-                            <div>
-                               <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>Telefone:</span>
-                               <strong style={{ fontSize: '12px', color: themeText }}>{forn.telefone}</strong>
-                            </div>
-                          )}
-
-                          {forn.nomeCadastrado && forn.nomeCadastrado.toUpperCase() !== forn.nome.toUpperCase() && (
-                            <div style={{ paddingTop: '5px', borderTop: `1px solid ${themeBorder}` }}>
-                               <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>Nome no Cadastro Oficial:</span>
-                               <strong style={{ fontSize: '11px', color: themeText }}>{forn.nomeCadastrado}</strong>
-                            </div>
-                          )}
-
-                        </div>
-                      )}
-
-                      <div style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        {forn.itens.map((i, k) => {
-                           const qtdCobrada = i.qtd - i.qtdBonificada;
-                           if (qtdCobrada > 0) {
-                             return (
-                               <div key={`norm_${k}`} style={{ fontSize: '11px', color: themeText, fontWeight: 'bold' }}>
-                                 {qtdCobrada} - {formatarNomeItem(i.nomeItem)} - {i.valUnit} = {formatarMoeda(i.totalCobrado)} <span style={{color: '#d97706', fontWeight: '900'}}>{i.isBoleto && '(BOLETO)'}</span>
-                               </div>
-                             );
-                           }
-                           return null;
-                        })}
+                    <div onClick={() => setFornExpandido(expandido ? null : forn.nome)} style={{ padding: '15px', backgroundColor: corFundo, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h3 style={{ margin: 0, fontSize: '13px', color: corTexto, textTransform: 'uppercase', fontWeight: '900' }}>{forn.nome}</h3>
+                        <span style={{ fontSize: '9px', fontWeight: '900', color: corTexto, padding: '3px 8px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.2)' }}>{tagStatus}</span>
                       </div>
+                      
+                      <div style={{ fontSize: '20px', fontWeight: '900', color: corTexto }}>
+                         {isBoletoOnly && !expandido ? 'BOLETO' : formatarMoeda(forn.totalPix + forn.totalBoleto)}
+                      </div>
+                    </div>
 
-                      {forn.totalDescontoBonif > 0 && (
-                        <div style={{ borderTop: `1px dashed ${themeBorder}`, paddingTop: '10px', marginTop: '10px' }}>
-                          <div style={{ fontSize: '12px', fontWeight: '900', color: '#16a34a', marginBottom: '5px' }}>Bonificações:</div>
-                          <div style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                            {forn.itens.filter(i => i.qtdBonificada > 0).map((i, k) => {
-                               const basePriceNum = tratarPrecoNum(i.valUnit);
-                               const valBonif = basePriceNum * i.qtdBonificada;
+                    {expandido && (
+                      <div style={{ padding: '15px' }}>
+                        
+                        {!isBoletoOnly && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', border: `1px dashed ${themeBorder}`, padding: '12px', borderRadius: '8px', marginBottom: '15px' }}>
+                            
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                 <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>Chave PIX:</span>
+                                 <strong style={{ fontSize: '12px', color: themeText }}>{forn.chavePix || 'Não cadastrada'}</strong>
+                              </div>
+                              {forn.chavePix && forn.chavePix !== 'Não cadastrada' && (
+                                 <button onClick={() => copiarPixFornecedor(forn.chavePix, forn.nome)} style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>COPIAR PIX</button>
+                              )}
+                            </div>
+
+                            {forn.telefone && (
+                              <div>
+                                 <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>Telefone:</span>
+                                 <strong style={{ fontSize: '12px', color: themeText }}>{forn.telefone}</strong>
+                              </div>
+                            )}
+
+                            {forn.nomeCadastrado && forn.nomeCadastrado.toUpperCase() !== forn.nome.toUpperCase() && (
+                              <div style={{ paddingTop: '5px', borderTop: `1px solid ${themeBorder}` }}>
+                                 <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>Nome no Cadastro Oficial:</span>
+                                 <strong style={{ fontSize: '11px', color: themeText }}>{forn.nomeCadastrado}</strong>
+                              </div>
+                            )}
+
+                          </div>
+                        )}
+
+                        <div style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          {forn.itens.map((i, k) => {
+                             const qtdCobrada = i.qtd - i.qtdBonificada;
+                             if (qtdCobrada > 0) {
                                return (
-                                 <div key={`bonif_${k}`} style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold' }}>
-                                   {i.qtdBonificada} - {formatarNomeItem(i.nomeItem)} - {formatarMoeda(valBonif)}
+                                 <div key={`norm_${k}`} style={{ fontSize: '11px', color: themeText, fontWeight: 'bold' }}>
+                                   {qtdCobrada} - {formatarNomeItem(i.nomeItem)} - {i.valUnit} = {formatarMoeda(i.totalCobrado)} <span style={{color: '#d97706', fontWeight: '900'}}>{i.isBoleto && '(BOLETO)'}</span>
                                  </div>
                                );
-                            })}
-                          </div>
-                          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '10px', fontWeight: 'bold' }}>
-                             Valor bruto = {formatarMoeda(forn.totalBruto)}
-                          </div>
+                             }
+                             return null;
+                          })}
                         </div>
-                      )}
 
-                      <div style={{ fontSize: '14px', fontWeight: '900', color: themeText, marginTop: '10px', borderTop: `1px solid ${themeBorder}`, paddingTop: '10px' }}>
-                          Total a pagar = {formatarMoeda(forn.totalPix + forn.totalBoleto)}
+                        {forn.totalDescontoBonif > 0 && (
+                          <div style={{ borderTop: `1px dashed ${themeBorder}`, paddingTop: '10px', marginTop: '10px' }}>
+                            <div style={{ fontSize: '12px', fontWeight: '900', color: '#16a34a', marginBottom: '5px' }}>Bonificações:</div>
+                            <div style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              {forn.itens.filter(i => i.qtdBonificada > 0).map((i, k) => {
+                                 const basePriceNum = tratarPrecoNum(i.valUnit);
+                                 const valBonif = basePriceNum * i.qtdBonificada;
+                                 return (
+                                   <div key={`bonif_${k}`} style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold' }}>
+                                     {i.qtdBonificada} - {formatarNomeItem(i.nomeItem)} - {formatarMoeda(valBonif)}
+                                   </div>
+                                 );
+                              })}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '10px', fontWeight: 'bold' }}>
+                               Valor bruto = {formatarMoeda(forn.totalBruto)}
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{ fontSize: '14px', fontWeight: '900', color: themeText, marginTop: '10px', borderTop: `1px solid ${themeBorder}`, paddingTop: '10px' }}>
+                            Total a pagar = {formatarMoeda(forn.totalPix + forn.totalBoleto)}
+                        </div>
+
+                        {!isBoletoOnly && (
+                          <button onClick={() => alternarStatusPagamento(forn.nome)} style={{ width: '100%', marginTop: '15px', padding: '12px', backgroundColor: isPago ? (isEscuro ? '#1e293b' : '#f1f5f9') : '#22c55e', color: isPago ? '#64748b' : '#fff', border: 'none', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
+                            {isPago ? 'DESFAZER PAGAMENTO' : 'PIX FEITO / CONCLUIR'}
+                          </button>
+                        )}
                       </div>
+                    )}
 
-                      {!isBoletoOnly && (
-                        <button onClick={() => alternarStatusPagamento(forn.nome)} style={{ width: '100%', marginTop: '15px', padding: '12px', backgroundColor: isPago ? (isEscuro ? '#1e293b' : '#f1f5f9') : '#22c55e', color: isPago ? '#64748b' : '#fff', border: 'none', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
-                          {isPago ? 'DESFAZER PAGAMENTO' : 'PIX FEITO / CONCLUIR'}
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                </div>
-              );
-            })}
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}
@@ -1166,8 +1174,11 @@ export default function FechamentoLojas({ isEscuro }) {
                       </strong>
                       
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '6px' }}>
+                        
                         <button onClick={() => setStatusRapido(item.id_pedido, 'boleto')} style={{ fontSize: '10px', background: item.isBoleto ? '#d97706' : (isEscuro ? '#451a03' : '#fef3c7'), color: item.isBoleto ? '#fff' : '#d97706', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>BOLETO</button>
+                        
                         <button onClick={() => setStatusRapido(item.id_pedido, 'falta')} style={{ fontSize: '10px', background: item.isFalta ? '#ef4444' : (isEscuro ? '#450a0a' : '#fef2f2'), color: item.isFalta ? '#fff' : '#ef4444', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>FALTA</button>
+                        
                         {(item.isFalta || item.isBoleto || item.isBonif || item.precoEditado !== item.precoOriginal) && (
                           <button onClick={() => setStatusRapido(item.id_pedido, 'normal')} style={{ fontSize: '10px', background: isEscuro ? '#334155' : '#e2e8f0', color: themeText, border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>🔙 DESFAZER</button>
                         )}
@@ -1195,7 +1206,7 @@ export default function FechamentoLojas({ isEscuro }) {
                     </div>
 
                   </div>
-                );
+                )
               })}
             </div>
 
