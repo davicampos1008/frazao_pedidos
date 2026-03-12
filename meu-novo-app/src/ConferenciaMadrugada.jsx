@@ -32,7 +32,7 @@ export default function ConferenciaMadrugada() {
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
   };
 
-  // 💡 Normalizador para evitar bugs de busca com acentos
+  // 💡 Normalizador para evitar bugs de busca com acentos e espaços
   const normalizar = (str) => {
     if (!str) return '';
     return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -50,7 +50,6 @@ export default function ConferenciaMadrugada() {
       const pedidos = pedData || [];
       const lojasDb = lojasData || [];
 
-      let metTotal = 0; let metRecebido = 0; let metFalta = 0; let metAguardando = 0; let metParcial = 0;
       const mapaForn = {};
 
       pedidos.forEach(p => {
@@ -62,24 +61,15 @@ export default function ConferenciaMadrugada() {
         
         const statusRec = p.status_recebimento || 'aguardando'; 
         const qtdPedida = Number(p.qtd_atendida || 0);
+        
         // Se a coluna nova for null, assume que a qtd_recebida é a própria qtd pedida para não bugar a tela
         const qtdRecebidaGalpao = p.qtd_recebida_galpao !== null && p.qtd_recebida_galpao !== undefined ? Number(p.qtd_recebida_galpao) : qtdPedida;
-
-        metTotal++;
-        if (statusRec === 'recebido') metRecebido++;
-        else if (statusRec === 'falta') metFalta++;
-        else if (statusRec === 'parcial') metParcial++;
-        else metAguardando++;
 
         if (!mapaForn[fNome]) {
             mapaForn[fNome] = { fornecedor: fNome, totalItens: 0, recebidos: 0, aguardando: 0, faltas: 0, parciais: 0, itens: {} };
         }
 
         mapaForn[fNome].totalItens++;
-        if (statusRec === 'recebido') mapaForn[fNome].recebidos++;
-        else if (statusRec === 'falta') mapaForn[fNome].faltas++;
-        else if (statusRec === 'parcial') mapaForn[fNome].parciais++;
-        else mapaForn[fNome].aguardando++;
 
         if (!mapaForn[fNome].itens[pNome]) {
             mapaForn[fNome].itens[pNome] = { 
@@ -106,11 +96,27 @@ export default function ConferenciaMadrugada() {
       }).sort((a, b) => a.fornecedor.localeCompare(b.fornecedor));
 
       setDadosAgrupados(arrayFinal);
-      setMetricasGestao({ total: metTotal, recebido: metRecebido, falta: metFalta, parcial: metParcial, aguardando: metAguardando });
 
     } catch (err) { console.error(err); }
     finally { if (!silencioso) setCarregando(false); }
   }, [hoje]);
+
+  // 💡 Efeito Inteligente que atualiza as métricas instantaneamente sempre que os dados mudam
+  useEffect(() => {
+     let metTotal = 0; let metRecebido = 0; let metFalta = 0; let metAguardando = 0; let metParcial = 0;
+     dadosAgrupados.forEach(f => {
+        f.itens.forEach(i => {
+           i.lojas.forEach(l => {
+              metTotal++;
+              if (l.status === 'recebido') metRecebido++;
+              else if (l.status === 'falta') metFalta++;
+              else if (l.status === 'parcial') metParcial++;
+              else metAguardando++;
+           });
+        });
+     });
+     setMetricasGestao({ total: metTotal, recebido: metRecebido, falta: metFalta, parcial: metParcial, aguardando: metAguardando });
+  }, [dadosAgrupados]);
 
   useEffect(() => { 
       carregarDados(); 
@@ -122,21 +128,26 @@ export default function ConferenciaMadrugada() {
       setFornecedoresExpandidos(prev => ({ ...prev, [fornNome]: !prev[fornNome] }));
   };
 
-  // 💡 MOTOR DE RECEBIMENTO COM SUPORTE A QUANTIDADE PARCIAL
+  // 💡 MOTOR DE RECEBIMENTO OTIMIZADO (Sem Recarregar a Tela)
   const registrarRecebimento = async (id_pedido, qtdChegou, qtdEsperada, fornecedorNome, isDesfazer = false) => {
       let novoStatus = 'recebido';
-      if (isDesfazer) novoStatus = 'aguardando';
-      else if (qtdChegou == 0) novoStatus = 'falta';
-      else if (qtdChegou < qtdEsperada) novoStatus = 'parcial';
+      let qtdReal = Number(qtdChegou) || 0;
 
-      // Atualiza UI na hora para não dar delay
+      if (isDesfazer) {
+          novoStatus = 'aguardando';
+          qtdReal = qtdEsperada; // Ao desfazer, volta ao padrão esperado
+      } 
+      else if (qtdReal === 0) novoStatus = 'falta';
+      else if (qtdReal < qtdEsperada) novoStatus = 'parcial';
+
+      // 1. Atualiza UI na hora para não dar delay ou tela branca
       setDadosAgrupados(prev => prev.map(f => {
           if (f.fornecedor === fornecedorNome) {
               const novosItens = f.itens.map(i => {
                   return {
                       ...i,
                       lojas: i.lojas.map(l => 
-                          l.id_pedido === id_pedido ? { ...l, status: novoStatus, qtd_recebida_galpao: qtdChegou } : l
+                          l.id_pedido === id_pedido ? { ...l, status: novoStatus, qtd_recebida_galpao: qtdReal } : l
                       )
                   };
               });
@@ -145,13 +156,15 @@ export default function ConferenciaMadrugada() {
           return f;
       }));
 
-      // Salva no Banco em segundo plano
-      await supabase.from('pedidos').update({ 
-          status_recebimento: novoStatus, 
-          qtd_recebida_galpao: qtdChegou 
-      }).eq('id', id_pedido);
-      
-      carregarDados(true);
+      // 2. Salva no Banco em segundo plano e silenciosamente
+      try {
+          await supabase.from('pedidos').update({ 
+              status_recebimento: novoStatus, 
+              qtd_recebida_galpao: qtdReal 
+          }).eq('id', id_pedido);
+      } catch (err) {
+          console.error("Erro ao salvar:", err);
+      }
   };
 
   // 💡 RECEBE TUDO OU FALTA TUDO DE UMA VEZ
@@ -178,10 +191,11 @@ export default function ConferenciaMadrugada() {
           }).eq('id', l.id_pedido);
       });
       await Promise.all(promessas);
-      carregarDados(true);
   };
 
   if (carregando && dadosAgrupados.length === 0) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Carregando Conferência...</div>;
+
+  const termoBusca = normalizar(busca);
 
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: configDesign.geral.fontePadrao, paddingBottom: '120px', padding: '10px' }}>
@@ -212,12 +226,18 @@ export default function ConferenciaMadrugada() {
             <span>🔍</span><input placeholder="Filtrar fornecedor ou item..." value={busca} onChange={e => setBusca(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
           </div>
 
-          {dadosAgrupados.filter(f => normalizar(f.fornecedor).includes(normalizar(busca)) || f.itens.some(i => normalizar(i.nome).includes(normalizar(busca)))).map(f => {
+          {/* 💡 CORREÇÃO DO FILTRO: Mostra o fornecedor se o nome dele ou de algum item bater com a busca */}
+          {dadosAgrupados.filter(f => normalizar(f.fornecedor).includes(termoBusca) || f.itens.some(i => normalizar(i.nome).includes(termoBusca))).map(f => {
              const isExpandido = fornecedoresExpandidos[f.fornecedor];
              
-             // Conta as lojas aguardando neste fornecedor
              const qtdLojasPendentes = f.itens.reduce((acc, item) => acc + item.lojas.filter(l => l.status === 'aguardando').length, 0);
              const isFinalizado = qtdLojasPendentes === 0;
+
+             // 💡 CORREÇÃO DO MISTÉRIO DOS ITENS VAZIOS:
+             // Se a busca bateu com o nome do fornecedor (ex: "Carambola"), ele mostra todos os itens dentro.
+             // Se a busca bateu só com a fruta (ex: "Melão"), ele filtra só o Melão.
+             const isFornecedorMatch = normalizar(f.fornecedor).includes(termoBusca);
+             const itensParaMostrar = isFornecedorMatch ? f.itens : f.itens.filter(i => normalizar(i.nome).includes(termoBusca));
 
              return (
                 <div key={f.fornecedor} style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '20px', boxShadow: configDesign.geral.sombraSuave, borderTop: isFinalizado ? `5px solid ${configDesign.cores.sucesso}` : `5px solid ${configDesign.cores.primaria}` }}>
@@ -236,7 +256,7 @@ export default function ConferenciaMadrugada() {
 
                    {isExpandido && (
                      <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                        {f.itens.filter(i => normalizar(i.nome).includes(normalizar(busca))).map(item => {
+                        {itensParaMostrar.map(item => {
                            const lojasAguardando = item.lojas.filter(l => l.status === 'aguardando');
                            const todasConcluidas = lojasAguardando.length === 0;
 
@@ -252,6 +272,7 @@ export default function ConferenciaMadrugada() {
 
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                                     {item.lojas.map((loja) => {
+                                        // Garante que o input mostre o número correto de forma fluida
                                         const valInputAtual = qtdEditando[loja.id_pedido] !== undefined ? qtdEditando[loja.id_pedido] : loja.qtd;
 
                                         let bgLoja = '#fff';
@@ -273,9 +294,14 @@ export default function ConferenciaMadrugada() {
                                                     <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                                                         <div style={{ display: 'flex', alignItems: 'center', background: '#f1f5f9', borderRadius: '8px', padding: '4px' }}>
                                                             <span style={{fontSize: '10px', fontWeight: 'bold', color: '#64748b', marginRight: '5px'}}>Chegou:</span>
-                                                            <button onClick={() => setQtdEditando({...qtdEditando, [loja.id_pedido]: Math.max(0, valInputAtual - 1)})} style={{width: '30px', height: '30px', border: 'none', background: '#e2e8f0', borderRadius: '6px', fontWeight: 'bold'}}>-</button>
-                                                            <input type="number" value={valInputAtual} onChange={e => setQtdEditando({...qtdEditando, [loja.id_pedido]: parseInt(e.target.value)||0})} style={{width: '45px', textAlign: 'center', border: 'none', background: 'transparent', fontWeight: '900', fontSize: '14px', outline: 'none'}} />
-                                                            <button onClick={() => setQtdEditando({...qtdEditando, [loja.id_pedido]: valInputAtual + 1})} style={{width: '30px', height: '30px', border: 'none', background: '#e2e8f0', borderRadius: '6px', fontWeight: 'bold'}}>+</button>
+                                                            <button onClick={() => setQtdEditando({...qtdEditando, [loja.id_pedido]: Math.max(0, Number(valInputAtual) - 1)})} style={{width: '30px', height: '30px', border: 'none', background: '#e2e8f0', borderRadius: '6px', fontWeight: 'bold'}}>-</button>
+                                                            <input 
+                                                              type="number" 
+                                                              value={valInputAtual === '' ? '' : valInputAtual} 
+                                                              onChange={e => setQtdEditando({...qtdEditando, [loja.id_pedido]: e.target.value === '' ? '' : parseInt(e.target.value) || 0})} 
+                                                              style={{width: '45px', textAlign: 'center', border: 'none', background: 'transparent', fontWeight: '900', fontSize: '14px', outline: 'none'}} 
+                                                            />
+                                                            <button onClick={() => setQtdEditando({...qtdEditando, [loja.id_pedido]: Number(valInputAtual) + 1})} style={{width: '30px', height: '30px', border: 'none', background: '#e2e8f0', borderRadius: '6px', fontWeight: 'bold'}}>+</button>
                                                         </div>
                                                         
                                                         <div style={{ display: 'flex', gap: '5px', flex: 1 }}>
@@ -286,7 +312,7 @@ export default function ConferenciaMadrugada() {
                                                 ) : (
                                                     <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                         <span style={{ fontSize: '12px', fontWeight: '900', color: loja.status === 'recebido' ? '#166534' : (loja.status === 'parcial' ? '#b45309' : '#991b1b') }}>
-                                                            {loja.status === 'recebido' ? '✅ CHEGOU COMPLETO' : loja.status === 'parcial' ? `⚠️ CHEGOU SÓ ${loja.qtd_recebida_galpao}` : '❌ NÃO CHEGOU NADA'}
+                                                            {loja.status === 'recebido' ? '✅ CHEGOU COMPLETO' : loja.status === 'parcial' ? `⚠️ CHEGOU SÓ ${loja.qtd_recebida_galpao} (Faltou ${loja.qtd - loja.qtd_recebida_galpao})` : '❌ NÃO CHEGOU NADA'}
                                                         </span>
                                                         <button onClick={() => registrarRecebimento(loja.id_pedido, loja.qtd, loja.qtd, f.fornecedor, true)} style={{ background: '#fff', color: '#64748b', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>↩️ DESFAZER</button>
                                                     </div>
@@ -311,7 +337,6 @@ export default function ConferenciaMadrugada() {
              );
           })}
           
-          {/* MENSAGEM SE TUDO ESTIVER FINALIZADO */}
           {dadosAgrupados.every(f => f.itens.every(i => i.lojas.every(l => l.status !== 'aguardando'))) && dadosAgrupados.length > 0 && (
              <div style={{ textAlign: 'center', padding: '40px', color: configDesign.cores.sucesso, backgroundColor: '#fff', borderRadius: '20px', fontWeight: '900', fontSize: '18px' }}>
                  🎉 TUDO CONFERIDO! GALPÃO LIMPO!
@@ -395,17 +420,35 @@ export default function ConferenciaMadrugada() {
               <h3 style={{ margin: '0 0 15px 0', color: '#111', fontSize: '16px' }}>Progresso por Fornecedor</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                  {dadosAgrupados.map(f => {
-                    const pctRecebido = Math.round(((f.recebidos + f.parciais) / f.totalItens) * 100) || 0;
+                    let totalAcoesFeitas = 0;
+                    let totalAcoesAguardando = 0;
+                    let teveFalta = false;
+                    let teveParcial = false;
+
+                    f.itens.forEach(i => {
+                        i.lojas.forEach(l => {
+                            if (l.status === 'aguardando') totalAcoesAguardando++;
+                            else {
+                                totalAcoesFeitas++;
+                                if (l.status === 'falta') teveFalta = true;
+                                if (l.status === 'parcial') teveParcial = true;
+                            }
+                        });
+                    });
+
+                    const totalGeral = totalAcoesFeitas + totalAcoesAguardando;
+                    const pctRecebido = Math.round((totalAcoesFeitas / totalGeral) * 100) || 0;
+                    
                     let corBarra = '#3b82f6';
-                    if (pctRecebido === 100 && f.faltas === 0 && f.parciais === 0) corBarra = configDesign.cores.sucesso;
-                    if (f.faltas > 0) corBarra = configDesign.cores.alerta;
-                    else if (f.parciais > 0) corBarra = configDesign.cores.aviso;
+                    if (pctRecebido === 100 && !teveFalta && !teveParcial) corBarra = configDesign.cores.sucesso;
+                    if (teveFalta) corBarra = configDesign.cores.alerta;
+                    else if (teveParcial) corBarra = configDesign.cores.aviso;
 
                     return (
                        <div key={f.fornecedor}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>
                              <span style={{color: '#111'}}>{f.fornecedor}</span>
-                             <span style={{color: corBarra}}>{pctRecebido}% ({f.recebidos + f.parciais}/{f.totalItens})</span>
+                             <span style={{color: corBarra}}>{pctRecebido}% ({totalAcoesFeitas}/{totalGeral})</span>
                           </div>
                           <div style={{ width: '100%', height: '8px', background: '#f1f5f9', borderRadius: '4px', overflow: 'hidden' }}>
                              <div style={{ width: `${pctRecebido}%`, height: '100%', background: corBarra, transition: 'width 0.5s' }}></div>
