@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
+// 💡 FUNÇÃO INTELIGENTE DE BUSCA GLOBAL (Ignora acentos e espaços)
+const normalizarParaBusca = (str) => {
+  if (!str) return '';
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '').toLowerCase();
+};
+
 // ============================================================================
 // COMPONENTE: LINHA DO PRODUTO (Otimizado e Sem Fornecedor)
 // ============================================================================
@@ -17,7 +23,6 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
   const dispararAutoSave = async (pValor, pPesoCaixa, acaoForcada = null) => {
     setStatusAviso('⏳');
     
-    // 💡 FORMATADOR INTELIGENTE DE MOEDA (Sempre X,XX)
     let v = String(pValor || '').replace(/[^\d,.]/g, '').trim();
     if (v.includes('.') && !v.includes(',')) v = v.replace('.', ','); 
     v = v.replace(/[^\d,]/g, ''); 
@@ -87,12 +92,10 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
     }
   };
 
-  // 💡 Lógica para mostrar no input se é CX, SC, PCT...
   const matchPeso = String(pesoCaixa).match(/^([A-Z]+)\s+(.+)$/);
   const siglaMedidaVisual = matchPeso ? matchPeso[1] : 'CX';
   const pesoVisual = matchPeso ? matchPeso[2] : pesoCaixa;
 
-  // 💡 Lógica do Ícone de Status da Cotação
   const iconeStatusCotacao = () => {
     switch(produto.status_cotacao) {
       case 'ativo': return '✅ Atualizado';
@@ -167,7 +170,7 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
 // ============================================================================
 export default function Precificacao() {
   const [produtos, setProdutos] = useState([]);
-  const [abaAtiva, setAbaAtiva] = useState('todos'); // 💡 AGORA INICIA EM TODOS
+  const [abaAtiva, setAbaAtiva] = useState('todos'); 
   const [busca, setBusca] = useState('');
   const [carregando, setCarregando] = useState(true);
   
@@ -177,7 +180,6 @@ export default function Precificacao() {
   const [modalAberto, setModalAberto] = useState(false);
   const [prodModal, setProdModal] = useState(null);
   
-  // 💡 ESTADO DO MODAL ATUALIZADO PARA SUPORTAR O TIPO DA MEDIDA FINAL
   const [formModal, setFormModal] = useState({ preco: '', fornecedor: '', status: 'pendente', promocao: false, novidade: false, fotos_novas: [], unidade: 'UN', peso_caixa: '', tipo_medida_kg: 'CX' });
   const [fazendoUpload, setFazendoUpload] = useState(false);
 
@@ -272,7 +274,6 @@ export default function Precificacao() {
 
   const isZerado = (preco) => !preco || preco === '0' || preco === '0,00' || String(preco).trim() === 'R$ 0,00' || String(preco).trim() === 'R$0,00';
 
-  // 💡 ADICIONADO A ABA 'TODOS' AQUI
   const listas = {
     todos: produtos, 
     pendentes: produtos.filter(p => !p.status_cotacao || p.status_cotacao === 'pendente'),
@@ -321,7 +322,6 @@ export default function Precificacao() {
     if (!window.confirm("🚨 TEM CERTEZA?\nIsso vai apagar os preços atuais, promoções e novidades, mas manterá as FOTOS. Todos os itens irão para Pendentes.")) return;
     
     setCarregando(true);
-    // 💡 FECHA A LOJA AUTOMATICAMENTE
     await supabase.from('configuracoes').update({ precos_liberados: false }).eq('id', 1);
 
     const payloadGeral = produtos.map(p => {
@@ -365,7 +365,6 @@ export default function Precificacao() {
     }
     
     setCarregando(true);
-    // 💡 ABRE A LOJA PARA OS CLIENTES
     const { error } = await supabase.from('configuracoes').update({ precos_liberados: true }).eq('id', 1);
     setCarregando(false);
     
@@ -380,7 +379,6 @@ export default function Precificacao() {
   const abrirEdicaoCompleta = (produto) => {
     setProdModal(produto);
 
-    // 💡 DESMEMBRANDO O PESO DA CAIXA SE ELE JÁ VIER COM SIGLA DO BANCO ("SC 20", "CX 15")
     let pesoPuro = produto.peso_caixa || '';
     let tipoMedida = 'CX';
 
@@ -399,7 +397,7 @@ export default function Precificacao() {
       fotos_novas: [],
       unidade: produto.unidade_medida || 'UN',
       peso_caixa: pesoPuro,
-      tipo_medida_kg: tipoMedida // 💡 NOVO ESTADO
+      tipo_medida_kg: tipoMedida 
     });
     setModalAberto(true);
   };
@@ -452,7 +450,6 @@ export default function Precificacao() {
     let statusCalc = formModal.status;
     if (statusCalc === 'pendente' && precoFinal !== 'R$ 0,00') statusCalc = 'ativo';
 
-    // 💡 JUNTA A SIGLA COM O PESO ANTES DE SALVAR (Ex: "SC 20", "CX 15")
     let pesoCaixaFinal = formModal.peso_caixa;
     if (formModal.unidade === 'KG' && formModal.peso_caixa) {
         pesoCaixaFinal = `${formModal.tipo_medida_kg} ${formModal.peso_caixa}`;
@@ -461,7 +458,7 @@ export default function Precificacao() {
     const fotosAtuais = prodModal.foto_url ? String(prodModal.foto_url).split(',') : [];
     const payload = {
       preco: precoFinal,
-      peso_caixa: pesoCaixaFinal, // 💡 SALVA O PESO JUNTO COM A SIGLA
+      peso_caixa: pesoCaixaFinal, 
       status_cotacao: statusCalc,
       promocao: formModal.promocao,
       novidade: formModal.novidade,
@@ -484,7 +481,6 @@ export default function Precificacao() {
 
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Carregando Sistema...</div>;
 
-  // 💡 ADICIONADO {id: 'todos'} NO ARRAY DE ABAS
   const CONFIG_ABAS = [
     { id: 'todos', nomeStr: 'TODOS', cor: '#8b5cf6', icone: '📋', itens: listas.todos },
     { id: 'pendentes', nomeStr: 'PENDENTES', cor: '#3b82f6', icone: '⏳', itens: listas.pendentes },
@@ -495,8 +491,14 @@ export default function Precificacao() {
   ];
 
   const listaDaAbaAtual = listas[abaAtiva] || [];
+  
+  // 💡 FILTRO INTELIGENTE APLICADO AQUI
   const produtosRenderizados = listaDaAbaAtual.filter(p => {
-      const bateuBusca = p.nome.toLowerCase().includes(busca.toLowerCase());
+      const termoBusca = normalizarParaBusca(busca);
+      const nomeProduto = normalizarParaBusca(p.nome);
+      
+      const bateuBusca = nomeProduto.includes(termoBusca);
+      
       if (categoriaFiltro === 'TODOS') return bateuBusca;
       return bateuBusca && (p.categoria === categoriaFiltro);
   });
@@ -595,6 +597,7 @@ export default function Precificacao() {
          ))}
       </div>
 
+      {/* 💡 BARRA DE PESQUISA (Agora não precisa alterar aqui, a função inteligente resolve) */}
       <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '12px', display: 'flex', gap: '10px', marginBottom: '15px', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
         <span>🔍</span><input placeholder="Buscar item..." value={busca} onChange={e => setBusca(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
       </div>
@@ -672,7 +675,6 @@ export default function Precificacao() {
                 </select>
               </div>
 
-              {/* 💡 MUDANÇA: SELECIONAR A SIGLA SE FOR VENDIDO EM KG */}
               {formModal.unidade === 'KG' && (
                 <div style={{ display: 'flex', gap: '5px' }}>
                   <div style={{ width: '70px' }}>

@@ -248,7 +248,7 @@ function App() {
                   <button onClick={() => navegarPara('usuarios')} style={s.btnNav}>👥 GESTÃO DE USUÁRIOS</button>
                   <button onClick={() => navegarPara('fornecedores')} style={s.btnNav}>📦 FORNECEDORES</button>
                   <button onClick={() => navegarPara('produtos')} style={s.btnNav}>🍎 GESTÃO DE PRODUTOS</button>
-                  <button onClick={() => navegarPara('precificacao')} style={s.btnNav}>💲 COTAÇÃO DIÁRIA</button>
+                  <button onClick={() => navegarPara('precificacao')} style={s.btnNav}>💲 PRECIFICAÇÃO</button>
                   <button onClick={() => navegarPara('marketing')} style={s.btnNav}>🖼️ BANNERS E MÍDIA</button>
                   <button onClick={() => navegarPara('listas')} style={s.btnNav}>📋 PAINEL DE CONFERÊNCIA</button>
                   <button onClick={() => navegarPara('compras')} style={s.btnNav}>🛒 MESA DE COMPRAS</button>
