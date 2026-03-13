@@ -4,17 +4,20 @@ import { supabase } from './supabaseClient';
 export default function FechamentoCliente({ isEscuro }) { 
   const [carregando, setCarregando] = useState(true);
   const [perfil, setPerfil] = useState(null); // { role, loja_id }
-  const [lojasLiberadas, setLojasLiberadas] = useState([]); // Lojas que possuem notas liberadas
+  const [lojasLiberadas, setLojasLiberadas] = useState([]); 
   const [lojaSelecionada, setLojaSelecionada] = useState('');
   const [dadosFechamento, setDadosFechamento] = useState(null);
   
+  const [statusFechamento, setStatusFechamento] = useState('');
+  
+  // 💡 LÓGICA DE DATAS CORRIGIDA (Busca EXATAMENTE a data do cabeçalho, sem subtrair)
   const obterDataLocal = () => {
     const data = new Date();
     const tzOffset = data.getTimezoneOffset() * 60000;
     return new Date(data.getTime() - tzOffset).toISOString().split('T')[0];
   };
 
-  const [dataFiltro, setDataFiltro] = useState(obterDataLocal());
+  const [dataVisivel, setDataVisivel] = useState(obterDataLocal());
 
   const configDesign = {
     cores: {
@@ -36,7 +39,38 @@ export default function FechamentoCliente({ isEscuro }) {
 
   useEffect(() => {
     if (perfil) carregarDados();
-  }, [perfil, dataFiltro, lojaSelecionada]);
+  }, [perfil, dataVisivel, lojaSelecionada]);
+
+  // 💡 LÓGICA DE ALERTA EXTERNO PROGRAMADO (Apenas às 14h)
+  useEffect(() => {
+    if (dadosFechamento && statusFechamento !== 'PAGO') {
+      const horaAtual = new Date().getHours();
+      
+      const keyAlerta = `alerta_cobranca_${dataVisivel}_14h`;
+      
+      if (horaAtual === 14 && !sessionStorage.getItem(keyAlerta)) {
+        const msgExterna = `🔔 Frazão Frutas & Cia: O pagamento do fechamento (Data: ${dataBr(dataVisivel)}) ainda não consta como concluído. Por favor, verifique!`;
+        
+        // Alerta interno (Pop-up na tela)
+        alert(`🔔 AVISO FINANCEIRO:\n\nConsta em nosso sistema que o pagamento do fechamento (Data: ${dataBr(dataVisivel)}) ainda não foi concluído. Por favor, regularize e avise o setor financeiro!`);
+        
+        // Alerta externo (Notificação Push do Celular/Sistema)
+        if ("Notification" in window) {
+            if (Notification.permission === "granted") {
+                new Notification("Cobrança Pendente", { body: msgExterna });
+            } else if (Notification.permission !== "denied") {
+                Notification.requestPermission().then(permission => {
+                    if (permission === "granted") {
+                        new Notification("Cobrança Pendente", { body: msgExterna });
+                    }
+                });
+            }
+        }
+        
+        sessionStorage.setItem(keyAlerta, 'true');
+      }
+    }
+  }, [dadosFechamento, statusFechamento, dataVisivel]);
 
   async function carregarPerfil() {
     try {
@@ -61,19 +95,19 @@ export default function FechamentoCliente({ isEscuro }) {
   async function carregarDados() {
     setCarregando(true);
     try {
-      // 1. Buscar nomes das lojas para o seletor (apenas se for admin)
       if (perfil?.role === 'admin') {
         const { data: lojas } = await supabase.from('lojas').select('codigo_loja, nome_fantasia');
         setLojasLiberadas(lojas || []);
       }
 
-      // 2. Buscar pedidos que estão com nota_liberada = true
+      // 💡 Busca pela data exata do cabeçalho e verifica se o status liberou a nota
       let query = supabase
         .from('pedidos')
         .select('*')
-        .eq('data_pedido', dataFiltro)
-        .eq('nota_liberada', true);
+        .eq('data_pedido', dataVisivel)
+        .in('status_fechamento', ['ENVIADO', 'PAGO', 'PENDENCIA']);
 
+      // 💡 Restrição de visualização (Cliente vê a sua, Admin vê todas selecionáveis)
       if (perfil?.role === 'cliente') {
         query = query.eq('loja_id', perfil.loja_id);
       } else if (lojaSelecionada) {
@@ -94,8 +128,11 @@ export default function FechamentoCliente({ isEscuro }) {
   const processarPedidos = (pedidos) => {
     if (pedidos.length === 0) {
       setDadosFechamento(null);
+      setStatusFechamento('');
       return;
     }
+
+    setStatusFechamento(pedidos[0].status_fechamento || 'ENVIADO');
 
     const itensProcessados = pedidos.map(p => {
       const valorRaw = p.preco_venda || p.custo_unit || 'R$ 0,00';
@@ -134,7 +171,7 @@ export default function FechamentoCliente({ isEscuro }) {
   };
 
   const imprimirPDF = () => {
-      window.print(); // Utiliza o padrão de impressão do navegador ou você pode integrar o html2pdf aqui
+      window.print();
   };
 
   return (
@@ -152,11 +189,12 @@ export default function FechamentoCliente({ isEscuro }) {
             </p>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave }}>Data da Entrega:</span>
             <input 
               type="date" 
-              value={dataFiltro} 
-              onChange={(e) => setDataFiltro(e.target.value)}
+              value={dataVisivel} 
+              onChange={(e) => setDataVisivel(e.target.value)}
               style={{ padding: '10px', borderRadius: '10px', border: `1px solid ${configDesign.cores.borda}`, fontWeight: 'bold', outline: 'none' }}
             />
             {perfil?.role === 'admin' && (
@@ -181,16 +219,27 @@ export default function FechamentoCliente({ isEscuro }) {
         <div style={{ textAlign: 'center', padding: '60px', backgroundColor: configDesign.cores.fundoCards, borderRadius: '20px', maxWidth: '900px', margin: '0 auto', border: `1px dashed ${configDesign.cores.borda}` }}>
            <span style={{ fontSize: '50px' }}>⏳</span>
            <h3 style={{ color: configDesign.cores.textoForte }}>Nenhum fechamento liberado</h3>
-           <p style={{ color: configDesign.cores.textoSuave }}>Seu fechamento ainda está sendo processado ou não foi liberado para esta data.</p>
+           <p style={{ color: configDesign.cores.textoSuave }}>Seu fechamento ainda não foi liberado para esta data ou já foi concluído/ocultado.</p>
         </div>
       ) : (
         <div style={{ maxWidth: '900px', margin: '0 auto' }}>
           
+          {/* 💡 ALERTA VISUAL NO PAINEL DO CLIENTE */}
+          {statusFechamento === 'PAGO' ? (
+             <div style={{ backgroundColor: '#22c55e', color: '#fff', padding: '15px', borderRadius: '12px', textAlign: 'center', fontWeight: '900', marginBottom: '20px', boxShadow: '0 4px 15px rgba(34,197,94,0.3)', letterSpacing: '1px' }}>
+                ✅ PAGAMENTO CONCLUÍDO COM SUCESSO
+             </div>
+          ) : (
+             <div style={{ backgroundColor: '#ef4444', color: '#fff', padding: '15px', borderRadius: '12px', textAlign: 'center', fontWeight: '900', marginBottom: '20px', boxShadow: '0 4px 15px rgba(239,68,68,0.3)', letterSpacing: '1px' }}>
+                ⚠️ ATENÇÃO: PAGAMENTO NÃO CONCLUÍDO AINDA
+             </div>
+          )}
+
           {/* CARD PRINCIPAL */}
           <div id="area-nota-cliente" style={{ backgroundColor: configDesign.cores.fundoCards, borderRadius: '20px', border: `1px solid ${configDesign.cores.borda}`, overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.05)' }}>
             
             {/* TOPO DA NOTA */}
-            <div style={{ padding: '30px', backgroundColor: isEscuro ? '#0f172a' : '#f1f5f9', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+            <div style={{ padding: '30px', backgroundColor: isEscuro ? '#0f172a' : '#f1f5f9', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '15px' }}>
               <div>
                 <span style={{ fontSize: '12px', fontWeight: '900', color: configDesign.cores.primaria, textTransform: 'uppercase', letterSpacing: '1px' }}>Resumo Financeiro</span>
                 <h1 style={{ margin: '5px 0 0 0', color: configDesign.cores.textoForte, fontSize: '28px', fontWeight: '900' }}>{formatarMoeda(dadosFechamento.totalGeral)}</h1>
@@ -229,13 +278,13 @@ export default function FechamentoCliente({ isEscuro }) {
             </div>
 
             {/* RODAPÉ DA NOTA */}
-            <div style={{ padding: '20px 30px', backgroundColor: isEscuro ? '#1e293b' : '#fafafa', borderTop: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ padding: '20px 30px', backgroundColor: isEscuro ? '#1e293b' : '#fafafa', borderTop: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
                <div style={{ fontSize: '12px', color: configDesign.cores.textoSuave }}>
                   Dúvidas sobre os valores? Entre em contato com o financeiro.
                </div>
                <div style={{ textAlign: 'right' }}>
                   <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, display: 'block' }}>Data da Entrega</span>
-                  <strong style={{ color: configDesign.cores.textoForte }}>{dataBr(dataFiltro)}</strong>
+                  <strong style={{ color: configDesign.cores.textoForte }}>{dataBr(dataVisivel)}</strong>
                </div>
             </div>
           </div>
@@ -245,6 +294,7 @@ export default function FechamentoCliente({ isEscuro }) {
   );
 
   function dataBr(data) {
+    if (!data) return '';
     return data.split('-').reverse().join('/');
   }
 }

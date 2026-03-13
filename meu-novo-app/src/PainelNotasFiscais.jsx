@@ -73,7 +73,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
     return parseFloat(precoCln.replaceAll('.', '').replace(',', '.')) || 0;
   };
 
-  // 💡 CORREÇÃO: LÓGICA MAIS INTELIGENTE PARA VINCULAR FORNECEDORES PARECIDOS
   const buscarFornecedorSimilar = (nomeBusca, listaBd) => {
       if (!nomeBusca || nomeBusca === 'DESCONHECIDO') return null;
       const normBusca = normalizarBusca(nomeBusca);
@@ -87,7 +86,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
       });
       if (match) return match;
 
-      // Se falhar, tenta achar pela PRIMEIRA palavra chave (Ex: "AMANDA BDG" se liga com "AMANDA BANDEJADOS")
       const nomeLimpo = nomeBusca.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
       const primeiraPalavraBusca = nomeLimpo.split(/\s+/)[0];
 
@@ -123,7 +121,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
       const pedidos = pedData || [];
       const lojas = lojasData || [];
 
-      // 💡 CORREÇÃO: Limpando a flag de "ALERTA|" logo de cara para não criar lixo no banco
       const nomesNosPedidos = [...new Set(pedidos.map(p => {
           let nome = String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase();
           if (nome.startsWith('ALERTA|')) nome = nome.replace('ALERTA|', '');
@@ -164,17 +161,15 @@ export default function PainelNotasFiscais({ isEscuro }) {
         const fNomeOficial = infoFornBD ? infoFornBD.nome_fantasia.toUpperCase() : fNomeOriginal;
         
         let tipoPessoa = 'SEM_CADASTRO';
-        let doc = '';
 
         if (infoFornBD && infoFornBD.documento) {
-            doc = infoFornBD.documento;
             const tipoDoc = String(infoFornBD.tipo_documento || '').toUpperCase().trim();
             if (tipoDoc === 'CNPJ') {
                 tipoPessoa = 'PJ';
             } else if (tipoDoc === 'CPF') {
                 tipoPessoa = 'PF';
             } else {
-                const docLimpo = doc.replace(/\D/g, '');
+                const docLimpo = infoFornBD.documento.replace(/\D/g, '');
                 tipoPessoa = docLimpo.length > 11 ? 'PJ' : 'PF';
             }
         }
@@ -183,17 +178,15 @@ export default function PainelNotasFiscais({ isEscuro }) {
           mapaForn[fNomeOficial] = { 
               fornecedor: fNomeOficial, 
               tipoPessoa: tipoPessoa, 
-              documento: doc, 
               dadosCadastrais: infoFornBD || null, 
               total: 0, 
               nota_fiscal: p.nota_fiscal || '', 
               itens: [],
-              ids_pedidos: [] // 💡 AQUI GARANTE QUE TODAS AS LINHAS DA TABELA SERÃO ATUALIZADAS
+              ids_pedidos: [] 
           };
           if (p.nota_fiscal) initNFs[fNomeOficial] = p.nota_fiscal;
         }
 
-        // Salva os IDs dos pedidos deste fornecedor
         if (p.id && !mapaForn[fNomeOficial].ids_pedidos.includes(p.id)) {
             mapaForn[fNomeOficial].ids_pedidos.push(p.id);
         }
@@ -245,6 +238,7 @@ export default function PainelNotasFiscais({ isEscuro }) {
          });
       }
 
+      // 💡 CORREÇÃO 2: MATEMÁTICA IDÊNTICA À TELA DE GESTÃO DE FECHAMENTOS
       const mapaLoja = {};
       pedidos.forEach(p => {
         const idLoja = parseInt(String(p.loja_id).match(/\d+/)?.[0]);
@@ -257,24 +251,37 @@ export default function PainelNotasFiscais({ isEscuro }) {
           mapaLoja[nomeLoja] = { loja: nomeLoja, total: 0, itens: [] };
         }
 
-        const valNum = tratarPrecoNum(p.custo_unit);
-        const qtd = Number(p.quantidade || 0); 
         const isBoleto = p.status_compra === 'boleto';
+        
+        // Puxando valores corrigidos (qtd_atendida reflete edições manuais)
+        const qtdFinal = Number(p.qtd_atendida || p.quantidade || 0); 
+        const qtdBonificada = Number(p.qtd_bonificada) || 0;
+        
+        let unitParaLoja = p.preco_venda || p.custo_unit || 'R$ 0,00';
+        let totalItem = 0;
+
+        if (String(unitParaLoja).includes('BONIFICAÇÃO |')) {
+          const precoOriginal = unitParaLoja.split('|')[1] ? unitParaLoja.split('|')[1].trim() : 'R$ 0,00';
+          const pUnit = tratarPrecoNum(precoOriginal);
+          const restCobrado = qtdFinal - qtdBonificada;
+          totalItem = restCobrado > 0 ? restCobrado * pUnit : 0;
+        } else if (!isBoleto) {
+          const valNum = tratarPrecoNum(unitParaLoja);
+          const restCobrado = Math.max(0, qtdFinal - qtdBonificada);
+          totalItem = restCobrado * valNum; 
+        }
 
         const itemExLoja = mapaLoja[nomeLoja].itens.find(i => i.nome === p.nome_produto && i.isBoleto === isBoleto);
+        
         if (itemExLoja) {
-            itemExLoja.qtd += qtd;
-            if (valNum > itemExLoja.preco_unit) {
-                itemExLoja.preco_unit = valNum;
-            }
-            itemExLoja.total = itemExLoja.qtd * itemExLoja.preco_unit;
+            itemExLoja.qtd += qtdFinal;
+            itemExLoja.total += totalItem;
         } else {
             mapaLoja[nomeLoja].itens.push({
               nome: p.nome_produto,
-              qtd: qtd,
+              qtd: qtdFinal,
               und: p.unidade_medida,
-              preco_unit: valNum,
-              total: valNum * qtd,
+              total: totalItem,
               isBoleto: isBoleto
             });
         }
@@ -301,7 +308,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
     return () => clearInterval(intervalo);
   }, [dataFiltro]);
 
-  // 💡 CORREÇÃO: Salvando diretamente usando o array de IDs mapeado
   const salvarNotaFiscal = async (fornecedorNome) => {
     const numeroNF = inputsNF[fornecedorNome] || '';
     if (!numeroNF.trim()) return alert("Digite o número da Nota Fiscal antes de salvar.");
@@ -315,7 +321,7 @@ export default function PainelNotasFiscais({ isEscuro }) {
     try {
       const { error } = await supabase.from('pedidos')
         .update({ nota_fiscal: numeroNF })
-        .in('id', fornAtual.ids_pedidos); // 🔥 ISSO RESOLVE O PROBLEMA DE NÃO SALVAR A NF
+        .in('id', fornAtual.ids_pedidos); 
       
       if (error) throw error;
       
@@ -328,7 +334,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
     }
   };
 
-  // 💡 CORREÇÃO: Apagando diretamente usando o array de IDs mapeado
   const apagarNotaFiscal = async (fornecedorNome) => {
     if (!window.confirm(`Tem certeza que deseja apagar a Nota Fiscal do fornecedor ${fornecedorNome} e devolver para os pendentes?`)) return;
 
@@ -341,7 +346,7 @@ export default function PainelNotasFiscais({ isEscuro }) {
     try {
       const { error } = await supabase.from('pedidos')
         .update({ nota_fiscal: null })
-        .in('id', fornAtual.ids_pedidos); // 🔥 ISSO RESOLVE O PROBLEMA DE NÃO APAGAR A NF
+        .in('id', fornAtual.ids_pedidos); 
       
       if (error) throw error;
       
@@ -523,11 +528,12 @@ export default function PainelNotasFiscais({ isEscuro }) {
                       <h3 style={{ margin: 0, color: isEscuro ? '#fff' : '#111', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                         🏢 {f.fornecedor} 
                         
+                        {/* 💡 CORREÇÃO 1: APENAS O NOME "PESSOA FÍSICA" / "JURÍDICA", SEM O NÚMERO */}
                         {f.tipoPessoa === 'PJ' && (
-                            <span style={{fontSize: '9px', background: '#3b82f6', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>PESSOA JURÍDICA: {f.documento}</span>
+                            <span style={{fontSize: '9px', background: '#3b82f6', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>PESSOA JURÍDICA</span>
                         )}
                         {f.tipoPessoa === 'PF' && (
-                            <span style={{fontSize: '9px', background: '#10b981', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>PESSOA FÍSICA: {f.documento}</span>
+                            <span style={{fontSize: '9px', background: '#10b981', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>PESSOA FÍSICA</span>
                         )}
                         {f.tipoPessoa === 'SEM_CADASTRO' && (
                             <span style={{fontSize: '9px', background: configDesign.cores.alerta, color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>SEM CADASTRO</span>
@@ -548,7 +554,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
                            <div style={{ background: configDesign.cores.fundoGeral, padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, marginBottom: '15px', fontSize: '13px', color: configDesign.cores.textoForte }}>
                                <div style={{fontWeight: '900', marginBottom: '8px', fontSize: '12px', color: configDesign.cores.textoSuave}}>📋 DADOS CADASTRADOS DO FORNECEDOR</div>
                                
-                               {/* 💡 MAPEAMENTO EXATO COM AS COLUNAS SOLICITADAS */}
                                <div><strong>Nome Fantasia:</strong> {f.dadosCadastrais.nome_fantasia || 'Não informado'}</div>
                                <div style={{marginTop: '4px'}}><strong>Nome Completo/Razão Social:</strong> {f.dadosCadastrais.nome_completo || 'Não informado'}</div>
                                
@@ -592,7 +597,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
                               />
                           </div>
                           
-                          {/* 💡 BOTÃO DE APAGAR ADICIONADO AQUI */}
                           {isConcluido && (
                               <button onClick={() => apagarNotaFiscal(f.fornecedor)} style={{ background: configDesign.cores.alerta, color: '#fff', border: 'none', padding: '0 15px', height: '42px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', marginTop: '18px' }}>
                                   🗑️ APAGAR
@@ -674,7 +678,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
                   {isExpandido && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px', color: configDesign.cores.textoSuave, marginTop: '20px', paddingTop: '15px', borderTop: `1px solid ${configDesign.cores.borda}` }}>
                       
-                      {/* 💡 MAPEAMENTO EXATO COM AS COLUNAS SOLICITADAS */}
                       <div><strong style={{color: configDesign.cores.textoForte}}>Nome Fantasia:</strong> {f.nome_fantasia || 'Não informado'}</div>
                       <div><strong style={{color: configDesign.cores.textoForte}}>Razão Social / Nome Completo:</strong> {f.nome_completo || 'Não informado'}</div>
                       

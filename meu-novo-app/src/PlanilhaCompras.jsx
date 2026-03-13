@@ -113,6 +113,12 @@ export default function PlanilhaCompras() {
   const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const formatarValorSemSimbolo = (v) => (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  // 💡 FUNÇÃO ADICIONADA PARA BARRAR O "KG" E FORÇAR "CX" NAS COMPRAS
+  const formatarUnidade = (und) => {
+    const u = String(und || 'UN').toUpperCase();
+    return u === 'KG' ? 'CX' : u;
+  };
+
   const formatarNomeItem = (str) => {
     if (!str) return '';
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
@@ -259,7 +265,7 @@ export default function PlanilhaCompras() {
 
           if (p.status_compra === 'pendente') {
             if (!mapaPendentes[nomeProdutoUpper]) {
-              mapaPendentes[nomeProdutoUpper] = { nome: nomeProdutoUpper, demanda: 0, qtd_bonificada_cliente: 0, unidade: String(p.unidade_medida || "UN"), lojas: [] };
+              mapaPendentes[nomeProdutoUpper] = { nome: nomeProdutoUpper, demanda: 0, qtd_bonificada_cliente: 0, unidade: formatarUnidade(p.unidade_medida), lojas: [] };
             }
             mapaPendentes[nomeProdutoUpper].demanda += qtdPedida;
             mapaPendentes[nomeProdutoUpper].qtd_bonificada_cliente += qtdBonificada;
@@ -276,14 +282,14 @@ export default function PlanilhaCompras() {
                }
             }
           } else {
-            if (!mapaFeitos[nomeProdutoUpper]) mapaFeitos[nomeProdutoUpper] = { nome: nomeProdutoUpper, total_resolvido: 0, status: p.status_compra, unidade: String(p.unidade_medida || "UN"), itens: [] };
+            if (!mapaFeitos[nomeProdutoUpper]) mapaFeitos[nomeProdutoUpper] = { nome: nomeProdutoUpper, total_resolvido: 0, status: p.status_compra, unidade: formatarUnidade(p.unidade_medida), itens: [] };
             mapaFeitos[nomeProdutoUpper].total_resolvido += qtdPedida;
             mapaFeitos[nomeProdutoUpper].itens.push(p);
           }
 
           if (!mapaGeralItens[nomeProdutoUpper]) {
              mapaGeralItens[nomeProdutoUpper] = {
-                nome: nomeProdutoUpper, unidade: String(p.unidade_medida || "UN"), total_solicitado: 0, total_comprado: 0, isFaltaTotal: false, temBoleto: false, fornecedores_comprados: {}
+                nome: nomeProdutoUpper, unidade: formatarUnidade(p.unidade_medida), total_solicitado: 0, total_comprado: 0, isFaltaTotal: false, temBoleto: false, fornecedores_comprados: {}
              };
           }
           mapaGeralItens[nomeProdutoUpper].total_solicitado += qtdPedida;
@@ -357,7 +363,7 @@ export default function PlanilhaCompras() {
                      mapaForn[fNome].lojas[nomeLoja].itens[idxItemForn].totalNum += totalItemFornCobrado;
                  } else {
                      mapaForn[fNome].lojas[nomeLoja].itens.push({
-                         id_pedido: p.id, nome: nomeProdutoUpper, qtd: p.qtd_atendida, qtd_bonificada: qtdBonifFornecedor, unidade: String(p.unidade_medida || 'UN'), valor_unit: baseValFormatado, totalNum: totalItemFornCobrado, isBoleto: isBoleto
+                         id_pedido: p.id, nome: nomeProdutoUpper, qtd: p.qtd_atendida, qtd_bonificada: qtdBonifFornecedor, unidade: formatarUnidade(p.unidade_medida), valor_unit: baseValFormatado, totalNum: totalItemFornCobrado, isBoleto: isBoleto
                      });
                  }
 
@@ -1344,7 +1350,7 @@ export default function PlanilhaCompras() {
                                        [nomeOriginal]: { ...configDesteItem, usarUnidade: e.target.checked }
                                    }
                                 }));
-                             }} 
+                              }} 
                            />
                            Incluir Unidade de Medida (Ex: CX, KG) na mensagem?
                         </label>

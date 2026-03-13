@@ -45,7 +45,6 @@ export default function FechamentoLojas({ isEscuro }) {
   const [itemMediaSelecionado, setItemMediaSelecionado] = useState('');
   const [valorMediaInput, setValorMediaInput] = useState('');
 
-  // 💡 NOVOS ESTADOS PARA LOJAS (Multi-seleção e Pendências)
   const [lojasSelecionadas, setLojasSelecionadas] = useState([]);
   const [lojaPendencia, setLojaPendencia] = useState(null);
   const [motivoPendencia, setMotivoPendencia] = useState('Conta errada');
@@ -69,7 +68,7 @@ export default function FechamentoLojas({ isEscuro }) {
   useEffect(() => {
     localStorage.setItem('virtus_fechamento_data', dataFiltro);
     carregar();
-    setLojasSelecionadas([]); // Reseta seleção ao mudar data
+    setLojasSelecionadas([]);
 
     const intervalo = setInterval(() => {
       carregar(true);
@@ -246,7 +245,6 @@ export default function FechamentoLojas({ isEscuro }) {
           };
         }
 
-        // 💡 PUXANDO OS NOVOS STATUS DA LOJA DO BANCO DE DADOS (Pega de qualquer item, afinal atualizamos em lote)
         if (p.status_fechamento) mapaLojas[idLoja].status_fechamento = p.status_fechamento;
         if (p.pendencia_motivo) mapaLojas[idLoja].pendencia_motivo = p.pendencia_motivo;
         if (p.pendencia_valor) mapaLojas[idLoja].pendencia_valor = p.pendencia_valor;
@@ -353,7 +351,8 @@ export default function FechamentoLojas({ isEscuro }) {
            mapaLojas[idLoja].totalFatura += totalItem;
         }
 
-        if (p.nota_liberada === true) {
+        // Atualizado para usar o novo status do banco em vez de nota_liberada
+        if (p.status_fechamento === 'ENVIADO' || p.status_fechamento === 'PAGO' || p.status_fechamento === 'PENDENCIA') {
            mapaLojas[idLoja].liberadoCliente = true;
         }
       });
@@ -399,13 +398,12 @@ export default function FechamentoLojas({ isEscuro }) {
     } catch (err) { console.error(err); } finally { if (!silencioso) setCarregando(false); }
   }
 
-  // 💡 MUDAR STATUS DA LOJA DIRETAMENTE NO SUPABASE
+  // 💡 ATUALIZADO: Salva apenas status_fechamento (Evitando erro de schema cache)
   const handleStatusLojaDB = async (idLoja, novoStatus, pMotivo = null, pValor = null) => {
     setCarregando(true);
     try {
         let payload = { 
-            status_fechamento: novoStatus, 
-            nota_liberada: (novoStatus === 'ENVIADO' || novoStatus === 'PAGO' || novoStatus === 'PENDENCIA') 
+            status_fechamento: novoStatus
         };
         
         if (pMotivo !== null) {
@@ -547,6 +545,19 @@ export default function FechamentoLojas({ isEscuro }) {
     setModoVisualizacaoImp(true);
   };
 
+  // 💡 ATUALIZADO: Liberação via status do banco de dados ao invés de nota_liberada
+  const liberarParaOCliente = async (idLoja) => {
+    const lojaObj = fechamentos.find(l => l.loja_id === idLoja);
+    if (lojaObj && lojaObj.temPendencia) {
+        alert('⚠️ Ação bloqueada! Esta loja possui itens com status PENDENTE.\nVá na Planilha de Compras e resolva antes de liberar para o cliente.');
+        return;
+    }
+    if (!window.confirm("Isso vai disponibilizar esse fechamento no aplicativo do Gerente dessa loja. Confirmar?")) return;
+    
+    await handleStatusLojaDB(idLoja, 'ENVIADO');
+    alert("✅ Fechamento liberado com sucesso para a loja!");
+  };
+
   const alternarStatusPagamento = async (nomeForn) => {
     const fornecedorAtual = fornecedores.find(f => f.nome === nomeForn);
     if (!fornecedorAtual) return;
@@ -570,7 +581,6 @@ export default function FechamentoLojas({ isEscuro }) {
     alert(`PIX Copiado: ${chave}\nFornecedor: ${fNome}`);
   };
 
-  // 💡 NOVO: Mensagem de Cobrança Padrão
   const copiarCobranca = (loja) => {
       const hora = new Date().getHours();
       const saudacao = hora < 12 ? 'Bom dia' : (hora < 18 ? 'Boa tarde' : 'Boa noite');
@@ -582,7 +592,6 @@ export default function FechamentoLojas({ isEscuro }) {
       alert("✅ Mensagem de cobrança copiada para a área de transferência!");
   };
 
-  // 💡 ATUALIZADO: Baixar Todos Multiplos (agora envia pro Whatsapp todos de uma vez se clicar no botão correspondente)
   const enviarWhatsAppMultiplos = async () => {
       if (!window.html2pdf) return alert("Aguarde, carregando biblioteca PDF...");
       if (lojasSelecionadas.length === 0) return alert("Selecione pelo menos uma loja nas caixinhas.");
@@ -611,7 +620,6 @@ export default function FechamentoLojas({ isEscuro }) {
               });
           } else {
               alert("Seu dispositivo não suporta o envio múltiplo automático pro WhatsApp. Os arquivos serão baixados.");
-              // Fallback para baixar
               files.forEach(f => {
                   const url = URL.createObjectURL(f);
                   const a = document.createElement('a');
@@ -840,14 +848,14 @@ export default function FechamentoLojas({ isEscuro }) {
   return (
     <div style={{ backgroundColor: themeBg, minHeight: '100vh', padding: '10px', paddingBottom: '100px', fontFamily: 'sans-serif', transition: '0.3s' }}>
       
-      {/* 💡 TOP BAR DE SELEÇÃO MÚLTIPLA */}
+      {/* 💡 TOP BAR DE SELEÇÃO MÚLTIPLA AJUSTADA PARA CELULAR */}
       {lojasSelecionadas.length > 0 && abaAtiva === 'lojas' && (
-        <div style={{ position: 'sticky', top: '10px', zIndex: 100, backgroundColor: '#3b82f6', color: '#fff', padding: '15px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', boxShadow: '0 10px 25px rgba(59,130,246,0.4)' }}>
-           <div><strong style={{fontSize:'16px'}}>{lojasSelecionadas.length}</strong> Lojas Selecionadas</div>
-           <div style={{display: 'flex', gap: '10px'}}>
-              <button onClick={() => setLojasSelecionadas([])} style={{ background: 'transparent', border: '1px solid #fff', color: '#fff', padding: '8px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>CANCELAR</button>
-              <button onClick={enviarWhatsAppMultiplos} style={{ background: '#25d366', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' }}>🟢 ENVIAR WHATSAPP ({lojasSelecionadas.length})</button>
-              <button onClick={() => baixarTodosSeparados(true)} style={{ background: '#fff', color: '#3b82f6', border: 'none', padding: '8px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>📥 BAIXAR PDFs</button>
+        <div style={{ position: 'sticky', top: '10px', zIndex: 100, backgroundColor: '#3b82f6', color: '#fff', padding: '15px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px', boxShadow: '0 10px 25px rgba(59,130,246,0.4)' }}>
+           <div style={{textAlign: 'center'}}><strong style={{fontSize:'18px'}}>{lojasSelecionadas.length}</strong> Lojas Selecionadas</div>
+           <div style={{display: 'flex', flexWrap: 'wrap', gap: '10px', width: '100%'}}>
+              <button onClick={() => setLojasSelecionadas([])} style={{ flex: '1 1 auto', background: 'transparent', border: '1px solid #fff', color: '#fff', padding: '10px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>CANCELAR</button>
+              <button onClick={enviarWhatsAppMultiplos} style={{ flex: '1 1 auto', background: '#25d366', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px' }}>🟢 ZAP ({lojasSelecionadas.length})</button>
+              <button onClick={() => baixarTodosSeparados(true)} style={{ flex: '1 1 auto', background: '#fff', color: '#3b82f6', border: 'none', padding: '10px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>📥 PDFs</button>
            </div>
         </div>
       )}
@@ -910,7 +918,6 @@ export default function FechamentoLojas({ isEscuro }) {
           ) : (
             fechamentos.map((loja) => {
               
-              // 💡 LÓGICA REFEITA PARA LER O STATUS DIRETAMENTE DO BANCO DE DADOS
               const s = loja.status_fechamento || 'AGUARDANDO';
               const isEnviado = s === 'ENVIADO';
               const isPago = s === 'PAGO';
@@ -938,15 +945,14 @@ export default function FechamentoLojas({ isEscuro }) {
               <div key={loja.loja_id} style={{ backgroundColor: themeCard, borderRadius: '16px', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', marginBottom: '20px', border: `2px solid ${bordaLoja}`, overflow: 'hidden', opacity: isPago ? 0.8 : 1 }}>
                 
                 {msgTopo && (
-                    <div style={{ backgroundColor: corFundoMsg, color: '#fff', textAlign: 'center', padding: '6px', fontSize: '11px', fontWeight: '900', letterSpacing: '1px' }}>
+                    <div style={{ backgroundColor: corFundoMsg, color: '#fff', textAlign: 'center', padding: '8px', fontSize: '11px', fontWeight: '900', letterSpacing: '1px' }}>
                         {msgTopo}
                     </div>
                 )}
 
                 <div onClick={() => setLojaExpandida(lojaExpandida === loja.loja_id ? null : loja.loja_id)} style={{ padding: '20px', cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'space-between', alignItems: 'center', backgroundColor: lojaExpandida === loja.loja_id ? (isEscuro ? '#0f172a' : '#f8fafc') : 'transparent', transition: '0.2s' }}>
-                  <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                  <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
                     
-                    {/* 💡 CAIXINHA DE SELEÇÃO MÚLTIPLA */}
                     <input 
                        type="checkbox" 
                        checked={lojasSelecionadas.includes(loja.loja_id)} 
@@ -974,30 +980,30 @@ export default function FechamentoLojas({ isEscuro }) {
                   </div>
                 </div>
 
-                {/* 💡 BOTÕES DE AÇÃO RÁPIDA (SEMPRE VISÍVEIS) COM LÓGICA DO BANCO DE DADOS */}
-                <div style={{ padding: '0 20px 15px 20px', display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', alignItems: 'center', backgroundColor: lojaExpandida === loja.loja_id ? (isEscuro ? '#0f172a' : '#f8fafc') : 'transparent' }}>
+                {/* 💡 BOTÕES DE AÇÃO RÁPIDA (AJUSTADOS PARA CELULAR) */}
+                <div style={{ padding: '0 20px 15px 20px', display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: lojaExpandida === loja.loja_id ? (isEscuro ? '#0f172a' : '#f8fafc') : 'transparent' }}>
                   
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                      <button onClick={() => handleStatusLojaDB(loja.loja_id, isEnviado ? 'AGUARDANDO' : 'ENVIADO')} style={{ background: isEnviado ? 'transparent' : '#ef4444', color: isEnviado ? '#ef4444' : '#fff', border: `1px solid #ef4444`, padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', width: '100%' }}>
+                      <button onClick={() => handleStatusLojaDB(loja.loja_id, isEnviado ? 'AGUARDANDO' : 'ENVIADO')} style={{ flex: '1 1 auto', background: isEnviado ? 'transparent' : '#ef4444', color: isEnviado ? '#ef4444' : '#fff', border: `1px solid #ef4444`, padding: '10px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>
                           {isEnviado ? 'DESFAZER ENVIO' : '📤 LIBERAR (ENVIADO)'}
                       </button>
 
-                      <button onClick={() => handleStatusLojaDB(loja.loja_id, isPago ? 'AGUARDANDO' : 'PAGO')} style={{ background: isPago ? 'transparent' : '#22c55e', color: isPago ? '#22c55e' : '#fff', border: `1px solid #22c55e`, padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                      <button onClick={() => handleStatusLojaDB(loja.loja_id, isPago ? 'AGUARDANDO' : 'PAGO')} style={{ flex: '1 1 auto', background: isPago ? 'transparent' : '#22c55e', color: isPago ? '#22c55e' : '#fff', border: `1px solid #22c55e`, padding: '10px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>
                           {isPago ? 'DESFAZER PAGAMENTO' : '✅ PAGAMENTO CONCLUÍDO'}
                       </button>
 
-                      <button onClick={() => setLojaPendencia(loja)} style={{ background: isPendencia ? '#f97316' : 'transparent', color: isPendencia ? '#fff' : '#f97316', border: `1px solid #f97316`, padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                      <button onClick={() => setLojaPendencia(loja)} style={{ flex: '1 1 auto', background: isPendencia ? '#f97316' : 'transparent', color: isPendencia ? '#fff' : '#f97316', border: `1px solid #f97316`, padding: '10px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>
                           ⚠️ PENDÊNCIA
                       </button>
                   </div>
 
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                      <button onClick={() => copiarCobranca(loja)} style={{ background: isEscuro ? '#334155' : '#e2e8f0', color: themeText, border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', width: '100%' }}>
+                      <button onClick={() => copiarCobranca(loja)} style={{ flex: '1 1 auto', background: isEscuro ? '#334155' : '#e2e8f0', color: themeText, border: 'none', padding: '10px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>
                           📋 COPIAR COBRANÇA
                       </button>
 
-                      <button onClick={() => enviarWhatsAppRapido(loja)} style={{ background: '#25d366', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                          🟢 WHATSAPP
+                      <button onClick={() => enviarWhatsAppRapido(loja)} style={{ flex: '1 1 auto', background: '#25d366', color: '#fff', border: 'none', padding: '10px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px' }}>
+                          🟢 WHATSAPP PDF
                       </button>
                   </div>
 
@@ -1007,8 +1013,8 @@ export default function FechamentoLojas({ isEscuro }) {
                   <div style={{ padding: '20px', borderTop: `2px solid ${themeBorder}` }}>
                     
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '25px', justifyContent: 'flex-end' }}>
-                      <button onClick={() => abrirEdicao(loja)} style={{ background: isEscuro ? '#334155' : '#111', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>✏️ EDITAR ITENS</button>
-                      <button onClick={() => abrirPreviewImpressao('loja_unica', loja)} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>📄 VISUALIZAR PDF COMPLETO</button>
+                      <button onClick={() => abrirEdicao(loja)} style={{ flex: '1 1 auto', background: isEscuro ? '#334155' : '#111', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>✏️ EDITAR ITENS</button>
+                      <button onClick={() => abrirPreviewImpressao('loja_unica', loja)} style={{ flex: '1 1 auto', background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>📄 VER PDF COMPLETO</button>
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px', fontSize: '12px' }}>
@@ -1199,7 +1205,7 @@ export default function FechamentoLojas({ isEscuro }) {
         </div>
       )}
 
-      {/* 💡 MODAL DE PENDÊNCIA */}
+      {/* MODAL DE PENDÊNCIA */}
       {lojaPendencia && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 11000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
           <div style={{ backgroundColor: themeCard, width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '25px' }}>

@@ -92,15 +92,27 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
   const siglaMedidaVisual = matchPeso ? matchPeso[1] : 'CX';
   const pesoVisual = matchPeso ? matchPeso[2] : pesoCaixa;
 
+  // 💡 Lógica do Ícone de Status da Cotação
+  const iconeStatusCotacao = () => {
+    switch(produto.status_cotacao) {
+      case 'ativo': return '✅ Atualizado';
+      case 'mantido': return '🔒 Mantido';
+      case 'sem_preco': return '⏸️ S/ Preço';
+      case 'falta': return '🚫 Falta';
+      default: return '⏳ Pendente';
+    }
+  };
+
   return (
     <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '12px 15px', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', borderLeft: `5px solid ${corBorda}` }}>
       <div onClick={() => abrirModal(produto)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '80%' }}>
-          <div style={{ width: '35px', height: '35px', borderRadius: '6px', backgroundImage: `url(${produto.foto_url?.split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#f1f5f9' }} />
+          <div style={{ width: '35px', height: '35px', borderRadius: '6px', backgroundImage: `url(${(produto.foto_url || '').split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#f1f5f9' }} />
           <div style={{ overflow: 'hidden' }}>
             <strong style={{ display: 'block', fontSize: '14px', color: '#111', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{produto.nome}</strong>
-            <div style={{ display: 'flex', gap: '5px', marginTop: '2px' }}>
+            <div style={{ display: 'flex', gap: '5px', marginTop: '2px', flexWrap: 'wrap' }}>
               <span style={{fontSize: '9px', background: '#f1f5f9', color: '#64748b', padding: '2px 4px', borderRadius: '4px', fontWeight: 'bold'}}>{produto.unidade_medida || 'UN'}</span>
+              <span style={{fontSize: '9px', background: '#e2e8f0', color: '#475569', padding: '2px 4px', borderRadius: '4px', fontWeight: 'bold'}}>{iconeStatusCotacao()}</span>
               {produto.promocao && <span style={{fontSize: '9px', background: '#fefce8', color: '#ca8a04', padding: '2px 6px', borderRadius: '4px', fontWeight: '900'}}>PROMO</span>}
               {produto.novidade && <span style={{fontSize: '9px', background: '#eff6ff', color: '#2563eb', padding: '2px 6px', borderRadius: '4px', fontWeight: '900'}}>NOVO</span>}
             </div>
@@ -155,7 +167,7 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
 // ============================================================================
 export default function Precificacao() {
   const [produtos, setProdutos] = useState([]);
-  const [abaAtiva, setAbaAtiva] = useState('pendentes');
+  const [abaAtiva, setAbaAtiva] = useState('todos'); // 💡 AGORA INICIA EM TODOS
   const [busca, setBusca] = useState('');
   const [carregando, setCarregando] = useState(true);
   
@@ -260,7 +272,9 @@ export default function Precificacao() {
 
   const isZerado = (preco) => !preco || preco === '0' || preco === '0,00' || String(preco).trim() === 'R$ 0,00' || String(preco).trim() === 'R$0,00';
 
+  // 💡 ADICIONADO A ABA 'TODOS' AQUI
   const listas = {
+    todos: produtos, 
     pendentes: produtos.filter(p => !p.status_cotacao || p.status_cotacao === 'pendente'),
     prontos: produtos.filter(p => p.status_cotacao === 'ativo' && !isZerado(p.preco)),
     mantidos: produtos.filter(p => p.status_cotacao === 'mantido'),
@@ -307,6 +321,7 @@ export default function Precificacao() {
     if (!window.confirm("🚨 TEM CERTEZA?\nIsso vai apagar os preços atuais, promoções e novidades, mas manterá as FOTOS. Todos os itens irão para Pendentes.")) return;
     
     setCarregando(true);
+    // 💡 FECHA A LOJA AUTOMATICAMENTE
     await supabase.from('configuracoes').update({ precos_liberados: false }).eq('id', 1);
 
     const payloadGeral = produtos.map(p => {
@@ -336,7 +351,7 @@ export default function Precificacao() {
     }
 
     if (!deuErro) {
-      alert("✅ Cotação Zerada! Preços limpos, fotos preservadas."); 
+      alert("✅ Cotação Zerada! A Loja foi fechada para os clientes (Preços Ocultos) e todos os itens foram para Pendentes."); 
       carregarDados(); 
       setAbaAtiva('pendentes');
     } else {
@@ -350,6 +365,7 @@ export default function Precificacao() {
     }
     
     setCarregando(true);
+    // 💡 ABRE A LOJA PARA OS CLIENTES
     const { error } = await supabase.from('configuracoes').update({ precos_liberados: true }).eq('id', 1);
     setCarregando(false);
     
@@ -468,7 +484,9 @@ export default function Precificacao() {
 
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Carregando Sistema...</div>;
 
+  // 💡 ADICIONADO {id: 'todos'} NO ARRAY DE ABAS
   const CONFIG_ABAS = [
+    { id: 'todos', nomeStr: 'TODOS', cor: '#8b5cf6', icone: '📋', itens: listas.todos },
     { id: 'pendentes', nomeStr: 'PENDENTES', cor: '#3b82f6', icone: '⏳', itens: listas.pendentes },
     { id: 'prontos', nomeStr: 'PRONTOS', cor: '#22c55e', icone: '✅', itens: listas.prontos },
     { id: 'mantidos', nomeStr: 'MANTIDOS', cor: '#eab308', icone: '🔒', itens: listas.mantidos },

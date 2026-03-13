@@ -281,6 +281,8 @@ export default function MenuCliente({ usuario, tema }) {
   const carrinhoSeguro = carrinho.filter(i => i && typeof i === 'object' && i.id && i.nome);
   const valorTotalCarrinho = carrinhoSeguro.reduce((acc, item) => acc + (Number(item.total) || 0), 0);
   const edicaoLiberadaBD = listaEnviadaHoje?.some(item => item.liberado_edicao === true);
+  
+  // 💡 LÓGICA DE TRAVAMENTO: Se !precosLiberados, a loja fecha e esconde os preços
   const isAppTravado = !precosLiberados || (listaEnviadaHoje && !edicaoLiberadaBD);
 
   const verificarSePadrao = (valorPadrao) => {
@@ -533,6 +535,13 @@ export default function MenuCliente({ usuario, tema }) {
   return (
     <div style={{ width: '100%', minHeight: '100vh', backgroundColor: configDesign.cores.fundoGeral, fontFamily: configDesign.geral.fontePadrao, paddingBottom: '100px' }}>
       
+      {/* 💡 AVISO DE LOJA FECHADA PARA ATUALIZAÇÃO DE PREÇOS */}
+      {!precosLiberados && (
+        <div style={{ width: '100%', backgroundColor: configDesign.cores.alerta, color: '#fff', textAlign: 'center', padding: '10px', fontWeight: '900', fontSize: '13px', letterSpacing: '1px', zIndex: 9999 }}>
+          ⚠️ LOJA FECHADA - AGUARDANDO PREÇOS
+        </div>
+      )}
+
       {/* HEADER */}
       <div style={{ padding: '25px 20px 15px 20px', backgroundColor: configDesign.cores.fundoCards, borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
@@ -560,7 +569,7 @@ export default function MenuCliente({ usuario, tema }) {
       )}
 
       {/* MENU CATEGORIAS */}
-      <div style={{ position: categoriaAtiva === 'DESTAQUES' ? 'relative' : 'fixed', top: categoriaAtiva === 'DESTAQUES' ? '0' : (navState.show ? '0' : '-100px'), left: 0, right: 0, zIndex: 100, backgroundColor: categoriaAtiva === 'DESTAQUES' ? configDesign.cores.fundoGeral : configDesign.cores.fundoCards, borderBottom: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? `1px solid ${configDesign.cores.borda}` : 'none', transition: configDesign.animacoes.transicaoSuave, paddingTop: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? '10px' : '20px', marginTop: categoriaAtiva === 'DESTAQUES' ? '15px' : '0' }}>
+      <div style={{ position: categoriaAtiva === 'DESTAQUES' ? 'relative' : 'fixed', top: categoriaAtiva === 'DESTAQUES' ? '0' : (navState.show ? (!precosLiberados ? '35px' : '0') : '-100px'), left: 0, right: 0, zIndex: 100, backgroundColor: categoriaAtiva === 'DESTAQUES' ? configDesign.cores.fundoGeral : configDesign.cores.fundoCards, borderBottom: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? `1px solid ${configDesign.cores.borda}` : 'none', transition: configDesign.animacoes.transicaoSuave, paddingTop: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? '10px' : '20px', marginTop: categoriaAtiva === 'DESTAQUES' ? '15px' : '0' }}>
         <div style={{ padding: '0 20px 10px 20px' }}>
           <div style={{ backgroundColor: configDesign.cores.inputFundo, borderRadius: '12px', padding: (categoriaAtiva !== 'DESTAQUES' && navState.shrink) ? '8px 12px' : '12px', display: 'flex', gap: '10px' }}>
             <span>🔍</span><input placeholder="Procurar produto..." value={buscaMenu} onChange={e => setBuscaMenu(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', color: configDesign.cores.textoForte }} />
@@ -631,7 +640,12 @@ export default function MenuCliente({ usuario, tema }) {
                  </strong>
                  {infosVenda.isCaixa && <small style={{fontSize: '9px', color: configDesign.cores.textoSuave, marginTop: '2px'}}>{infosVenda.textoSecundario}</small>}
                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto', paddingTop: '5px' }}>
-                   <span style={{ color: configDesign.cores.primaria, fontWeight: '900', fontSize: categoriaAtiva === 'DESTAQUES' ? '18px' : '13px' }}>{infosVenda.textoPreco}</span>
+                   
+                   {/* 💡 MUDANÇA NO PREÇO DO CARD SE ESTIVER TRAVADO */}
+                   <span style={{ color: precosLiberados ? configDesign.cores.primaria : configDesign.cores.textoSuave, fontWeight: '900', fontSize: precosLiberados ? (categoriaAtiva === 'DESTAQUES' ? '18px' : '13px') : '11px' }}>
+                     {precosLiberados ? infosVenda.textoPreco : '🔒 Aguardando preço'}
+                   </span>
+
                    <span style={{ fontSize: '10px', color: configDesign.cores.textoSuave, fontWeight: 'bold', background: configDesign.cores.inputFundo, padding: '2px 6px', borderRadius: '4px' }}>{itemNoCarrinho ? formatarQtdUnidade(itemNoCarrinho.quantidade, infosVenda.unidadeFinal) : infosVenda.unidadeFinal}</span>
                  </div>
                </div>
@@ -709,12 +723,22 @@ export default function MenuCliente({ usuario, tema }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px', paddingBottom: '15px', borderBottom: `1px dashed ${configDesign.cores.borda}` }}>
                 <div>
                   <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário {infosVendaExpandido.isCaixa && `(Embalagem Fechada)`}</span>
-                  <span style={{color: configDesign.cores.primaria, fontSize: '20px', fontWeight: '900'}}>{infosVendaExpandido.textoPreco}</span>
+                  
+                  {/* 💡 MUDANÇA NO PREÇO DO MODAL SE ESTIVER TRAVADO */}
+                  <span style={{color: precosLiberados ? configDesign.cores.primaria : configDesign.cores.textoSuave, fontSize: precosLiberados ? '20px' : '16px', fontWeight: '900'}}>
+                    {precosLiberados ? infosVendaExpandido.textoPreco : '🔒 Aguardando preço'}
+                  </span>
+
                   {infosVendaExpandido.isCaixa && <span style={{display: 'block', fontSize: '10px', color: configDesign.cores.textoSuave}}>{infosVendaExpandido.textoSecundario}</span>}
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Total a Pagar ({formatarQtdUnidade(qtdCobradaExp, infosVendaExpandido.unidadeFinal)})</span>
-                  <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>{formatarMoeda(valorTotalCalcExp)}</span>
+                  
+                  {/* 💡 MUDANÇA NO TOTAL DO MODAL SE ESTIVER TRAVADO */}
+                  <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>
+                    {precosLiberados ? formatarMoeda(valorTotalCalcExp) : '---'}
+                  </span>
+
                   {temBonificacao && bonifSeguraExp > 0 && (
                      <span style={{color: configDesign.cores.sucesso, fontSize: '11px', fontWeight: 'bold', display: 'block'}}>
                         Desconto: -{formatarMoeda(valorEconomiaExp)}
