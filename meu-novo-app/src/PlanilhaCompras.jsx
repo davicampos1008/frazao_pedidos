@@ -8,6 +8,7 @@ export default function PlanilhaCompras() {
     return new Date(data.getTime() - tzOffset).toISOString().split('T')[0];
   };
 
+  // 💡 NOVO: Controle de Data persistente no cache (não reseta ao atualizar a página)
   const [dataFiltro, setDataFiltro] = useState(() => {
     return localStorage.getItem('virtus_data_filtro') || obterDataLocal();
   });
@@ -217,7 +218,7 @@ export default function PlanilhaCompras() {
     carregarDados();
   };
 
-  // 💡 FUNÇÃO DE SALVAR ITEM MANUAL NA PLANILHA 
+  // 💡 LÓGICA DE SALVAR ITEM MANUAL CORRIGIDA: SEMPRE VAI PARA PENDENTES
   const salvarNovoItemManual = async () => {
       if (!novoItemBusca.trim()) return alert("Digite ou selecione o nome do produto.");
       
@@ -234,11 +235,11 @@ export default function PlanilhaCompras() {
                   nome_produto: novoItemBusca.toUpperCase().trim(),
                   quantidade: qtd,
                   unidade_medida: unidadeRef,
-                  // Se for apenas cobrança, vai direto pra atendido e some da pendência
-                  status_compra: novoItemApenasCobranca ? 'atendido' : 'pendente',
+                  // 💡 MODIFICADO: SEMPRE deve entrar como pendente para aparecer na lista e poder ser comprado no CEASA.
+                  status_compra: 'pendente', 
                   fornecedor_compra: '',
                   custo_unit: '',
-                  qtd_atendida: novoItemApenasCobranca ? qtd : 0,
+                  qtd_atendida: 0, 
                   qtd_bonificada: 0,
                   apenas_cobranca: novoItemApenasCobranca 
               });
@@ -258,7 +259,7 @@ export default function PlanilhaCompras() {
           setNovoItemBusca('');
           setNovoItemLojas({});
           setNovoItemApenasCobranca(false);
-          mostrarNotificacao(novoItemApenasCobranca ? "✅ Item de cobrança enviado para o Fechamento!" : "✅ Pedido manual adicionado em Pendentes!", "sucesso");
+          mostrarNotificacao(novoItemApenasCobranca ? "✅ Item de cobrança adicionado aos Pendentes!" : "✅ Pedido manual adicionado em Pendentes!", "sucesso");
           carregarDados();
       }
   };
@@ -950,6 +951,7 @@ export default function PlanilhaCompras() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-end' }}>
             
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {/* 💡 BOTÃO DE ADICIONAR ITEM */}
               <button onClick={() => setModalAdicionarItem(true)} style={{ background: '#10b981', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '11px', boxShadow: '0 4px 15px rgba(16,185,129,0.4)' }}>
                 ➕ ADICIONAR ITEM
               </button>
