@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
 export default function Listas() {
-  // 💡 LÓGICA DE DATA FIXA E SELECIONÁVEL
   const obterDataLocal = () => {
     const data = new Date();
     const tzOffset = data.getTimezoneOffset() * 60000;
@@ -21,11 +20,10 @@ export default function Listas() {
 
   const [lojas, setLojas] = useState([]);
   const [pedidosDia, setPedidosDia] = useState([]);
-  const [produtosBd, setProdutosBd] = useState([]); // 💡 NOVO: Guarda os produtos do sistema para a barra de pesquisa
+  const [produtosBd, setProdutosBd] = useState([]); 
   const [modalAberto, setModalAberto] = useState(null);
   const [carregando, setCarregando] = useState(true);
 
-  // 💡 ESTADOS PARA EDIÇÃO DA LISTA
   const [editandoLista, setEditandoLista] = useState(false);
   const [listaEditada, setListaEditada] = useState({});
 
@@ -45,7 +43,7 @@ export default function Listas() {
       setCarregando(true);
       const { data: dLojas } = await supabase.from('lojas').select('*').order('nome_fantasia', { ascending: true });
       const { data: dPedidos } = await supabase.from('pedidos').select('*').eq('data_pedido', dataFiltro); 
-      const { data: dProdutos } = await supabase.from('produtos').select('nome'); // 💡 NOVO: Puxa os produtos do sistema
+      const { data: dProdutos } = await supabase.from('produtos').select('nome'); 
       
       const lojasDb = dLojas || [];
       
@@ -56,7 +54,7 @@ export default function Listas() {
 
       setLojas(lojasDb);
       setPedidosDia(dPedidos || []);
-      setProdutosBd(dProdutos || []); // 💡 Salva os produtos para a pesquisa
+      setProdutosBd(dProdutos || []); 
     } catch (err) { console.error("Erro:", err); } 
     finally { setCarregando(false); }
   }
@@ -156,7 +154,6 @@ export default function Listas() {
     }
   };
 
-  // 💡 ATIVA A EDIÇÃO LOCAL 
   const iniciarEdicaoLocal = () => {
     const mapData = {};
     const lojaAbertaPedidos = modalAberto ? pedidosDia.filter(p => extrairNum(p.loja_id) === extrairNum(modalAberto.codigo_loja)) : [];
@@ -170,7 +167,24 @@ export default function Listas() {
     setEditandoLista(true);
   };
 
-  // 💡 SALVA A EDIÇÃO LOCAL APENAS NO PEDIDO ESPECÍFICO (.eq('id', idPedido))
+  const deletarItemUnicoLocal = async (idPedido, nomeItem) => {
+    if(!window.confirm(`Tem certeza que deseja REMOVER "${nomeItem}" desta loja?`)) return;
+    
+    setCarregando(true);
+    try {
+        await supabase.from('pedidos').delete().eq('id', idPedido);
+        
+        const novaListaEditada = { ...listaEditada };
+        delete novaListaEditada[idPedido];
+        setListaEditada(novaListaEditada);
+        
+        carregarDados(); 
+    } catch(e) {
+        alert("Erro ao remover o item: " + e.message);
+        setCarregando(false);
+    }
+  };
+
   const salvarEdicaoLocal = async () => {
     setCarregando(true);
     try {
@@ -182,7 +196,7 @@ export default function Listas() {
               quantidade: Number(listaEditada[idPedido].quantidade),
               nome_produto: listaEditada[idPedido].nome.toUpperCase() 
           })
-          .eq('id', idPedido) // 💡 GARANTIA DE ISOLAMENTO: Só altera a ID desse pedido, de mais ninguém
+          .eq('id', idPedido) 
         );
       }
       await Promise.all(promessas);
@@ -195,6 +209,38 @@ export default function Listas() {
     }
   };
 
+  // 💡 NOVA FUNÇÃO: PUXAR LOG DO CARRINHO EM FORMATO DE TEXTO
+  const puxarHistoricoLogCarrinho = async (lojaCodigo, nomeLoja) => {
+    try {
+      const { data, error } = await supabase
+        .from('logs_carrinho')
+        .select('*')
+        .eq('loja_id', lojaCodigo)
+        .gte('created_at', `${dataFiltro}T00:00:00Z`)
+        .lte('created_at', `${dataFiltro}T23:59:59Z`)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      
+      if (!data || data.length === 0) {
+        return alert(`Nenhum registro de atividade encontrado no carrinho da loja ${nomeLoja} para a data ${dataBr}.`);
+      }
+
+      let resumoLog = `*HISTÓRICO DO CARRINHO - ${nomeLoja}*\nData: ${dataBr}\n\n`;
+
+      data.forEach((log) => {
+        const hora = new Date(log.created_at).toLocaleTimeString('pt-BR');
+        resumoLog += `[${hora}] ${log.login_responsavel} ${log.acao}: ${log.quantidade}x ${formatarNomeItem(log.item_nome)}\n`;
+      });
+
+      navigator.clipboard.writeText(resumoLog);
+      alert("✅ Histórico copiado para a área de transferência!");
+
+    } catch (err) {
+      alert("Erro ao puxar histórico: " + err.message);
+    }
+  };
+
   const fecharModal = () => {
     setModalAberto(null);
     setEditandoLista(false);
@@ -202,14 +248,13 @@ export default function Listas() {
 
   if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Carregando painel...</div>;
 
-  const lojaAbertaPedidos = modalAberto ? pedidosDia.filter(p => extrairNum(p.loja_id) === extrairNum(modalAberto.codigo_loja)) : [];
+  const lojaAbertaPedidos = modalAberto ? pedidosDia.filter(p => extrairNum(p.loja_id) === extrairNum(modalAberto.codigo_loja) && (!editandoLista || listaEditada[p.id])) : [];
   const lojaAbertasolicitouRefazer = lojaAbertaPedidos.some(p => p.solicitou_refazer === true);
   const lojaAbertaJaLiberada = lojaAbertaPedidos.some(p => p.liberado_edicao === true);
 
   return (
     <div style={{ width: '95%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px' }}>
       
-      {/* 💡 DATALIST DE PRODUTOS PARA A BARRA DE PESQUISA */}
       <datalist id="lista-produtos">
         {produtosBd.map((p, i) => (
           <option key={i} value={p.nome} />
@@ -301,7 +346,29 @@ export default function Listas() {
                 <strong style={{fontSize: '15px'}}>{loja.nome_fantasia}</strong>
                 <span style={{display: 'block', fontSize: '11px', color: textoCor, fontWeight: 'bold', marginTop: '4px'}}>{textoStatus}</span>
               </div>
-              <div style={{fontSize: '24px'}}>{iconeStatus}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {/* 💡 NOVO BOTÃO: PUXAR LOG DO CARRINHO */}
+                  <button 
+                      onClick={(e) => {
+                          e.stopPropagation();
+                          puxarHistoricoLogCarrinho(loja.codigo_loja, loja.nome_fantasia);
+                      }}
+                      style={{
+                          background: '#8b5cf6', 
+                          color: 'white', 
+                          border: 'none', 
+                          padding: '5px 10px', 
+                          borderRadius: '6px', 
+                          fontSize: '10px', 
+                          fontWeight: 'bold', 
+                          cursor: 'pointer'
+                      }}
+                      title="Copiar Histórico de Ações"
+                  >
+                      📜 VER HISTÓRICO DE CARRINHO
+                  </button>
+                  <div style={{fontSize: '24px'}}>{iconeStatus}</div>
+              </div>
             </div>
           );
         })}
@@ -324,17 +391,20 @@ export default function Listas() {
               {lojaAbertaPedidos.map((item, i) => (
                 <div key={item.id} style={{ padding: '12px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
                   
-                  {/* 💡 BARRA DE PESQUISA COM OS PRODUTOS DO SISTEMA */}
                   {editandoLista ? (
                     <>
-                      <input 
-                        list="lista-produtos"
-                        placeholder="Pesquisar produto..."
-                        type="text" 
-                        value={listaEditada[item.id]?.nome || ''} 
-                        onChange={(e) => setListaEditada({...listaEditada, [item.id]: { ...listaEditada[item.id], nome: e.target.value }})} 
-                        style={{ flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '13px', textTransform: 'uppercase' }} 
-                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                        <button onClick={() => deletarItemUnicoLocal(item.id, listaEditada[item.id]?.nome || item.nome)} style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '8px', padding: '8px 10px', cursor: 'pointer', fontWeight: 'bold' }}>🗑️</button>
+                        
+                        <input 
+                          list="lista-produtos"
+                          placeholder="Pesquisar produto..."
+                          type="text" 
+                          value={listaEditada[item.id]?.nome || ''} 
+                          onChange={(e) => setListaEditada({...listaEditada, [item.id]: { ...listaEditada[item.id], nome: e.target.value }})} 
+                          style={{ flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '13px', textTransform: 'uppercase' }} 
+                        />
+                      </div>
                       <input 
                         type="number" 
                         value={listaEditada[item.id]?.quantidade !== undefined ? listaEditada[item.id].quantidade : item.quantidade} 

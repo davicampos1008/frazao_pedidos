@@ -141,6 +141,22 @@ export default function MenuCliente({ usuario, tema }) {
     if ("Notification" in window) setPermissaoPush(Notification.permission);
   }, []);
 
+  // 💡 NOVA FUNÇÃO: REGISTRO DE LOG NO BANCO
+  const registrarLogCarrinho = async (acao, nomeItem, qtdItem) => {
+    try {
+      const { error } = await supabase.from('logs_carrinho').insert([{
+        loja_id: codLoja,
+        login_responsavel: usuario?.nome || 'Operador',
+        acao: acao,
+        item_nome: nomeItem,
+        quantidade: qtdItem
+      }]);
+      if (error) console.error("Erro ao registrar log de carrinho:", error);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const removerAcentos = (str) => {
     return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   };
@@ -195,11 +211,9 @@ export default function MenuCliente({ usuario, tema }) {
     return (isNaN(num) ? 0 : num).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
   
-  // 💡 CALCULO DE EMBALAGEM INTELIGENTE (Caixa, Saco, BDJ, etc)
   const tratarInfosDeVenda = (produto) => {
     const precoBase = tratarPreco(produto.preco);
     
-    // Extrai o número puro, se houver
     const temPesoExtra = produto.peso_caixa && String(produto.peso_caixa).trim() !== '';
     const numeroPeso = temPesoExtra ? parseFloat(String(produto.peso_caixa).replace(/[^\d.]/g, '')) : 0;
     
@@ -282,7 +296,6 @@ export default function MenuCliente({ usuario, tema }) {
   const valorTotalCarrinho = carrinhoSeguro.reduce((acc, item) => acc + (Number(item.total) || 0), 0);
   const edicaoLiberadaBD = listaEnviadaHoje?.some(item => item.liberado_edicao === true);
   
-  // 💡 LÓGICA DE TRAVAMENTO: Se !precosLiberados, a loja fecha e esconde os preços
   const isAppTravado = !precosLiberados || (listaEnviadaHoje && !edicaoLiberadaBD);
 
   const verificarSePadrao = (valorPadrao) => {
@@ -309,6 +322,7 @@ export default function MenuCliente({ usuario, tema }) {
     setQtdBonificada(isNaN(val) || val < 0 ? 0 : val);
   };
 
+  // 💡 MUDANÇA: REGISTRAR LOG AO SALVAR NO CARRINHO PELO MODAL DO PRODUTO
   const salvarNoCarrinho = () => {
     const qtdFinal = parseInt(quantidade, 10) || 1;
     const bonifFinal = temBonificacao ? (parseInt(qtdBonificada, 10) || 0) : 0;
@@ -338,39 +352,52 @@ export default function MenuCliente({ usuario, tema }) {
 
     if (itemEx) {
       setCarrinho(carrinhoSeguro.map(i => i.id === produtoExpandido.id ? novoItemFormatado : i));
+      registrarLogCarrinho('ALTEROU (MODAL)', produtoExpandido.nome, qtdFinal); // Log
     } else {
       setCarrinho([...carrinhoSeguro, novoItemFormatado]);
+      registrarLogCarrinho('ADICIONOU (MODAL)', produtoExpandido.nome, qtdFinal); // Log
     }
     setProdutoExpandido(null);
   };
 
+  // 💡 MUDANÇA: REGISTRAR LOG AO ALTERAR QUANTIDADE PELOS BOTÕES + E - NO CARRINHO
   const alterarQtdCart = (id, delta) => {
     setCarrinho(prev => prev.map(item => {
       if (item.id === id) {
         const novaQtd = Math.max(1, (Number(item.quantidade) || 0) + delta);
         const bonif = Number(item.qtd_bonificada) || 0;
         const cobrada = Math.max(0, novaQtd - bonif);
+        registrarLogCarrinho('ALTEROU (BOTÃO +/-)', item.nome, novaQtd); // Log
         return { ...item, quantidade: novaQtd, total: cobrada * (Number(item.valorUnit) || 0) };
       }
       return item;
     }));
   };
 
+  // 💡 MUDANÇA: REGISTRAR LOG AO DIGITAR A QUANTIDADE NO CARRINHO
   const alterarQtdCartInput = (id, valor) => {
     const novaQtd = parseInt(valor, 10) || 1;
     setCarrinho(prev => prev.map(item => {
         if (item.id === id) {
             const bonif = Number(item.qtd_bonificada) || 0;
             const cobrada = Math.max(0, novaQtd - bonif);
+            registrarLogCarrinho('ALTEROU (DIGITOU)', item.nome, novaQtd); // Log
             return { ...item, quantidade: novaQtd, total: cobrada * (Number(item.valorUnit) || 0) };
         }
         return item;
     }));
   };
 
+  // 💡 MUDANÇA: REGISTRAR LOG AO REMOVER ITEM DO CARRINHO
+  const removerItemCarrinho = (item) => {
+    setCarrinho(carrinhoSeguro.filter(i => i.id !== item.id));
+    registrarLogCarrinho('REMOVEU', item.nome, item.quantidade); // Log
+  };
+
   const zerarCarrinho = () => {
     if (window.confirm("⚠️ Tem certeza que deseja apagar todos os itens do carrinho?")) {
       setCarrinho([]);
+      registrarLogCarrinho('ZEROU CARRINHO', 'Todos os Itens', 0); // Log
       setModalCarrinhoAberto(false);
     }
   };
@@ -418,6 +445,8 @@ export default function MenuCliente({ usuario, tema }) {
       await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
       const { error } = await supabase.from('pedidos').insert(dadosParaEnviar);
       if (error) throw error;
+
+      registrarLogCarrinho('ENVIOU PEDIDO', 'Fechou o Carrinho', carrinhoSeguro.length); // Log Final
 
       setListaEnviadaHoje(dadosParaEnviar); 
       setCarrinho([]); 
@@ -467,6 +496,7 @@ export default function MenuCliente({ usuario, tema }) {
       setCarrinho(itensRestaurados);
       setListaEnviadaHoje(null);
       setModoVisualizacao(false);
+      registrarLogCarrinho('RESTAUROU (EDICAO)', 'Abertura de Lista', itensRestaurados.length); // Log
       mostrarNotificacao("🛒 Itens de volta no carrinho!", 'info');
     } catch (err) { alert("Erro ao importar: " + err.message); }
   };
@@ -505,7 +535,7 @@ export default function MenuCliente({ usuario, tema }) {
 
     return (
       <div style={{ padding: '20px', fontFamily: configDesign.geral.fontePadrao, textAlign: 'center', backgroundColor: configDesign.cores.fundoGeral, minHeight: '100vh', paddingBottom: '50px' }}>
-        <div style={{ background: edicaoLiberada ? configDesign.cores.sucesso : (aguardandoLiberacao ? configDesign.cores.promocao : configDesign.cores.textoForte), color: isEscuro && !edicaoLiberada && !aguardandoLiberacao ? '#000' : '#fff', padding: '40px 30px', borderRadius: '30px', marginTop: '20px' }}>
+        <div style={{ background: edicaoLiberada ? configDesign.cores.sucesso : (aguardandoLiberacao ? configDesign.cores.promocoes : configDesign.cores.textoForte), color: isEscuro && !edicaoLiberada && !aguardandoLiberacao ? '#000' : '#fff', padding: '40px 30px', borderRadius: '30px', marginTop: '20px' }}>
           <div style={{fontSize: '50px', marginBottom: '10px'}}>{edicaoLiberada ? '🔓' : (aguardandoLiberacao ? '⏳' : '✅')}</div>
           <h2 style={{ margin: 0 }}>{edicaoLiberada ? 'EDIÇÃO LIBERADA' : (aguardandoLiberacao ? 'AGUARDANDO ADMIN' : 'PEDIDO ENVIADO!')}</h2>
         </div>
@@ -535,14 +565,12 @@ export default function MenuCliente({ usuario, tema }) {
   return (
     <div style={{ width: '100%', minHeight: '100vh', backgroundColor: configDesign.cores.fundoGeral, fontFamily: configDesign.geral.fontePadrao, paddingBottom: '100px' }}>
       
-      {/* 💡 AVISO DE LOJA FECHADA PARA ATUALIZAÇÃO DE PREÇOS */}
       {!precosLiberados && (
         <div style={{ width: '100%', backgroundColor: configDesign.cores.alerta, color: '#fff', textAlign: 'center', padding: '10px', fontWeight: '900', fontSize: '13px', letterSpacing: '1px', zIndex: 9999 }}>
           ⚠️ LOJA FECHADA - AGUARDANDO PREÇOS
         </div>
       )}
 
-      {/* HEADER */}
       <div style={{ padding: '25px 20px 15px 20px', backgroundColor: configDesign.cores.fundoCards, borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '22px', color: configDesign.cores.textoForte, fontWeight: '900' }}>{saudacaoStr}, {primeiroNome}!</h2>
@@ -557,7 +585,6 @@ export default function MenuCliente({ usuario, tema }) {
         </div>
       </div>
 
-      {/* BANNERS */}
       {categoriaAtiva === 'DESTAQUES' && (
         <div style={{ backgroundColor: configDesign.cores.fundoGeral }}>
           <div style={{ width: '100%', height: '180px', backgroundImage: `url(${banners.topo})`, backgroundSize: 'cover', backgroundPosition: 'center' }}></div>
@@ -568,7 +595,6 @@ export default function MenuCliente({ usuario, tema }) {
         </div>
       )}
 
-      {/* MENU CATEGORIAS */}
       <div style={{ position: categoriaAtiva === 'DESTAQUES' ? 'relative' : 'fixed', top: categoriaAtiva === 'DESTAQUES' ? '0' : (navState.show ? (!precosLiberados ? '35px' : '0') : '-100px'), left: 0, right: 0, zIndex: 100, backgroundColor: categoriaAtiva === 'DESTAQUES' ? configDesign.cores.fundoGeral : configDesign.cores.fundoCards, borderBottom: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? `1px solid ${configDesign.cores.borda}` : 'none', transition: configDesign.animacoes.transicaoSuave, paddingTop: categoriaAtiva !== 'DESTAQUES' && navState.shrink ? '10px' : '20px', marginTop: categoriaAtiva === 'DESTAQUES' ? '15px' : '0' }}>
         <div style={{ padding: '0 20px 10px 20px' }}>
           <div style={{ backgroundColor: configDesign.cores.inputFundo, borderRadius: '12px', padding: (categoriaAtiva !== 'DESTAQUES' && navState.shrink) ? '8px 12px' : '12px', display: 'flex', gap: '10px' }}>
@@ -583,7 +609,6 @@ export default function MenuCliente({ usuario, tema }) {
       </div>
       <div style={{ height: categoriaAtiva === 'DESTAQUES' ? '10px' : '110px' }}></div>
 
-      {/* PRODUTOS */}
       <div style={{ padding: '0 20px 20px 20px', display: 'grid', gridTemplateColumns: categoriaAtiva === 'DESTAQUES' ? '1fr' : 'repeat(auto-fill, minmax(140px, 1fr))', gap: '15px' }}>
         {produtos.filter(p => {
           const termoBuscado = removerAcentos(buscaMenu.toLowerCase().trim());
@@ -641,7 +666,6 @@ export default function MenuCliente({ usuario, tema }) {
                  {infosVenda.isCaixa && <small style={{fontSize: '9px', color: configDesign.cores.textoSuave, marginTop: '2px'}}>{infosVenda.textoSecundario}</small>}
                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto', paddingTop: '5px' }}>
                    
-                   {/* 💡 MUDANÇA NO PREÇO DO CARD SE ESTIVER TRAVADO */}
                    <span style={{ color: precosLiberados ? configDesign.cores.primaria : configDesign.cores.textoSuave, fontWeight: '900', fontSize: precosLiberados ? (categoriaAtiva === 'DESTAQUES' ? '18px' : '13px') : '11px' }}>
                      {precosLiberados ? infosVenda.textoPreco : '🔒 Aguardando preço'}
                    </span>
@@ -724,7 +748,6 @@ export default function MenuCliente({ usuario, tema }) {
                 <div>
                   <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Preço Unitário {infosVendaExpandido.isCaixa && `(Embalagem Fechada)`}</span>
                   
-                  {/* 💡 MUDANÇA NO PREÇO DO MODAL SE ESTIVER TRAVADO */}
                   <span style={{color: precosLiberados ? configDesign.cores.primaria : configDesign.cores.textoSuave, fontSize: precosLiberados ? '20px' : '16px', fontWeight: '900'}}>
                     {precosLiberados ? infosVendaExpandido.textoPreco : '🔒 Aguardando preço'}
                   </span>
@@ -734,7 +757,6 @@ export default function MenuCliente({ usuario, tema }) {
                 <div style={{ textAlign: 'right' }}>
                   <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, fontWeight: 'bold', display: 'block' }}>Total a Pagar ({formatarQtdUnidade(qtdCobradaExp, infosVendaExpandido.unidadeFinal)})</span>
                   
-                  {/* 💡 MUDANÇA NO TOTAL DO MODAL SE ESTIVER TRAVADO */}
                   <span style={{color: configDesign.cores.textoForte, fontSize: '24px', fontWeight: '900'}}>
                     {precosLiberados ? formatarMoeda(valorTotalCalcExp) : '---'}
                   </span>
@@ -775,6 +797,7 @@ export default function MenuCliente({ usuario, tema }) {
                      )}
                   </div>
 
+                  {/* 💡 BOTÃO SALVAR AGORA CHAMA A FUNÇÃO DE LOG */}
                   <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px' }}>
                     {carrinhoSeguro.find(i => i.id === produtoExpandido.id) ? 'ATUALIZAR QUANTIDADE' : 'ADICIONAR AO CARRINHO'}
                   </button>
@@ -808,6 +831,7 @@ export default function MenuCliente({ usuario, tema }) {
                 <div key={`cart-${item.id}`} style={{ padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   {itemEditandoId === item.id ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                       {/* 💡 BOTÕES +/- E INPUT DO CARRINHO */}
                        <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>-</button>
                        <input type="number" value={item.quantidade || 1} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
                        <button onClick={() => alterarQtdCart(item.id, 1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>+</button>
@@ -823,7 +847,8 @@ export default function MenuCliente({ usuario, tema }) {
                       <div style={{ fontWeight: '900', color: configDesign.cores.textoForte, fontSize: '14px' }}>{formatarMoeda(item?.total)}</div>
                     </div>
                   )}
-                  {itemEditandoId !== item.id && ( <button onClick={() => setCarrinho(carrinhoSeguro.filter(i => i.id !== item.id))} style={{ color: configDesign.cores.alerta, border: 'none', background: 'none', fontWeight: 'bold', padding: '10px' }}>Remover</button> )}
+                  {/* 💡 BOTÃO REMOVER DO CARRINHO */}
+                  {itemEditandoId !== item.id && ( <button onClick={() => removerItemCarrinho(item)} style={{ color: configDesign.cores.alerta, border: 'none', background: 'none', fontWeight: 'bold', padding: '10px' }}>Remover</button> )}
                 </div>
               ))
             )}
