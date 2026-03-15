@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
 export default function Listas() {
+  // 💡 LÓGICA DE DATA FIXA E SELECIONÁVEL
   const obterDataLocal = () => {
     const data = new Date();
     const tzOffset = data.getTimezoneOffset() * 60000;
@@ -24,6 +25,7 @@ export default function Listas() {
   const [modalAberto, setModalAberto] = useState(null);
   const [carregando, setCarregando] = useState(true);
 
+  // 💡 ESTADOS PARA EDIÇÃO DA LISTA
   const [editandoLista, setEditandoLista] = useState(false);
   const [listaEditada, setListaEditada] = useState({});
 
@@ -43,7 +45,7 @@ export default function Listas() {
       setCarregando(true);
       const { data: dLojas } = await supabase.from('lojas').select('*').order('nome_fantasia', { ascending: true });
       const { data: dPedidos } = await supabase.from('pedidos').select('*').eq('data_pedido', dataFiltro); 
-      const { data: dProdutos } = await supabase.from('produtos').select('nome'); 
+      const { data: dProdutos } = await supabase.from('produtos').select('id, nome, preco, peso_caixa, unidade_medida'); 
       
       const lojasDb = dLojas || [];
       
@@ -209,7 +211,6 @@ export default function Listas() {
     }
   };
 
-  // 💡 NOVA FUNÇÃO: PUXAR LOG DO CARRINHO EM FORMATO DE TEXTO
   const puxarHistoricoLogCarrinho = async (lojaCodigo, nomeLoja) => {
     try {
       const { data, error } = await supabase
@@ -238,6 +239,169 @@ export default function Listas() {
 
     } catch (err) {
       alert("Erro ao puxar histórico: " + err.message);
+    }
+  };
+
+  // 💡 NOVA FUNÇÃO: RESTAURAÇÃO FORÇADA E DIRETA PARA A NUVEM DO CLIENTE
+ // 💡 NOVA FUNÇÃO: RESTAURAÇÃO FORÇADA E DIRETA PARA A NUVEM DO CLIENTE
+  const forcarRetornoCarrinho = async (lojaAlvo) => {
+    if (!lojaAlvo) return;
+    if (!window.confirm(`Tem certeza que deseja FORÇAR o retorno da lista para o carrinho da loja ${lojaAlvo.nome_fantasia}?\n\nOs itens aparecerão imediatamente na tela do cliente.`)) return;
+    
+    setCarregando(true);
+    try {
+      const lojaAbertaPedidos = pedidosDia.filter(p => extrairNum(p.loja_id) === extrairNum(lojaAlvo.codigo_loja));
+      const payloadNuvem = [];
+
+      lojaAbertaPedidos.forEach(dbItem => {
+        const prodOriginal = produtosBd.find(p => p.nome === dbItem.nome_produto || p.nome === dbItem.nome);
+        
+        if (prodOriginal) {
+          let pUnit = parseFloat(String(prodOriginal.preco || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
+          let precoFinalItem = pUnit;
+          let undFinal = prodOriginal.unidade_medida || 'UN';
+
+          const temPesoExtra = prodOriginal.peso_caixa && String(prodOriginal.peso_caixa).trim() !== '';
+          const numeroPeso = temPesoExtra ? parseFloat(String(prodOriginal.peso_caixa).replace(/[^\d.]/g, '')) : 0;
+          
+          if (temPesoExtra && numeroPeso > 0) {
+              precoFinalItem = pUnit * numeroPeso;
+              if (undFinal === 'KG') undFinal = 'CX'; 
+          }
+
+          const bonif = Number(dbItem.qtd_bonificada) || 0;
+          const qtdCobrada = Math.max(0, Number(dbItem.quantidade) - bonif);
+
+          payloadNuvem.push({
+              loja_id: extrairNum(lojaAlvo.codigo_loja),
+              produto_id: prodOriginal.id,
+              nome: prodOriginal.nome,
+              quantidade: dbItem.quantidade,
+              qtd_bonificada: bonif,
+              valorUnit: precoFinalItem,
+              total: precoFinalItem * qtdCobrada,
+              unidade_medida: dbItem.unidade_medida || undFinal
+          });
+        }
+      });
+
+      if (payloadNuvem.length > 0) {
+          // Limpa o carrinho atual na nuvem caso tenha lixo e insere os resgatados
+          await supabase.from('carrinho_nuvem').delete().eq('loja_id', extrairNum(lojaAlvo.codigo_loja));
+          const { error: errNuvem } = await supabase.from('carrinho_nuvem').insert(payloadNuvem);
+          if (errNuvem) throw errNuvem;
+      }
+
+      // Apaga os pedidos finalizados para liberar a loja
+      await supabase.from('pedidos')
+        .delete()
+        .eq('data_pedido', dataFiltro) 
+        .eq('loja_id', extrairNum(lojaAlvo.codigo_loja));
+
+      alert("✅ Carrinho forçado com sucesso! A loja já pode ver e editar os itens no aplicativo.");
+      fecharModal();
+      carregarDados();
+    } catch (err) {
+      alert("Erro ao forçar retorno: " + err.message);
+      setCarregando(false);
+    }
+  };
+
+  // 💡 NOVA FUNÇÃO: RECONSTRÓI O CARRINHO LENDO OS CLIQUES E IGNORANDO A LIXEIRA
+  // 💡 NOVA FUNÇÃO: RECONSTRÓI O CARRINHO LENDO APENAS O ÚLTIMO SAVE ANTES DE ZERAR
+  const resgatarRascunhoLog = async (lojaAlvo) => {
+    if (!lojaAlvo) return;
+    if (!window.confirm(`🚨 SALVA-VIDAS: Isso vai reconstruir o carrinho da loja ${lojaAlvo.nome_fantasia} com os itens exatos que estavam lá logo antes do cliente clicar em "Esvaziar Carrinho" pela última vez. Continuar?`)) return;
+
+    setCarregando(true);
+    try {
+        const { data: logs, error } = await supabase
+            .from('logs_carrinho')
+            .select('*')
+            .eq('loja_id', extrairNum(lojaAlvo.codigo_loja))
+            .gte('created_at', `${dataFiltro}T00:00:00Z`)
+            .lte('created_at', `${dataFiltro}T23:59:59Z`)
+            .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        if (!logs || logs.length === 0) {
+            alert("Nenhum histórico de cliques encontrado para esta loja hoje.");
+            setCarregando(false);
+            return;
+        }
+
+        let carrinhoTemporario = {};
+        let ultimoCarrinhoAntesDeZerar = {};
+
+        // Lê a linha do tempo cronologicamente
+        logs.forEach(log => {
+            if (log.acao === 'ZEROU CARRINHO' || log.acao === 'ENVIOU PEDIDO') {
+                // Tira a "foto" (backup) do carrinho antes de apagar, caso ele não esteja vazio
+                if (Object.keys(carrinhoTemporario).length > 0) {
+                    ultimoCarrinhoAntesDeZerar = { ...carrinhoTemporario };
+                }
+                carrinhoTemporario = {}; // Esvazia o carrinho atual
+            } else if (log.acao === 'REMOVEU') {
+                delete carrinhoTemporario[log.item_nome];
+            } else {
+                carrinhoTemporario[log.item_nome] = log.quantidade;
+            }
+        });
+
+        // Se ele zerou e se arrependeu, a lista certa está no "ultimoCarrinhoAntesDeZerar"
+        // Se ele não zerou hoje (só deu bug e sumiu), a lista certa está no "carrinhoTemporario"
+        const itensParaResgatar = Object.keys(ultimoCarrinhoAntesDeZerar).length > 0 
+            ? ultimoCarrinhoAntesDeZerar 
+            : carrinhoTemporario;
+
+        const payloadNuvem = [];
+        Object.keys(itensParaResgatar).forEach(nomeItem => {
+            const prodOriginal = produtosBd.find(p => p.nome === nomeItem);
+            if (prodOriginal) {
+                let pUnit = parseFloat(String(prodOriginal.preco || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
+                let precoFinalItem = pUnit;
+                let undFinal = prodOriginal.unidade_medida || 'UN';
+
+                const temPesoExtra = prodOriginal.peso_caixa && String(prodOriginal.peso_caixa).trim() !== '';
+                const numeroPeso = temPesoExtra ? parseFloat(String(prodOriginal.peso_caixa).replace(/[^\d.]/g, '')) : 0;
+                
+                if (temPesoExtra && numeroPeso > 0) {
+                    precoFinalItem = pUnit * numeroPeso;
+                    if (undFinal === 'KG') undFinal = 'CX'; 
+                }
+
+                payloadNuvem.push({
+                    loja_id: extrairNum(lojaAlvo.codigo_loja),
+                    produto_id: prodOriginal.id,
+                    nome: prodOriginal.nome,
+                    quantidade: itensParaResgatar[nomeItem],
+                    qtd_bonificada: 0,
+                    valorUnit: precoFinalItem,
+                    total: precoFinalItem * itensParaResgatar[nomeItem],
+                    unidade_medida: undFinal
+                });
+            }
+        });
+
+        if (payloadNuvem.length === 0) {
+            alert("O histórico não possui itens válidos para restaurar. O carrinho antes de zerar estava vazio.");
+            setCarregando(false);
+            return;
+        }
+
+        // Deleta o carrinho atual da nuvem e insere o backup resgatado
+        await supabase.from('carrinho_nuvem').delete().eq('loja_id', extrairNum(lojaAlvo.codigo_loja));
+        await supabase.from('carrinho_nuvem').insert(payloadNuvem);
+        
+        // Se a loja tiver um pedido parcialmente enviado ou travado, a gente limpa
+        await supabase.from('pedidos').delete().eq('data_pedido', dataFiltro).eq('loja_id', extrairNum(lojaAlvo.codigo_loja));
+
+        alert(`✅ Ufa! Carrinho reconstruído com ${payloadNuvem.length} itens resgatados do último "save". O cliente já pode voltar ao app e finalizar a compra.`);
+        carregarDados();
+    } catch (err) {
+        alert("Erro ao resgatar rascunho: " + err.message);
+        setCarregando(false);
     }
   };
 
@@ -340,34 +504,53 @@ export default function Listas() {
           }
           
           return (
-            <div key={loja.id || idDestaLoja} onClick={() => enviou && setModalAberto(loja)} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '18px', border: `2px solid ${bordaCor}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: enviou ? 'pointer' : 'default', transition: 'all 0.2s', boxShadow: enviou ? '0 4px 15px rgba(0,0,0,0.05)' : 'none', position: 'relative' }}>
+            <div key={loja.id || idDestaLoja} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '18px', border: `2px solid ${bordaCor}`, display: 'flex', flexDirection: 'column', gap: '15px', transition: 'all 0.2s', boxShadow: enviou ? '0 4px 15px rgba(0,0,0,0.05)' : 'none', position: 'relative' }}>
               {isLojaTeste && <div style={{position: 'absolute', top: '-10px', left: '15px', background: '#22c55e', color: '#fff', fontSize: '9px', fontWeight: 'bold', padding: '2px 8px', borderRadius: '6px'}}>🛠️ MODO TESTE</div>}
-              <div>
-                <strong style={{fontSize: '15px'}}>{loja.nome_fantasia}</strong>
-                <span style={{display: 'block', fontSize: '11px', color: textoCor, fontWeight: 'bold', marginTop: '4px'}}>{textoStatus}</span>
+              
+              <div onClick={() => enviou && setModalAberto(loja)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: enviou ? 'pointer' : 'default' }}>
+                <div>
+                  <strong style={{fontSize: '15px'}}>{loja.nome_fantasia}</strong>
+                  <span style={{display: 'block', fontSize: '11px', color: textoCor, fontWeight: 'bold', marginTop: '4px'}}>{textoStatus}</span>
+                </div>
+                <div style={{fontSize: '24px'}}>{iconeStatus}</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  {/* 💡 NOVO BOTÃO: PUXAR LOG DO CARRINHO */}
+
+              {/* BOTÕES SEMPRE VISÍVEIS DO LADO DE FORA */}
+              {/* BOTÕES SEMPRE VISÍVEIS DO LADO DE FORA */}
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', borderTop: '1px dashed #e2e8f0', paddingTop: '15px' }}>
                   <button 
                       onClick={(e) => {
                           e.stopPropagation();
                           puxarHistoricoLogCarrinho(loja.codigo_loja, loja.nome_fantasia);
                       }}
-                      style={{
-                          background: '#8b5cf6', 
-                          color: 'white', 
-                          border: 'none', 
-                          padding: '5px 10px', 
-                          borderRadius: '6px', 
-                          fontSize: '10px', 
-                          fontWeight: 'bold', 
-                          cursor: 'pointer'
-                      }}
+                      style={{ flex: 1, background: '#8b5cf6', color: 'white', border: 'none', padding: '10px', borderRadius: '8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
                       title="Copiar Histórico de Ações"
                   >
-                      📜 VER HISTÓRICO DE CARRINHO
+                      📜 HISTÓRICO
                   </button>
-                  <div style={{fontSize: '24px'}}>{iconeStatus}</div>
+
+                  <button 
+                      onClick={(e) => {
+                          e.stopPropagation();
+                          forcarRetornoCarrinho(loja);
+                      }}
+                      style={{ flex: 1, background: '#ef4444', color: 'white', border: 'none', padding: '10px', borderRadius: '8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
+                      title="Devolve o pedido que foi finalizado de volta ao carrinho"
+                  >
+                      📥 DEVOLVER PEDIDO
+                  </button>
+
+                  {/* 💡 NOVO BOTÃO DE RESGATE DO HISTÓRICO (IGNORA LIXEIRA) */}
+                  <button 
+                      onClick={(e) => {
+                          e.stopPropagation();
+                          resgatarRascunhoLog(loja);
+                      }}
+                      style={{ flex: 1, background: '#eab308', color: '#111', border: 'none', padding: '10px', borderRadius: '8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
+                      title="Resgata os cliques mesmo se o carrinho foi esvaziado"
+                  >
+                      🛟 RESGATAR RASCUNHO
+                  </button>
               </div>
             </div>
           );
@@ -456,8 +639,10 @@ export default function Listas() {
                     ✏️ EDITAR ITENS (NÓS MESMOS)
                   </button>
 
+              
+
                   <button onClick={liberarLojaParaRefazer} style={{ width: '100%', padding: '15px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
-                    🔓 DEVOLVER PARA O CARRINHO (EDITAR)
+                    🔓 LIBERAR LOJA PARA EDITAR
                   </button>
 
                   <div style={{ display: 'flex', gap: '10px' }}>

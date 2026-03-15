@@ -402,13 +402,13 @@ export default function Precificacao() {
     setModalAberto(true);
   };
 
-  const handleUploadFotos = async (event) => {
-    const files = Array.from(event.target.files);
-    if (!files.length) return;
+  // 💡 NOVA LOGICA DE UPLOAD REAPROVEITAVEL PARA O COLA (CTRL+V)
+  const processarArquivosFotos = async (files) => {
+    if (!files || !files.length) return;
     setFazendoUpload(true);
     const urlsSalvas = [];
     for (const file of files) {
-      const fileName = `prod_${prodModal.id}_${Date.now()}.jpg`;
+      const fileName = `prod_${prodModal.id}_${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
       const { error } = await supabase.storage.from('frazao-midia').upload(`produtos/${fileName}`, file);
       if (!error) {
         const { data } = supabase.storage.from('frazao-midia').getPublicUrl(`produtos/${fileName}`);
@@ -417,6 +417,26 @@ export default function Precificacao() {
     }
     setFormModal(prev => ({ ...prev, fotos_novas: [...prev.fotos_novas, ...urlsSalvas] }));
     setFazendoUpload(false);
+  };
+
+  const handleUploadFotos = async (event) => {
+    const files = Array.from(event.target.files);
+    await processarArquivosFotos(files);
+  };
+
+  const handleColarFoto = async (event) => {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    const files = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        files.push(items[i].getAsFile());
+      }
+    }
+    if (files.length > 0) {
+      event.preventDefault(); // Previne comportamentos padroes ao colar
+      await processarArquivosFotos(files);
+    }
   };
 
   const removerFoto = (index) => {
@@ -618,9 +638,9 @@ export default function Precificacao() {
         )}
       </div>
 
-      {/* 🛠️ MODAL DE EDIÇÃO COMPLETA */}
+      {/* 🛠️ MODAL DE EDIÇÃO COMPLETA (💡 MODIFICADO PARA O CTRL+V) */}
       {modalAberto && prodModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-end', padding: '0' }}>
+        <div onPaste={handleColarFoto} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-end', padding: '0' }}>
           <div style={{ backgroundColor: '#fff', width: '100%', maxWidth: '600px', borderRadius: '30px 30px 0 0', padding: '30px 25px', display: 'flex', flexDirection: 'column', maxHeight: '90vh', overflowY: 'auto' }}>
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -718,8 +738,9 @@ export default function Precificacao() {
 
             <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '10px' }}>FOTOS (Obrigatório para Promoção ou Novidade)</label>
             <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '10px', scrollbarWidth: 'none' }}>
-              <label style={{ minWidth: '70px', height: '70px', borderRadius: '10px', border: '2px dashed #cbd5e1', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backgroundColor: '#f8fafc' }}>
-                <span style={{ fontSize: '20px' }}>{fazendoUpload ? '⏳' : '📸'}</span>
+              <label style={{ minWidth: '90px', height: '70px', borderRadius: '10px', border: '2px dashed #cbd5e1', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backgroundColor: '#f8fafc', textAlign: 'center', padding: '5px' }}>
+                <span style={{ fontSize: '20px', marginBottom: '2px' }}>{fazendoUpload ? '⏳' : '📸'}</span>
+                {!fazendoUpload && <span style={{ fontSize: '8px', color: '#64748b', fontWeight: 'bold' }}>Galeria ou<br/>Ctrl+V</span>}
                 <input type="file" multiple accept="image/*" onChange={handleUploadFotos} style={{ display: 'none' }} disabled={fazendoUpload} />
               </label>
               {[...(prodModal.foto_url ? String(prodModal.foto_url).split(',') : []), ...formModal.fotos_novas].filter(f=>f).map((url, i) => (
