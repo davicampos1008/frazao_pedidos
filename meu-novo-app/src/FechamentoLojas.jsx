@@ -29,6 +29,8 @@ export default function FechamentoLojas({ isEscuro }) {
   const [fornecedoresBd, setFornecedoresBd] = useState([]); 
   const [carregando, setCarregando] = useState(true);
 
+  const [mensagemFlutuante, setMensagemFlutuante] = useState('');
+
   const [lojaExpandida, setLojaExpandida] = useState(null);
   const [lojaEmEdicao, setLojaEmEdicao] = useState(null);
   const [itensEditados, setItensEditados] = useState([]);
@@ -532,24 +534,48 @@ export default function FechamentoLojas({ isEscuro }) {
      carregar();
   };
 
-  const salvarEdicaoLoja = async () => {
+ const salvarEdicaoLoja = async () => {
     setCarregando(true);
     try {
-      for (const item of itensEditados) {
-        if (item.isPendente) continue;
+      // 💡 Criamos uma lista de promessas para salvar tudo em paralelo (mais rápido)
+      const promessas = itensEditados.map(item => {
+        if (item.isPendente) return null;
         if (item.desfazerVoltar) {
-            await supabase.from('pedidos').update({ qtd_atendida: 0, qtd_bonificada: 0, custo_unit: '', fornecedor_compra: `ALERTA|${item.fornecedor_original || ''}`, status_compra: 'pendente', preco_venda: null }).eq('id', item.id_pedido);
-            continue;
+            return supabase.from('pedidos').update({ 
+                qtd_atendida: 0, qtd_bonificada: 0, custo_unit: '', 
+                fornecedor_compra: `ALERTA|${item.fornecedor_original || ''}`, 
+                status_compra: 'pendente', preco_venda: null 
+            }).eq('id', item.id_pedido);
         }
         const statusFinal = item.isFalta ? 'falta' : item.isBoleto ? 'boleto' : 'atendido';
         let unitParaBanco = item.precoEditado || item.precoOriginal;
         if(Number(item.qtd_bonificada) > 0) unitParaBanco = `BONIFICAÇÃO | ${item.precoEditado}`;
-        await supabase.from('pedidos').update({ qtd_atendida: Number(item.qtdEntregue) || 0, qtd_bonificada: Number(item.qtd_bonificada) || 0, preco_venda: unitParaBanco, status_compra: statusFinal }).eq('id', item.id_pedido);
-      }
-      setLojaEmEdicao(null);
-      setHouveAlteracao(true);
-      carregar(); 
-    } catch(e) { alert("Erro ao salvar: " + e.message); setCarregando(false); }
+        
+        return supabase.from('pedidos').update({ 
+            qtd_atendida: Number(item.qtdEntregue) || 0, 
+            qtd_bonificada: Number(item.qtd_bonificada) || 0, 
+            preco_venda: unitParaBanco, 
+            status_compra: statusFinal 
+        }).eq('id', item.id_pedido);
+      }).filter(p => p !== null);
+
+      // Espera todos os itens serem salvos
+      await Promise.all(promessas);
+      
+      // 💡 ORDEM DE EXECUÇÃO PRIORITÁRIA:
+      setLojaEmEdicao(null);   // 1. Fecha o modal primeiro
+      setCarregando(false);    // 2. Tira o loading para liberar a tela
+      setHouveAlteracao(true); // 3. Ativa o aviso de alteração
+      
+      // 4. Mostra o alerta (com delay mínimo para o React fechar o modal antes)
+      setMensagemFlutuante('✅ Lista salva com sucesso!');
+      setTimeout(() => setMensagemFlutuante(''), 3000);
+
+      carregar(true); // Atualiza os dados no fundo de forma silenciosa
+    } catch(e) { 
+      alert("Erro ao salvar: " + e.message); 
+      setCarregando(false); 
+    }
   };
 
   const totalAoVivoEdicao = itensEditados.reduce((acc, item) => {
@@ -1565,6 +1591,30 @@ export default function FechamentoLojas({ isEscuro }) {
           </div>
         ))}
       </div>
+
+      {/* 🔔 MENSAGEM FLUTUANTE (TOAST) */}
+      {mensagemFlutuante && (
+        <div style={{
+          position: 'fixed',
+          bottom: '30px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: '#22c55e',
+          color: '#fff',
+          padding: '15px 30px',
+          borderRadius: '50px',
+          fontWeight: '900',
+          fontSize: '14px',
+          boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+          zIndex: 20000,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          transition: 'all 0.3s ease'
+        }}>
+          {mensagemFlutuante}
+        </div>
+      )}
 
     </div>
   );
