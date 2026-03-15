@@ -14,9 +14,17 @@ export default function Listas() {
   });
   const dataBr = dataFiltro.split('-').reverse().join('/');
 
+  // 💡 ONDE MUDAR: No useEffect que já existe perto do topo do arquivo
   useEffect(() => {
     localStorage.setItem('virtus_listas_data', dataFiltro);
-    carregarDados();
+    carregarDados(); // Carregamento inicial (com loading)
+
+    // Criar o intervalo de 1 segundo (silencioso)
+    const intervalo = setInterval(() => {
+        carregarDados(true); 
+    }, 1000);
+
+    return () => clearInterval(intervalo); // Limpa o timer ao fechar a tela
   }, [dataFiltro]);
 
   const [lojas, setLojas] = useState([]);
@@ -40,15 +48,16 @@ export default function Listas() {
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
   };
 
-  async function carregarDados() {
+  // 💡 ONDE MUDAR: Na definição da função carregarDados
+  async function carregarDados(silencioso = false) {
     try {
-      setCarregando(true);
+      if (!silencioso) setCarregando(true); // Só mostra "Carregando" se não for silencioso
+      
       const { data: dLojas } = await supabase.from('lojas').select('*').order('nome_fantasia', { ascending: true });
       const { data: dPedidos } = await supabase.from('pedidos').select('*').eq('data_pedido', dataFiltro); 
       const { data: dProdutos } = await supabase.from('produtos').select('id, nome, preco, peso_caixa, unidade_medida'); 
       
       const lojasDb = dLojas || [];
-      
       const temFrazao = lojasDb.some(l => extrairNum(l.codigo_loja) === 0);
       if (!temFrazao) {
         lojasDb.unshift({ id: 99999, codigo_loja: '00', nome_fantasia: 'FRAZÃO (TESTE)' });
@@ -57,8 +66,11 @@ export default function Listas() {
       setLojas(lojasDb);
       setPedidosDia(dPedidos || []);
       setProdutosBd(dProdutos || []); 
-    } catch (err) { console.error("Erro:", err); } 
-    finally { setCarregando(false); }
+    } catch (err) { 
+      console.error("Erro:", err); 
+    } finally { 
+      if (!silencioso) setCarregando(false); // Só tira o "Carregando" se ele foi ativado
+    }
   }
 
   const obterSomaTotal = () => {

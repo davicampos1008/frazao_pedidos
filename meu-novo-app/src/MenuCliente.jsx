@@ -281,6 +281,7 @@ export default function MenuCliente({ usuario, tema }) {
   }, [codLoja, hoje]); 
 
   // 💡 NOVA FUNÇÃO: SINCRONIZAÇÃO DO CARRINHO NA NUVEM
+// 💡 ONDE MUDAR: Função syncCarrinhoNuvem
   const syncCarrinhoNuvem = useCallback(async () => {
     if (!codLoja) return;
     try {
@@ -290,21 +291,21 @@ export default function MenuCliente({ usuario, tema }) {
         .eq('loja_id', codLoja);
 
       if (!error && itensNuvem) {
-         // Formata os itens da nuvem para o formato do State carrinhoSeguro
-         const carrinhoAtualizado = itensNuvem.map(n => ({
-            id: n.produto_id,
-            nome: n.nome,
-            quantidade: n.quantidade,
-            qtd_bonificada: n.qtd_bonificada,
-            valorUnit: n.valorUnit,
-            total: n.total,
-            unidade_medida: n.unidade_medida
-         }));
-         setCarrinho(carrinhoAtualizado);
+          // 💡 AGRUPAMENTO INTELIGENTE: Evita que itens apareçam repetidos no State
+          const mapa = {};
+          itensNuvem.forEach(n => {
+            const id = n.produto_id;
+            if (!mapa[id]) {
+              mapa[id] = { ...n, id: n.produto_id, quantidade: Number(n.quantidade), total: Number(n.total), valorUnit: Number(n.valorUnit) };
+            } else {
+              mapa[id].quantidade += Number(n.quantidade);
+              mapa[id].qtd_bonificada += Number(n.qtd_bonificada);
+              mapa[id].total += Number(n.total);
+            }
+          });
+          setCarrinho(Object.values(mapa));
       }
-    } catch (err) {
-       console.error("Erro ao sincronizar carrinho:", err);
-    }
+    } catch (err) { console.error(err); }
   }, [codLoja]);
 
   useEffect(() => { 
@@ -487,14 +488,25 @@ export default function MenuCliente({ usuario, tema }) {
     setModalRevisaoAberto(true);
   };
 
+  // 💡 ONDE MUDAR: Início da função confirmarEnvio
   const confirmarEnvio = async () => {
     if (!codLoja) return alert("🚨 ERRO: Seu usuário não tem uma Loja vinculada.");
-
     setEnviandoPedido(true);
     enviandoRef.current = true; 
     
     try {
-      const dadosParaEnviar = carrinhoSeguro.map(item => ({
+      // 💡 DEDUPLICAÇÃO: Agrupa o carrinho antes de mandar para o banco de pedidos
+      const mapaFinal = {};
+      carrinhoSeguro.forEach(item => {
+        if (!mapaFinal[item.nome]) {
+          mapaFinal[item.nome] = { ...item };
+        } else {
+          mapaFinal[item.nome].quantidade += Number(item.quantidade);
+          mapaFinal[item.nome].qtd_bonificada += Number(item.qtd_bonificada);
+        }
+      });
+
+      const dadosParaEnviar = Object.values(mapaFinal).map(item => ({
         loja_id: codLoja, 
         nome_usuario: usuario?.nome || "Operador", 
         nome_produto: item.nome, 
@@ -509,6 +521,7 @@ export default function MenuCliente({ usuario, tema }) {
 
       await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
       const { error } = await supabase.from('pedidos').insert(dadosParaEnviar);
+      // ... resto da função continua igual
       if (error) throw error;
 
       registrarLogCarrinho('ENVIOU PEDIDO', 'Fechou o Carrinho', carrinhoSeguro.length); 
@@ -590,24 +603,44 @@ export default function MenuCliente({ usuario, tema }) {
   };
 
   // 💡 NOVA FUNÇÃO: O Cliente Copia o Resumo Pós-Envio
+ // 💡 ONDE MUDAR: Função copiarMeuPedidoWpp
   const copiarMeuPedidoWpp = () => {
       if (!listaEnviadaHoje || listaEnviadaHoje.length === 0) return;
       
+      // Agrupa para o texto não sair repetido
+      const agrupado = {};
+      listaEnviadaHoje.forEach(it => {
+          if(!agrupado[it.nome_produto]) agrupado[it.nome_produto] = {...it};
+          else {
+              agrupado[it.nome_produto].quantidade += Number(it.quantidade);
+              agrupado[it.nome_produto].qtd_bonificada += Number(it.qtd_bonificada);
+          }
+      });
+      
+      const dataBr = new Date().toLocaleDateString('pt-BR');
       const nomeOperador = usuario?.nome || 'Operador';
       let msg = `*RESUMO DO PEDIDO*\nLoja: *${nomeLojaLimpo}*\nResponsável: *${nomeOperador}*\nData: *${dataBr}*\n\n`;
       
-      listaEnviadaHoje.forEach(item => {
+      Object.values(agrupado).forEach(item => {
           msg += `📦 ${item.quantidade}x ${item.nome_produto}`;
-          if (item.qtd_bonificada > 0) {
-              msg += ` (🎁 +${item.qtd_bonificada} Bonif.)`;
-          }
+          if (item.qtd_bonificada > 0) msg += ` (🎁 +${item.qtd_bonificada} Bonif.)`;
           msg += `\n`;
       });
       
-      navigator.clipboard.writeText(msg);
-      alert("✅ Resumo do pedido copiado! Só colar no WhatsApp.");
+      // 💡 MÉTODO DE CÓPIA INFALÍVEL (Funciona em todos os celulares)
+      const textArea = document.createElement("textarea");
+      textArea.value = msg;
+      document.body.appendChild(textArea);
+      textArea.select();
+      textArea.setSelectionRange(0, 99999); // Para mobile
+      try {
+          document.execCommand('copy');
+          alert("✅ Resumo do pedido copiado!");
+      } catch (err) {
+          alert("Erro ao copiar. Tente novamente.");
+      }
+      document.body.removeChild(textArea);
   };
-
   const salvarNovaSenha = async () => {
     if(!dadosSenha.antiga || !dadosSenha.nova || !dadosSenha.confirma) return setErroSenha("Preencha todos os campos.");
     if(dadosSenha.nova !== dadosSenha.confirma) return setErroSenha("A nova senha não confere.");
