@@ -150,10 +150,13 @@ export default function PainelNotasFiscais({ isEscuro }) {
           }
       }
 
+      // 💡 LÓGICA DE FORNECEDORES IDÊNTICA À TELA DE FECHAMENTO (Sincronizando Total, Qtd, Preço e Bonif)
       const mapaForn = {};
       const initNFs = {};
       
       pedidos.forEach(p => {
+        if (p.apenas_cobranca) return; // Ignora itens marcados como apenas cobrança do total
+
         let fNomeOriginal = String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase();
         if (fNomeOriginal.startsWith('ALERTA|')) fNomeOriginal = fNomeOriginal.replace('ALERTA|', '');
         
@@ -181,6 +184,7 @@ export default function PainelNotasFiscais({ isEscuro }) {
               dadosCadastrais: infoFornBD || null, 
               total: 0, 
               nota_fiscal: p.nota_fiscal || '', 
+              itensRaw: {}, 
               itens: [],
               ids_pedidos: [] 
           };
@@ -191,27 +195,34 @@ export default function PainelNotasFiscais({ isEscuro }) {
             mapaForn[fNomeOficial].ids_pedidos.push(p.id);
         }
 
-        const valNum = tratarPrecoNum(p.custo_unit);
-        const qtd = Number(p.quantidade || 0); 
         const isBoleto = p.status_compra === 'boleto';
-
-        const itemExistente = mapaForn[fNomeOficial].itens.find(i => i.nome === p.nome_produto && i.isBoleto === isBoleto);
         
-        if (itemExistente) {
-            itemExistente.qtd += qtd;
-            if (valNum > itemExistente.preco_unit) {
-                itemExistente.preco_unit = valNum;
-            }
-            itemExistente.total = itemExistente.qtd * itemExistente.preco_unit;
-        } else {
-            mapaForn[fNomeOficial].itens.push({
-              nome: p.nome_produto,
-              qtd: qtd,
-              und: p.unidade_medida,
-              preco_unit: valNum,
-              total: valNum * qtd,
-              isBoleto: isBoleto
-            });
+        let baseVal = p.custo_unit; 
+        let qtdBonifFornecedor = Number(p.qtd_bonificada) || 0;
+        
+        if (String(p.custo_unit).includes('BONIFICAÇÃO |')) {
+           baseVal = baseVal.split('|')[1] ? baseVal.split('|')[1].trim() : 'R$ 0,00';
+        }
+
+        const valNum = tratarPrecoNum(baseVal);
+
+        const keyItem = `${p.nome_produto}_${isBoleto}`;
+        if (!mapaForn[fNomeOficial].itensRaw[keyItem]) {
+            mapaForn[fNomeOficial].itensRaw[keyItem] = {
+                nomeItem: p.nome_produto,
+                unidade: p.unidade_medida || 'UN',
+                qtd: 0,
+                qtdBonificada: 0,
+                maxValNum: 0, 
+                isBoleto: isBoleto
+            };
+        }
+
+        const raw = mapaForn[fNomeOficial].itensRaw[keyItem];
+        raw.qtd += Number(p.qtd_atendida || 0); // Puxa a Qtd Atendida real, já com edição
+        raw.qtdBonificada += qtdBonifFornecedor;
+        if (valNum > raw.maxValNum) {
+            raw.maxValNum = valNum;
         }
 
         if (p.nota_fiscal && !mapaForn[fNomeOficial].nota_fiscal) {
@@ -221,7 +232,23 @@ export default function PainelNotasFiscais({ isEscuro }) {
       });
 
       Object.values(mapaForn).forEach(forn => {
+          Object.values(forn.itensRaw).forEach(raw => {
+              const qtdCobradaForn = Math.max(0, raw.qtd - raw.qtdBonificada);
+              const totalItemFornCobrado = qtdCobradaForn * raw.maxValNum;
+
+              if (qtdCobradaForn > 0) {
+                  forn.itens.push({
+                      nome: raw.nomeItem,
+                      und: raw.unidade,
+                      qtd: qtdCobradaForn,
+                      preco_unit: raw.maxValNum,
+                      total: totalItemFornCobrado,
+                      isBoleto: raw.isBoleto
+                  });
+              }
+          });
           forn.total = forn.itens.reduce((acc, item) => acc + item.total, 0);
+          delete forn.itensRaw;
       });
 
       setPedidosFornecedor(Object.values(mapaForn).sort((a,b) => a.fornecedor.localeCompare(b.fornecedor)));
@@ -238,9 +265,11 @@ export default function PainelNotasFiscais({ isEscuro }) {
          });
       }
 
-      // 💡 CORREÇÃO 2: MATEMÁTICA IDÊNTICA À TELA DE GESTÃO DE FECHAMENTOS
+      // 💡 LÓGICA DE LOJAS IDÊNTICA À TELA DE FECHAMENTOS
       const mapaLoja = {};
       pedidos.forEach(p => {
+        if (p.apenas_cobranca) return; // Ignora apenas cobrança para as Lojas
+
         const idLoja = parseInt(String(p.loja_id).match(/\d+/)?.[0]);
         if (!idLoja || idLoja <= 1) return; 
 
@@ -528,7 +557,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
                       <h3 style={{ margin: 0, color: isEscuro ? '#fff' : '#111', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                         🏢 {f.fornecedor} 
                         
-                        {/* 💡 CORREÇÃO 1: APENAS O NOME "PESSOA FÍSICA" / "JURÍDICA", SEM O NÚMERO */}
                         {f.tipoPessoa === 'PJ' && (
                             <span style={{fontSize: '9px', background: '#3b82f6', color: '#fff', padding: '3px 6px', borderRadius: '4px', fontWeight: '900'}}>PESSOA JURÍDICA</span>
                         )}

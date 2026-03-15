@@ -50,6 +50,10 @@ export default function FechamentoLojas({ isEscuro }) {
   const [lojaPendencia, setLojaPendencia] = useState(null);
   const [motivoPendencia, setMotivoPendencia] = useState('Conta errada');
   const [valorPagoIncorreto, setValorPagoIncorreto] = useState('');
+  
+  const [houveAlteracao, setHouveAlteracao] = useState(false);
+  const [fornecedorEmEdicao, setFornecedorEmEdicao] = useState(null);
+  const [itensFornEditados, setItensFornEditados] = useState({});
 
   const themeBg = isEscuro ? '#0f172a' : '#f5f5f4';
   const themeCard = isEscuro ? '#1e293b' : '#ffffff';
@@ -444,6 +448,7 @@ export default function FechamentoLojas({ isEscuro }) {
         alert(`Sucesso! O item ${itemMediaSelecionado} agora custa ${finalStr} para as lojas.`);
         setModalMediaAberto(false);
         setValorMediaInput('');
+        setHouveAlteracao(true);
         carregar();
     } catch(e) { alert(e.message); setCarregando(false); }
   };
@@ -542,6 +547,7 @@ export default function FechamentoLojas({ isEscuro }) {
         await supabase.from('pedidos').update({ qtd_atendida: Number(item.qtdEntregue) || 0, qtd_bonificada: Number(item.qtd_bonificada) || 0, preco_venda: unitParaBanco, status_compra: statusFinal }).eq('id', item.id_pedido);
       }
       setLojaEmEdicao(null);
+      setHouveAlteracao(true);
       carregar(); 
     } catch(e) { alert("Erro ao salvar: " + e.message); setCarregando(false); }
   };
@@ -556,6 +562,64 @@ export default function FechamentoLojas({ isEscuro }) {
     setTipoImpressao(tipo);
     setLojaParaImprimir(loja);
     setModoVisualizacaoImp(true);
+  };
+
+  const iniciarEdicaoFornecedor = (forn) => {
+      setFornecedorEmEdicao(forn.nome);
+      const mapEdit = {};
+      forn.itens.forEach(i => {
+         mapEdit[i.nomeItem] = { qtd: i.qtd, valUnit: tratarPrecoNum(i.valUnit), total: i.totalCobrado };
+      });
+      setItensFornEditados(mapEdit);
+  };
+
+  const handleFornEditChange = (nomeItem, campo, valor) => {
+      setItensFornEditados(prev => {
+          const curr = prev[nomeItem];
+          const novo = { ...curr, [campo]: valor };
+          if (campo === 'qtd' || campo === 'valUnit') novo.total = (Number(novo.qtd) || 0) * (Number(novo.valUnit) || 0);
+          else if (campo === 'total') if (Number(novo.qtd) > 0) novo.valUnit = (Number(novo.total) / Number(novo.qtd)).toFixed(2);
+          return { ...prev, [nomeItem]: novo };
+      });
+  };
+
+  const removerItemEdicaoForn = (nomeItem) => {
+      setItensFornEditados(prev => {
+          const novo = { ...prev };
+          delete novo[nomeItem];
+          return novo;
+      });
+  };
+
+  const salvarEdicaoFornecedor = async (forn) => {
+      setCarregando(true);
+      try {
+          const nomeFornLimpo = forn.nome.replace(' (BOLETO)', '').trim();
+          const promessas = [];
+          for (const nomeItem of Object.keys(itensFornEditados)) {
+              const editado = itensFornEditados[nomeItem];
+              const original = forn.itens.find(i => i.nomeItem === nomeItem);
+              if (!original) continue; 
+              
+              const unitStr = editado.valUnit > 0 ? `R$ ${Number(editado.valUnit).toFixed(2).replace('.', ',')}` : 'R$ 0,00';
+              if (editado.valUnit !== tratarPrecoNum(original.valUnit)) {
+                  promessas.push(supabase.from('pedidos').update({ custo_unit: unitStr }).eq('data_pedido', dataFiltro).ilike('fornecedor_compra', `%${nomeFornLimpo}%`).eq('nome_produto', nomeItem));
+              }
+              const diffQtd = Number(editado.qtd) - Number(original.qtd);
+              if (diffQtd !== 0) {
+                  const { data: peds } = await supabase.from('pedidos').select('id, qtd_atendida').eq('data_pedido', dataFiltro).ilike('fornecedor_compra', `%${nomeFornLimpo}%`).eq('nome_produto', nomeItem).limit(1);
+                  if (peds && peds.length > 0) {
+                      const novaQtd = Math.max(0, Number(peds[0].qtd_atendida) + diffQtd);
+                      promessas.push(supabase.from('pedidos').update({ qtd_atendida: novaQtd }).eq('id', peds[0].id));
+                  }
+              }
+          }
+          await Promise.all(promessas);
+          alert("✅ Valores atualizados com sucesso!");
+          setFornecedorEmEdicao(null);
+          setHouveAlteracao(false);
+          carregar();
+      } catch (e) { alert("Erro ao atualizar: " + e.message); setCarregando(false); }
   };
 
   const alternarStatusPagamento = async (nomeForn) => {
@@ -985,6 +1049,13 @@ export default function FechamentoLojas({ isEscuro }) {
                 <span>📊</span> VALOR MÉDIA
             </button>
 
+            {/* 💡 AVISO DE ALTERAÇÃO */}
+      {houveAlteracao && abaAtiva === 'fornecedores' && (
+         <div style={{ maxWidth: '1000px', margin: '0 auto 15px auto', background: '#fefce8', color: '#b45309', padding: '15px', borderRadius: '12px', fontWeight: 'bold', border: '1px solid #fde68a', fontSize: '12px' }}>
+            ⚠️ VALORES ALTERADOS: Você modificou itens nas lojas ou aplicou o "Valor Média". Recomendamos conferir e clicar em "✏️ EDITAR VALORES" nos fornecedores abaixo caso seja necessário ajustar a conta.
+         </div>
+      )}
+
             {abaAtiva === 'lojas' && (
             <>
               <button onClick={() => baixarTodosSeparados(false)} style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '12px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', display: 'flex', gap: '10px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>
@@ -1006,6 +1077,12 @@ export default function FechamentoLojas({ isEscuro }) {
           🏢 PAGAR FORNECEDORES
         </button>
       </div>
+
+      {houveAlteracao && abaAtiva === 'fornecedores' && (
+         <div style={{ maxWidth: '1000px', margin: '0 auto 15px auto', background: '#fefce8', color: '#b45309', padding: '15px', borderRadius: '12px', fontWeight: 'bold', border: '1px solid #fde68a', fontSize: '12px' }}>
+            ⚠️ VALORES ALTERADOS: Você modificou itens nas lojas ou aplicou "Valor Média". Confira e clique em "✏️ EDITAR VALORES" nos fornecedores abaixo se necessário.
+         </div>
+      )}
 
       {abaAtiva === 'lojas' && (
         <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
@@ -1255,18 +1332,56 @@ export default function FechamentoLojas({ isEscuro }) {
 
                           </div>
                         )}
+                        
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                          <h4 style={{ margin: 0, fontSize: '13px', color: themeText }}>Itens Comprados</h4>
+                          {fornecedorEmEdicao !== forn.nome ? (
+                            <button onClick={() => iniciarEdicaoFornecedor(forn)} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>✏️ EDITAR VALORES</button>
+                          ) : (
+                            <div style={{ display: 'flex', gap: '5px' }}>
+                               <button onClick={() => salvarEdicaoFornecedor(forn)} style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>💾 SALVAR</button>
+                               <button onClick={() => setFornecedorEmEdicao(null)} style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>X</button>
+                            </div>
+                          )}
+                        </div>
 
+                        {/* LISTAGEM DOS ITENS */}
                         <div style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                           {forn.itens.map((i, k) => {
                              const qtdCobrada = i.qtd - i.qtdBonificada;
-                             if (qtdCobrada > 0) {
-                               return (
-                                 <div key={`norm_${k}`} style={{ fontSize: '11px', color: themeText, fontWeight: 'bold' }}>
-                                   {qtdCobrada} - {formatarNomeItem(i.nomeItem)} - {i.valUnit} = {formatarMoeda(i.totalCobrado)} <span style={{color: '#d97706', fontWeight: '900'}}>{i.isBoleto && '(BOLETO)'}</span>
-                                 </div>
-                               );
+                             if (qtdCobrada <= 0) return null;
+
+                             if (fornecedorEmEdicao === forn.nome) {
+                                 const editado = itensFornEditados[i.nomeItem] || { qtd: qtdCobrada, valUnit: tratarPrecoNum(i.valUnit), total: i.totalCobrado };
+                                 return (
+                                   <div key={`edit_${k}`} style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: isEscuro ? '#1e293b' : '#f8fafc', padding: '15px', borderRadius: '12px', border: `1px solid ${themeBorder}`, marginBottom: '10px', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${themeBorder}`, paddingBottom: '8px' }}>
+                                       <strong style={{ fontSize: '14px', color: '#3b82f6' }}>{formatarNomeItem(i.nomeItem)}</strong>
+                                       <button onClick={() => removerItemEdicaoForn(i.nomeItem)} style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '6px', padding: '5px 8px', cursor: 'pointer', fontSize: '14px' }} title="Remover da visualização">🗑️</button>
+                                     </div>
+                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                                       <div style={{ flex: '1 1 60px' }}>
+                                         <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>QTD</label>
+                                         <input type="number" value={editado.qtd} onChange={e => handleFornEditChange(i.nomeItem, 'qtd', e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc', textAlign: 'center', fontWeight: 'bold', fontSize: '14px', boxSizing: 'border-box' }} />
+                                       </div>
+                                       <div style={{ flex: '1 1 100px' }}>
+                                         <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>VAL. UNIT (R$)</label>
+                                         <input type="number" step="0.01" value={editado.valUnit} onChange={e => handleFornEditChange(i.nomeItem, 'valUnit', e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc', textAlign: 'center', fontWeight: 'bold', fontSize: '14px', boxSizing: 'border-box' }} />
+                                       </div>
+                                       <div style={{ flex: '1 1 120px' }}>
+                                         <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>TOTAL (R$)</label>
+                                         <input type="number" step="0.01" value={editado.total} onChange={e => handleFornEditChange(i.nomeItem, 'total', e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #22c55e', textAlign: 'center', fontWeight: 'bold', color: '#16a34a', fontSize: '14px', boxSizing: 'border-box', background: '#f0fdf4' }} />
+                                       </div>
+                                     </div>
+                                   </div>
+                                 );
                              }
-                             return null;
+
+                             return (
+                               <div key={`norm_${k}`} style={{ fontSize: '11px', color: themeText, fontWeight: 'bold' }}>
+                                 {qtdCobrada} - {formatarNomeItem(i.nomeItem)} - {i.valUnit} = {formatarMoeda(i.totalCobrado)} <span style={{color: '#d97706', fontWeight: '900'}}>{i.isBoleto && '(BOLETO)'}</span>
+                               </div>
+                             );
                           })}
                         </div>
 
@@ -1425,6 +1540,31 @@ export default function FechamentoLojas({ isEscuro }) {
           </div>
         </div>
       )}
+
+      {/* DIV ESCONDIDA PARA O DOWNLOAD DE TODOS OS PDFs E DO WHATSAPP RÁPIDO */}
+      <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
+        {fechamentos.map(loja => (
+          <div id={`print-secreto-${loja.loja_id}`} key={loja.loja_id} style={{ width: '2480px', height: '3450px', padding: '80px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+              <div style={{ border: '8px solid black', boxSizing: 'border-box', padding: '40px', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '8px solid black', paddingBottom: '30px', marginBottom: '20px' }}>
+                      <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+                          <span style={{ fontWeight: '900', fontSize: '55px', color: 'black', textTransform: 'uppercase' }}>{loja.nome_fantasia}</span>
+                      </div>
+                      <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <img src="/logoPDF.png" alt="Logo" style={{ maxHeight: '160px', objectFit: 'contain' }} />
+                      </div>
+                      <div style={{ flex: '1', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center' }}>
+                          <span style={{ fontWeight: '900', fontSize: '60px', color: 'black' }}>TOTAL: {formatarMoeda(loja.totalFatura)}</span>
+                          <span style={{ fontWeight: 'bold', fontSize: '40px', color: 'black', marginTop: '10px' }}>DATA: {dataFechamentoBr}</span>
+                      </div>
+                  </div>
+                  <div style={{ flex: 1, width: '100%', display: 'flex', flexDirection: 'column' }}>
+                    {renderTabelaDupla(loja.itens, false)}
+                  </div>
+              </div>
+          </div>
+        ))}
+      </div>
 
     </div>
   );
