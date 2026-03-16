@@ -1,6 +1,34 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabaseClient';
 
+// 💡 BLOCO DE ORDENAÇÃO GLOBAL DAS LOJAS
+const ORDEM_LOJAS = [
+  "FLAMINGO", "PARANOÁ", "411", "404", "QE15", "QE30", 
+  "QUALIDADE", "XEPA", "MANSÕES", "Q6", "VARJÃO", "215", "313", "307"
+];
+
+const ordenarLojas = (lojasArray) => {
+  if (!Array.isArray(lojasArray)) return lojasArray;
+  return [...lojasArray].sort((a, b) => {
+    // 💡 Agora ele encontra o nome em qualquer formato
+    const nA = String(a.nome_fantasia || a.loja || a.nome || a.nome_loja || "").toUpperCase();
+    const nB = String(b.nome_fantasia || b.loja || b.nome || b.nome_loja || "").toUpperCase();
+    
+    // Garante que a loja Frazão (Teste) fique sempre no topo
+    if (nA.includes('FRAZÃO')) return -1;
+    if (nB.includes('FRAZÃO')) return 1;
+
+    let iA = ORDEM_LOJAS.findIndex(nome => nA.includes(nome));
+    let iB = ORDEM_LOJAS.findIndex(nome => nB.includes(nome));
+    
+    // Se não encontrar na lista, joga pro final
+    if (iA === -1) iA = 999;
+    if (iB === -1) iB = 999;
+    
+    return iA - iB;
+  });
+};
+
 export default function ConferenciaMadrugada() {
   const configDesign = {
     geral: { fontePadrao: "'Inter', sans-serif", raioBordaGlobal: '20px', sombraSuave: '0 8px 30px rgba(0,0,0,0.04)' },
@@ -104,8 +132,12 @@ export default function ConferenciaMadrugada() {
         });
       });
 
+      // 💡 APLICANDO A ORDENAÇÃO DE FORMA SEGURA (SEM QUEBRAR A TELA)
       const arrayFinal = Object.values(mapaForn).map(f => {
-          f.itens = Object.values(f.itens).sort((a, b) => a.nome.localeCompare(b.nome));
+          f.itens = Object.values(f.itens).map(item => {
+              item.lojas = ordenarLojas(item.lojas); // Aplica a ordem das filiais
+              return item;
+          }).sort((a, b) => a.nome.localeCompare(b.nome));
           return f;
       }).sort((a, b) => a.fornecedor.localeCompare(b.fornecedor));
 

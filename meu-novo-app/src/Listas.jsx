@@ -1,6 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
+// 💡 BLOCO DE ORDENAÇÃO GLOBAL DAS LOJAS
+const ORDEM_LOJAS = [
+  "FLAMINGO", "PARANOÁ", "411", "404", "QE15", "QE30", 
+  "QUALIDADE", "XEPA", "MANSÕES", "Q6", "VARJÃO", "215", "313", "307"
+];
+
+const ordenarLojas = (lojasArray) => {
+  if (!Array.isArray(lojasArray)) return lojasArray;
+  return [...lojasArray].sort((a, b) => {
+    // 💡 Agora ele encontra o nome em qualquer formato
+    const nA = String(a.nome_fantasia || a.loja || a.nome || a.nome_loja || "").toUpperCase();
+    const nB = String(b.nome_fantasia || b.loja || b.nome || b.nome_loja || "").toUpperCase();
+    
+    // Garante que a loja Frazão (Teste) fique sempre no topo
+    if (nA.includes('FRAZÃO')) return -1;
+    if (nB.includes('FRAZÃO')) return 1;
+
+    let iA = ORDEM_LOJAS.findIndex(nome => nA.includes(nome));
+    let iB = ORDEM_LOJAS.findIndex(nome => nB.includes(nome));
+    
+    // Se não encontrar na lista, joga pro final
+    if (iA === -1) iA = 999;
+    if (iB === -1) iB = 999;
+    
+    return iA - iB;
+  });
+};
+
 export default function Listas() {
   // 💡 LÓGICA DE DATA FIXA E SELECIONÁVEL
   const obterDataLocal = () => {
@@ -57,13 +85,13 @@ export default function Listas() {
       const { data: dPedidos } = await supabase.from('pedidos').select('*').eq('data_pedido', dataFiltro); 
       const { data: dProdutos } = await supabase.from('produtos').select('id, nome, preco, peso_caixa, unidade_medida'); 
       
-      const lojasDb = dLojas || [];
+      let lojasDb = dLojas || [];
       const temFrazao = lojasDb.some(l => extrairNum(l.codigo_loja) === 0);
       if (!temFrazao) {
         lojasDb.unshift({ id: 99999, codigo_loja: '00', nome_fantasia: 'FRAZÃO (TESTE)' });
       }
 
-      setLojas(lojasDb);
+      setLojas(ordenarLojas(lojasDb)); // 💡 APLICA A ORDENAÇÃO AQUI ANTES DE SALVAR NA TELA
       setPedidosDia(dPedidos || []);
       setProdutosBd(dProdutos || []); 
     } catch (err) { 
@@ -254,8 +282,6 @@ export default function Listas() {
     }
   };
 
-  // 💡 NOVA FUNÇÃO: RESTAURAÇÃO FORÇADA E DIRETA PARA A NUVEM DO CLIENTE
- // 💡 NOVA FUNÇÃO: RESTAURAÇÃO FORÇADA E DIRETA PARA A NUVEM DO CLIENTE
   const forcarRetornoCarrinho = async (lojaAlvo) => {
     if (!lojaAlvo) return;
     if (!window.confirm(`Tem certeza que deseja FORÇAR o retorno da lista para o carrinho da loja ${lojaAlvo.nome_fantasia}?\n\nOs itens aparecerão imediatamente na tela do cliente.`)) return;
@@ -298,13 +324,11 @@ export default function Listas() {
       });
 
       if (payloadNuvem.length > 0) {
-          // Limpa o carrinho atual na nuvem caso tenha lixo e insere os resgatados
           await supabase.from('carrinho_nuvem').delete().eq('loja_id', extrairNum(lojaAlvo.codigo_loja));
           const { error: errNuvem } = await supabase.from('carrinho_nuvem').insert(payloadNuvem);
           if (errNuvem) throw errNuvem;
       }
 
-      // Apaga os pedidos finalizados para liberar a loja
       await supabase.from('pedidos')
         .delete()
         .eq('data_pedido', dataFiltro) 
@@ -319,8 +343,6 @@ export default function Listas() {
     }
   };
 
-  // 💡 NOVA FUNÇÃO: RECONSTRÓI O CARRINHO LENDO OS CLIQUES E IGNORANDO A LIXEIRA
-  // 💡 NOVA FUNÇÃO: RECONSTRÓI O CARRINHO LENDO APENAS O ÚLTIMO SAVE ANTES DE ZERAR
   const resgatarRascunhoLog = async (lojaAlvo) => {
     if (!lojaAlvo) return;
     if (!window.confirm(`🚨 SALVA-VIDAS: Isso vai reconstruir o carrinho da loja ${lojaAlvo.nome_fantasia} com os itens exatos que estavam lá logo antes do cliente clicar em "Esvaziar Carrinho" pela última vez. Continuar?`)) return;
@@ -346,14 +368,12 @@ export default function Listas() {
         let carrinhoTemporario = {};
         let ultimoCarrinhoAntesDeZerar = {};
 
-        // Lê a linha do tempo cronologicamente
         logs.forEach(log => {
             if (log.acao === 'ZEROU CARRINHO' || log.acao === 'ENVIOU PEDIDO') {
-                // Tira a "foto" (backup) do carrinho antes de apagar, caso ele não esteja vazio
                 if (Object.keys(carrinhoTemporario).length > 0) {
                     ultimoCarrinhoAntesDeZerar = { ...carrinhoTemporario };
                 }
-                carrinhoTemporario = {}; // Esvazia o carrinho atual
+                carrinhoTemporario = {}; 
             } else if (log.acao === 'REMOVEU') {
                 delete carrinhoTemporario[log.item_nome];
             } else {
@@ -361,8 +381,6 @@ export default function Listas() {
             }
         });
 
-        // Se ele zerou e se arrependeu, a lista certa está no "ultimoCarrinhoAntesDeZerar"
-        // Se ele não zerou hoje (só deu bug e sumiu), a lista certa está no "carrinhoTemporario"
         const itensParaResgatar = Object.keys(ultimoCarrinhoAntesDeZerar).length > 0 
             ? ultimoCarrinhoAntesDeZerar 
             : carrinhoTemporario;
@@ -402,11 +420,8 @@ export default function Listas() {
             return;
         }
 
-        // Deleta o carrinho atual da nuvem e insere o backup resgatado
         await supabase.from('carrinho_nuvem').delete().eq('loja_id', extrairNum(lojaAlvo.codigo_loja));
         await supabase.from('carrinho_nuvem').insert(payloadNuvem);
-        
-        // Se a loja tiver um pedido parcialmente enviado ou travado, a gente limpa
         await supabase.from('pedidos').delete().eq('data_pedido', dataFiltro).eq('loja_id', extrairNum(lojaAlvo.codigo_loja));
 
         alert(`✅ Ufa! Carrinho reconstruído com ${payloadNuvem.length} itens resgatados do último "save". O cliente já pode voltar ao app e finalizar a compra.`);
@@ -422,7 +437,7 @@ export default function Listas() {
     setEditandoLista(false);
   };
 
-  if (carregando) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Carregando painel...</div>;
+  if (carregando && !pedidosDia.length) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Carregando painel...</div>;
 
   const lojaAbertaPedidos = modalAberto ? pedidosDia.filter(p => extrairNum(p.loja_id) === extrairNum(modalAberto.codigo_loja) && (!editandoLista || listaEditada[p.id])) : [];
   const lojaAbertasolicitouRefazer = lojaAbertaPedidos.some(p => p.solicitou_refazer === true);
@@ -458,7 +473,7 @@ export default function Listas() {
             )}
           </div>
         </div>
-        <button onClick={carregarDados} style={{background: '#333', border: 'none', color: '#fff', padding: '10px 15px', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold'}}>🔄</button>
+        <button onClick={() => carregarDados()} style={{background: '#333', border: 'none', color: '#fff', padding: '10px 15px', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold'}}>🔄</button>
       </div>
 
       <div style={{ backgroundColor: '#fff', borderRadius: '24px', padding: '25px', boxShadow: '0 10px 30px rgba(0,0,0,0.08)', borderTop: '8px solid #f97316', marginBottom: '40px' }}>
@@ -527,8 +542,6 @@ export default function Listas() {
                 <div style={{fontSize: '24px'}}>{iconeStatus}</div>
               </div>
 
-              {/* BOTÕES SEMPRE VISÍVEIS DO LADO DE FORA */}
-              {/* BOTÕES SEMPRE VISÍVEIS DO LADO DE FORA */}
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', borderTop: '1px dashed #e2e8f0', paddingTop: '15px' }}>
                   <button 
                       onClick={(e) => {
@@ -549,10 +562,9 @@ export default function Listas() {
                       style={{ flex: 1, background: '#ef4444', color: 'white', border: 'none', padding: '10px', borderRadius: '8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
                       title="Devolve o pedido que foi finalizado de volta ao carrinho"
                   >
-                      📥 DEVOLVER PEDIDO
+                      📥 DEVOLVER
                   </button>
 
-                  {/* 💡 NOVO BOTÃO DE RESGATE DO HISTÓRICO (IGNORA LIXEIRA) */}
                   <button 
                       onClick={(e) => {
                           e.stopPropagation();
@@ -561,7 +573,7 @@ export default function Listas() {
                       style={{ flex: 1, background: '#eab308', color: '#111', border: 'none', padding: '10px', borderRadius: '8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
                       title="Resgata os cliques mesmo se o carrinho foi esvaziado"
                   >
-                      🛟 RESGATAR RASCUNHO
+                      🛟 RESGATAR
                   </button>
               </div>
             </div>

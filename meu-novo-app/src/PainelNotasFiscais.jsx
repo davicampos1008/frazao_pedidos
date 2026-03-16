@@ -1,6 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
+const ORDEM_LOJAS = [
+  "FLAMINGO", "PARANOÁ", "411", "404", "QE15", "QE30", 
+  "QUALIDADE", "XEPA", "MANSÕES", "Q6", "VARJÃO", "215", "313", "307"
+];
+
+const ordenarLojas = (lojasArray) => {
+  if (!Array.isArray(lojasArray)) return lojasArray;
+  return [...lojasArray].sort((a, b) => {
+    const nA = String(a.nome_fantasia || a.loja || a.nome || "").toUpperCase();
+    const nB = String(b.nome_fantasia || b.loja || b.nome || "").toUpperCase();
+    
+    // Garante que a loja Frazão (Teste) fique sempre no topo
+    if (nA.includes('FRAZÃO')) return -1;
+    if (nB.includes('FRAZÃO')) return 1;
+
+    let iA = ORDEM_LOJAS.findIndex(nome => nA.includes(nome));
+    let iB = ORDEM_LOJAS.findIndex(nome => nB.includes(nome));
+    
+    // Se não encontrar na lista, joga pro final
+    if (iA === -1) iA = 999;
+    if (iB === -1) iB = 999;
+    
+    return iA - iB;
+  });
+};
+
 export default function PainelNotasFiscais({ isEscuro }) {
   const configDesign = {
     cores: {
