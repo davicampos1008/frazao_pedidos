@@ -8,9 +8,9 @@ const normalizarParaBusca = (str) => {
 };
 
 // ============================================================================
-// COMPONENTE: LINHA DO PRODUTO (Otimizado com Fornecedor e Enter-to-Next)
+// COMPONENTE: LINHA DO PRODUTO
 // ============================================================================
-const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) => {
+const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda, fornecedoresBd }) => {
   const [preco, setPreco] = useState(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
   const [pesoCaixa, setPesoCaixa] = useState(produto.peso_caixa || '');
   const [fornecedor, setFornecedor] = useState(produto.fornecedor_nome || '');
@@ -56,10 +56,18 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
       }
     }
 
+    // 💡 AUTO-CORRETOR DE FORNECEDOR PARA EVITAR O "X" VERMELHO DO SUPABASE
+    let fornFinal = pFornecedor ? pFornecedor.trim().toUpperCase() : null;
+    if (fornFinal) {
+        const limpo = normalizarParaBusca(fornFinal);
+        const oficial = (fornecedoresBd || []).find(f => normalizarParaBusca(f.nome_fantasia) === limpo || normalizarParaBusca(f.nome_completo) === limpo);
+        if (oficial) fornFinal = oficial.nome_fantasia.toUpperCase();
+    }
+
     const payload = {
       preco: acaoForcada === 'sem_preco' || acaoForcada === 'falta' ? 'R$ 0,00' : precoFinal,
       peso_caixa: pPesoCaixa,
-      fornecedor_nome: pFornecedor ? pFornecedor.toUpperCase() : '',
+      fornecedor_nome: fornFinal,
       status_cotacao: statusCalculado
     };
 
@@ -72,10 +80,11 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
     const { error } = await supabase.from('produtos').update(payload).eq('id', produto.id);
     if (!error) {
       setStatusAviso('✅');
+      setFornecedor(fornFinal || ''); // Atualiza o input com o nome corrigido do banco
       setTimeout(() => setStatusAviso(''), 2000);
     } else {
       setStatusAviso('❌');
-      console.error(error);
+      console.error("Erro Supabase:", error);
     }
   };
 
@@ -243,6 +252,7 @@ export default function Precificacao() {
   async function carregarDados(silencioso = false) {
     if (!silencioso) setCarregando(true);
     try {
+      // 💡 Carregamos os fornecedores para abastecer o Datalist e o Corretor
       const { data: fornData } = await supabase.from('fornecedores').select('id, nome_fantasia, nome_completo').order('nome_fantasia', { ascending: true });
       if (fornData) setFornecedoresBd(fornData);
 
@@ -431,7 +441,6 @@ export default function Precificacao() {
     setModalAberto(true);
   };
 
-  // 💡 NOVA LOGICA DE UPLOAD REAPROVEITAVEL PARA O COLA (CTRL+V)
   const processarArquivosFotos = async (files) => {
     if (!files || !files.length) return;
     setFazendoUpload(true);
@@ -463,7 +472,7 @@ export default function Precificacao() {
       }
     }
     if (files.length > 0) {
-      event.preventDefault(); // Previne comportamentos padroes ao colar
+      event.preventDefault(); 
       await processarArquivosFotos(files);
     }
   };
@@ -504,11 +513,19 @@ export default function Precificacao() {
         pesoCaixaFinal = `${formModal.tipo_medida_kg} ${formModal.peso_caixa}`;
     }
 
+    // 💡 AUTO-CORRETOR TAMBÉM NO MODAL
+    let fornFinalModal = formModal.fornecedor ? formModal.fornecedor.trim().toUpperCase() : null;
+    if (fornFinalModal) {
+        const strBusca = normalizarParaBusca(fornFinalModal);
+        const oficial = fornecedoresBd.find(f => normalizarParaBusca(f.nome_fantasia) === strBusca || normalizarParaBusca(f.nome_completo) === strBusca);
+        if (oficial) fornFinalModal = oficial.nome_fantasia.toUpperCase();
+    }
+
     const fotosAtuais = prodModal.foto_url ? String(prodModal.foto_url).split(',') : [];
     const payload = {
       preco: precoFinal,
       peso_caixa: pesoCaixaFinal, 
-      fornecedor_nome: formModal.fornecedor ? formModal.fornecedor.toUpperCase() : '',
+      fornecedor_nome: fornFinalModal,
       status_cotacao: statusCalc,
       promocao: formModal.promocao,
       novidade: formModal.novidade,
@@ -542,7 +559,6 @@ export default function Precificacao() {
 
   const listaDaAbaAtual = listas[abaAtiva] || [];
   
-  // 💡 FILTRO INTELIGENTE APLICADO AQUI
   const produtosRenderizados = listaDaAbaAtual.filter(p => {
       const termoBusca = normalizarParaBusca(busca);
       const nomeProduto = normalizarParaBusca(p.nome);
@@ -618,7 +634,7 @@ export default function Precificacao() {
 
       </div>
 
-      {/* 📑 ABAS DE STATUS (PENDENTES, PRONTOS...) */}
+      {/* 📑 ABAS DE STATUS */}
       <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', overflowX: 'auto', paddingBottom: '5px', scrollbarWidth: 'none' }}>
         {CONFIG_ABAS.map(aba => (
           <button 
@@ -637,7 +653,6 @@ export default function Precificacao() {
         ))}
       </div>
 
-      {/* 💡 BARRA ROLÁVEL DE CATEGORIAS (FILTRO SUPERIOR) */}
       <div style={{ display: 'flex', overflowX: 'auto', gap: '10px', paddingBottom: '15px', marginBottom: '10px', scrollbarWidth: 'none' }}>
          {categoriasPossiveis.map(cat => (
             <button 
@@ -660,7 +675,6 @@ export default function Precificacao() {
          ))}
       </div>
 
-      {/* 💡 BARRA DE PESQUISA (Agora não precisa alterar aqui, a função inteligente resolve) */}
       <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '12px', display: 'flex', gap: '10px', marginBottom: '15px', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
         <span>🔍</span><input placeholder="Buscar item..." value={busca} onChange={e => setBusca(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
       </div>
@@ -673,7 +687,8 @@ export default function Precificacao() {
              produto={p} 
              corBorda={CONFIG_ABAS.find(a => a.id === p.status_cotacao)?.cor || '#3b82f6'}
              abrirModal={abrirEdicaoCompleta} 
-             aoSalvar={handleAtualizarLista} 
+             aoSalvar={handleAtualizarLista}
+             fornecedoresBd={fornecedoresBd} 
            />
         ))}
         {produtosRenderizados.length === 0 && (
@@ -681,7 +696,7 @@ export default function Precificacao() {
         )}
       </div>
 
-      {/* 🛠️ MODAL DE EDIÇÃO COMPLETA (💡 MODIFICADO PARA O CTRL+V) */}
+      {/* 🛠️ MODAL DE EDIÇÃO COMPLETA */}
       {modalAberto && prodModal && (
         <div onPaste={handleColarFoto} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-end', padding: '0' }}>
           <div style={{ backgroundColor: '#fff', width: '100%', maxWidth: '600px', borderRadius: '30px 30px 0 0', padding: '30px 25px', display: 'flex', flexDirection: 'column', maxHeight: '90vh', overflowY: 'auto' }}>
@@ -708,8 +723,8 @@ export default function Precificacao() {
               </button>
             </div>
 
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-              <div style={{ flex: 1 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '10px', marginBottom: '15px' }}>
+              <div>
                 <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>VENDA (R$)</label>
                 <input 
                   type="text" value={formModal.preco} 
@@ -719,7 +734,21 @@ export default function Precificacao() {
                   style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '2px solid #f1f5f9', outline: 'none', fontSize: '16px', fontWeight: '900', boxSizing: 'border-box' }} 
                 />
               </div>
+              
+              <div>
+                <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>FORNECEDOR</label>
+                <input 
+                  list="lista-fornecedores"
+                  type="text" 
+                  value={formModal.fornecedor} 
+                  onChange={e => setFormModal({...formModal, fornecedor: e.target.value})} 
+                  placeholder="EX: CEASA..."
+                  style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '2px solid #f1f5f9', outline: 'none', fontSize: '12px', fontWeight: 'bold', boxSizing: 'border-box', textTransform: 'uppercase' }} 
+                />
+              </div>
+            </div>
 
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
               <div style={{ width: '80px' }}>
                 <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>MEDIDA</label>
                 <select 
