@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 
 // 💡 FUNÇÃO INTELIGENTE DE BUSCA GLOBAL (Ignora acentos e espaços)
@@ -8,19 +8,23 @@ const normalizarParaBusca = (str) => {
 };
 
 // ============================================================================
-// COMPONENTE: LINHA DO PRODUTO (Otimizado e Sem Fornecedor)
+// COMPONENTE: LINHA DO PRODUTO (Otimizado com Fornecedor e Enter-to-Next)
 // ============================================================================
 const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) => {
   const [preco, setPreco] = useState(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
   const [pesoCaixa, setPesoCaixa] = useState(produto.peso_caixa || '');
+  const [fornecedor, setFornecedor] = useState(produto.fornecedor_nome || '');
   const [statusAviso, setStatusAviso] = useState('');
+  
+  const fornecedorRef = useRef(null);
 
   useEffect(() => {
     setPreco(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
     setPesoCaixa(produto.peso_caixa || '');
-  }, [produto.preco, produto.peso_caixa]);
+    setFornecedor(produto.fornecedor_nome || '');
+  }, [produto.preco, produto.peso_caixa, produto.fornecedor_nome]);
 
-  const dispararAutoSave = async (pValor, pPesoCaixa, acaoForcada = null) => {
+  const dispararAutoSave = async (pValor, pPesoCaixa, pFornecedor, acaoForcada = null) => {
     setStatusAviso('⏳');
     
     let v = String(pValor || '').replace(/[^\d,.]/g, '').trim();
@@ -55,6 +59,7 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
     const payload = {
       preco: acaoForcada === 'sem_preco' || acaoForcada === 'falta' ? 'R$ 0,00' : precoFinal,
       peso_caixa: pPesoCaixa,
+      fornecedor_nome: pFornecedor ? pFornecedor.toUpperCase() : '',
       status_cotacao: statusCalculado
     };
 
@@ -75,20 +80,20 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
   };
 
   const handleBlur = () => {
-    dispararAutoSave(preco, pesoCaixa);
+    dispararAutoSave(preco, pesoCaixa, fornecedor);
   };
 
   const acaoRapida = (acao) => {
     if (acao === 'mantido') {
       const pAntigo = produto.preco_anterior && produto.preco_anterior !== 'R$ 0,00' ? produto.preco_anterior.replace('R$ ', '') : '';
       setPreco(pAntigo);
-      dispararAutoSave(pAntigo, pesoCaixa, 'mantido');
+      dispararAutoSave(pAntigo, pesoCaixa, fornecedor, 'mantido');
     } else if (acao === 'sem_preco') {
       setPreco('');
-      dispararAutoSave('', pesoCaixa, 'sem_preco');
+      dispararAutoSave('', pesoCaixa, fornecedor, 'sem_preco');
     } else if (acao === 'falta') {
       setPreco('');
-      dispararAutoSave('', pesoCaixa, 'falta');
+      dispararAutoSave('', pesoCaixa, fornecedor, 'falta');
     }
   };
 
@@ -125,21 +130,41 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
       </div>
 
       <div style={{ display: 'flex', gap: '10px' }}>
-        <div style={{ position: 'relative', flex: 1 }}>
+        <div style={{ position: 'relative', flex: 1.2 }}>
           <span style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8', fontWeight: 'bold', fontSize: '11px' }}>R$</span>
           <input 
             type="text" 
             value={preco} 
             onChange={e => setPreco(e.target.value)} 
             onBlur={handleBlur}
-            onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+            onKeyDown={e => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (fornecedorRef.current) fornecedorRef.current.focus();
+                    else e.target.blur();
+                }
+            }}
             placeholder={produto.preco_anterior && produto.preco_anterior !== 'R$ 0,00' ? produto.preco_anterior.replace('R$ ', '') : "0,00"}
             style={{ width: '100%', padding: '10px 10px 10px 30px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', fontWeight: '900', fontSize: '14px', backgroundColor: '#f8fafc', boxSizing: 'border-box' }}
           />
         </div>
 
+        <div style={{ position: 'relative', flex: 1.5 }}>
+          <input 
+            ref={fornecedorRef}
+            list="lista-fornecedores"
+            type="text"
+            value={fornecedor}
+            onChange={e => setFornecedor(e.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+            placeholder="Fornecedor..."
+            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: '#f8fafc', boxSizing: 'border-box', textTransform: 'uppercase' }}
+          />
+        </div>
+
         {produto.unidade_medida === 'KG' && (
-          <div style={{ position: 'relative', width: '100px' }}>
+          <div style={{ position: 'relative', width: '90px' }}>
             <input 
               type="text" 
               value={pesoVisual} 
@@ -170,6 +195,7 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda }) =>
 // ============================================================================
 export default function Precificacao() {
   const [produtos, setProdutos] = useState([]);
+  const [fornecedoresBd, setFornecedoresBd] = useState([]);
   const [abaAtiva, setAbaAtiva] = useState('todos'); 
   const [busca, setBusca] = useState('');
   const [carregando, setCarregando] = useState(true);
@@ -217,6 +243,9 @@ export default function Precificacao() {
   async function carregarDados(silencioso = false) {
     if (!silencioso) setCarregando(true);
     try {
+      const { data: fornData } = await supabase.from('fornecedores').select('id, nome_fantasia, nome_completo').order('nome_fantasia', { ascending: true });
+      if (fornData) setFornecedoresBd(fornData);
+
       const { data: prodData } = await supabase.from('produtos').select('*').eq('status', true).order('nome', { ascending: true });
       
       if (prodData) {
@@ -390,7 +419,7 @@ export default function Precificacao() {
 
     setFormModal({
       preco: produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '',
-      fornecedor: produto.fornecedor || '', 
+      fornecedor: produto.fornecedor_nome || '', 
       status: produto.status_cotacao || 'pendente',
       promocao: produto.promocao || false,
       novidade: produto.novidade || false,
@@ -479,6 +508,7 @@ export default function Precificacao() {
     const payload = {
       preco: precoFinal,
       peso_caixa: pesoCaixaFinal, 
+      fornecedor_nome: formModal.fornecedor ? formModal.fornecedor.toUpperCase() : '',
       status_cotacao: statusCalc,
       promocao: formModal.promocao,
       novidade: formModal.novidade,
@@ -526,6 +556,19 @@ export default function Precificacao() {
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px', padding: '10px' }}>
       
+      <datalist id="lista-fornecedores">
+        {fornecedoresBd.map(f => {
+           const nomeA = (f.nome_fantasia || f.nome_completo || "").toUpperCase();
+           const nomeS = nomeA.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+           return (
+             <React.Fragment key={f.id}>
+               <option value={nomeA} />
+               {nomeA !== nomeS && <option value={nomeS} />}
+             </React.Fragment>
+           );
+        })}
+      </datalist>
+
       {/* 🎛️ HEADER DE COMANDO */}
       <div style={{ backgroundColor: '#111', padding: '25px', borderRadius: '24px', color: 'white', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
         

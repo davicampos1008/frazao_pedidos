@@ -234,24 +234,70 @@ export default function PlanilhaCompras() {
     carregarDados();
   };
 
+  // 💡 ATUALIZAÇÃO 1: Tratamento detalhado da Bonificação no Cliente Único
   const rejeitarBonificacaoCliente = async () => {
-     if(!window.confirm('Tem certeza que deseja recusar/ignorar a bonificação solicitada para este item?')) return;
      setCarregando(true);
-     const promessas = itemModal.lojas.map(l => supabase.from('pedidos').update({ qtd_bonificada: 0 }).eq('id', l.id_pedido));
+     const promessas = [];
+     let novasLojasEnvolvidas = [...lojasEnvolvidas];
+
+     for (let loja of itemModal.lojas.filter(l => l.qtd_bonificada_cliente > 0)) {
+         const cobrada = Number(loja.qtd_pedida) || 0;
+         const bonificada = Number(loja.qtd_bonificada_cliente) || 0;
+         const totalBruto = cobrada + bonificada;
+
+         const msg = `A loja ${loja.nome_fantasia} pediu:\n- ${cobrada} pagas\n- ${bonificada} bonificadas\n\nTotal: ${totalBruto} itens.\n\nAo recusar a bonificação, o que você deseja fazer?\n\n[OK] = Enviar os ${totalBruto} itens, mas COBRAR por todos.\n[CANCELAR] = Enviar apenas os ${cobrada} itens originais.`;
+
+         const querTotalBruto = window.confirm(msg);
+         const novaQtd = querTotalBruto ? totalBruto : cobrada;
+
+         promessas.push(supabase.from('pedidos').update({ qtd_bonificada: 0, quantidade: novaQtd }).eq('id', loja.id_pedido));
+
+         const index = novasLojasEnvolvidas.findIndex(l => l.id_pedido === loja.id_pedido);
+         if (index !== -1) {
+             novasLojasEnvolvidas[index].qtd_pedida = novaQtd;
+             if (novasLojasEnvolvidas[index].qtd_receber === cobrada) {
+                 novasLojasEnvolvidas[index].qtd_receber = novaQtd;
+             }
+             novasLojasEnvolvidas[index].qtd_bonificada_cliente = 0;
+         }
+     }
+
      await Promise.all(promessas);
      setItemModal(prev => ({...prev, qtd_bonificada_cliente: 0}));
-     setLojasEnvolvidas(lojasEnvolvidas.map(l => ({ ...l, qtd_bonificada_cliente: 0 })));
-     mostrarNotificacao('❌ Bonificação recusada e removida.', 'info');
+     setLojasEnvolvidas(novasLojasEnvolvidas);
+     mostrarNotificacao('❌ Bonificação recusada e pedidos ajustados.', 'info');
      carregarDados(true);
      setCarregando(false);
   };
 
+  // 💡 ATUALIZAÇÃO 1: Tratamento detalhado da Bonificação no Agrupamento
   const rejeitarBonificacaoGrupo = async (nomeItem, lojasDoItem) => {
-     if(!window.confirm(`Deseja recusar a bonificação de ${nomeItem}?`)) return;
      setCarregando(true);
-     const promessas = lojasDoItem.map(l => supabase.from('pedidos').update({ qtd_bonificada: 0 }).eq('id', l.id_pedido));
+     const promessas = [];
+
+     const lojasComBonificacao = lojasDoItem.filter(l => l.qtd_bonificada_cliente > 0);
+
+     if (lojasComBonificacao.length === 0) {
+         if(!window.confirm(`Deseja recusar a bonificação de ${nomeItem}?`)) { setCarregando(false); return; }
+         const promessasBasicas = lojasDoItem.map(l => supabase.from('pedidos').update({ qtd_bonificada: 0 }).eq('id', l.id_pedido));
+         await Promise.all(promessasBasicas);
+     } else {
+         for (let loja of lojasComBonificacao) {
+             const cobrada = Number(loja.qtd_pedida) || 0;
+             const bonificada = Number(loja.qtd_bonificada_cliente) || 0;
+             const totalBruto = cobrada + bonificada;
+
+             const msg = `A loja ${loja.nome_fantasia} pediu para o item ${nomeItem}:\n- ${cobrada} pagas\n- ${bonificada} bonificadas\n\nTotal: ${totalBruto} itens.\n\nAo recusar a bonificação, qual será o novo total desta loja?\n\n[OK] = Enviar ${totalBruto} itens (COBRANDO TUDO)\n[CANCELAR] = Enviar apenas ${cobrada} itens`;
+
+             const querTotalBruto = window.confirm(msg);
+             const novaQtd = querTotalBruto ? totalBruto : cobrada;
+
+             promessas.push(supabase.from('pedidos').update({ qtd_bonificada: 0, quantidade: novaQtd }).eq('id', loja.id_pedido));
+         }
+     }
+
      await Promise.all(promessas);
-     mostrarNotificacao(`❌ Bonificação de ${nomeItem} recusada.`, 'info');
+     mostrarNotificacao(`❌ Bonificação de ${nomeItem} tratada.`, 'info');
      carregarDados(true);
      setCarregando(false);
   };
@@ -631,6 +677,21 @@ export default function PlanilhaCompras() {
     }));
   };
 
+  // 💡 ATUALIZAÇÃO 2: Lógica para forçar a quantidade fracionada como o novo Pedido Total
+  const atualizarPedidoTotalLoja = async (idPedido, novaQuantidade, nomeLoja) => {
+      const qtdNum = Number(novaQuantidade);
+      if (isNaN(qtdNum) || qtdNum < 0) return alert('Quantidade inválida.');
+      if (!window.confirm(`Deseja alterar o pedido original da loja ${nomeLoja} para ${qtdNum}?`)) return;
+
+      setCarregando(true);
+      await supabase.from('pedidos').update({ quantidade: qtdNum }).eq('id', idPedido);
+
+      setLojasEnvolvidas(prev => prev.map(l => l.id_pedido === idPedido ? { ...l, qtd_pedida: qtdNum } : l));
+      mostrarNotificacao(`✅ Pedido da loja ${nomeLoja} atualizado para ${qtdNum}!`, 'sucesso');
+      carregarDados(true);
+      setCarregando(false);
+  };
+
   const aceitarBonificacaoCliente = () => {
      setDadosCompra({...dadosCompra, temBonificacao: true});
      setLojasEnvolvidas(lojasEnvolvidas.map(l => ({
@@ -937,6 +998,7 @@ export default function PlanilhaCompras() {
      } else { window.html2pdf().set(opt).from(elemento).save(); }
   };
 
+  // 💡 ATUALIZAÇÃO 2: Renderização das Lojas com Botão de "USAR COMO TOTAL"
   const renderListaLojasModal = () => (
     <div style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0', marginTop: '10px' }}>
       <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#111', display: 'block', marginBottom: '15px', textTransform: 'uppercase' }}>
@@ -951,8 +1013,17 @@ export default function PlanilhaCompras() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
             {abaModal === 'fracionado' && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <label style={{ fontSize: '9px', color: '#666', fontWeight: 'bold' }}>Receber</label>
-                <input type="number" value={loja.qtd_receber} onChange={(e) => atualizarLoja(loja.id_pedido, 'qtd_receber', e.target.value)} style={{ width: '50px', padding: '8px', borderRadius: '8px', border: '2px solid #ccc', textAlign: 'center', fontWeight: 'bold' }} />
+                <label style={{ fontSize: '9px', color: '#666', fontWeight: 'bold', marginBottom: '3px' }}>Receber</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <input type="number" value={loja.qtd_receber} onChange={(e) => atualizarLoja(loja.id_pedido, 'qtd_receber', e.target.value)} style={{ width: '45px', padding: '6px', borderRadius: '6px', border: '2px solid #ccc', textAlign: 'center', fontWeight: 'bold' }} />
+                    <button
+                        onClick={() => atualizarPedidoTotalLoja(loja.id_pedido, loja.qtd_receber, loja.nome_fantasia)}
+                        title="Usar este valor como o novo pedido total da loja"
+                        style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 6px', fontSize: '9px', cursor: 'pointer', fontWeight: 'bold', lineHeight: '1.2' }}
+                    >
+                        USAR COMO<br/>TOTAL
+                    </button>
+                </div>
               </div>
             )}
             {dadosCompra.temBonificacao && (
@@ -985,7 +1056,6 @@ export default function PlanilhaCompras() {
     if (!nomeFornecedorLote.trim()) return alert("Digite o nome do fornecedor para agrupar.");
     if (itensSelecionados.length === 0) return alert("Selecione pelo menos um item.");
     
-    // 💡 APLICA AUTO-CORREÇÃO ANTES DE AGRUPAR
     const fornecedorFinal = verificarFornecedorCadastrado(nomeFornecedorLote);
     if (!fornecedorFinal) return;
 
@@ -1024,7 +1094,6 @@ export default function PlanilhaCompras() {
   return (
     <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px', padding: '10px' }}>
       
-      {/* 💡 CORREÇÃO DO NAVEGADOR: OPÇÕES COM E SEM ACENTO PARA A LISTA MÁGICA */}
       <datalist id="lista-fornecedores">
         {fornecedoresOficiais.map(f => {
            const nomeA = (f.nome_fantasia || f.nome_completo || "").toUpperCase();
@@ -1146,6 +1215,9 @@ export default function PlanilhaCompras() {
                   </div>
                  <strong style={{ fontSize: '13px', color: '#111', lineHeight: '1.2' }}>{item.nome}</strong>
 <span style={{ fontSize: '12px', color: '#f97316', fontWeight: '900', marginTop: '3px' }}>{calcularPrecoFinalSugestao(item.nome)}</span>
+{item.fornecedor_sugerido && item.fornecedor_sugerido !== 'Não cadastrado' && (
+   <span style={{ fontSize: '10px', color: '#8b5cf6', fontWeight: 'bold', marginTop: '2px' }}>🏢 {item.fornecedor_sugerido}</span>
+)}
                   <span style={{ fontSize: '10px', color: item.isResto ? '#ef4444' : '#64748b', fontWeight: item.isResto ? 'bold' : 'normal', marginTop: '5px' }}>
                     {item.isResto ? 'RESTA COMPRAR' : `${item.lojas.length} Loja(s)`}
                   </span>
@@ -1255,13 +1327,22 @@ export default function PlanilhaCompras() {
                                 <div style={{ flex: 1 }}>
                                   <strong style={{ display: 'block', fontSize: '13px', color: '#111' }}>{nomeItem}</strong>
 <small style={{ color: '#8b5cf6', fontWeight: '900', fontSize: '12px', display: 'block', marginTop: '2px' }}>{calcularPrecoFinalSugestao(nomeItem)}</small>
+{prodDB && prodDB.fornecedor_nome && (
+   <small style={{ color: '#8b5cf6', fontWeight: 'bold', fontSize: '10px', display: 'block' }}>🏢 {prodDB.fornecedor_nome}</small>
+)}
                                    <small style={{ color: '#f97316', fontWeight: 'bold', fontSize: '10px', display: 'block' }}>Pediram: {demandaReal.demanda} {demandaReal.unidade}</small>
                                    {pesoInfo && <small style={{ color: '#8b5cf6', fontWeight: 'bold', fontSize: '9px', display: 'block', marginTop: '2px' }}>{pesoInfo}</small>}
                                    
+                                   {/* 💡 ATUALIZAÇÃO 1: Detalhes das lojas na Bonificação no agrupamento */}
                                    {temBonificacao && (
-                                     <div style={{ marginTop: '5px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                     <div style={{ marginTop: '5px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
                                         <div>
-                                           <span style={{display: 'block', fontSize: '10px', color: '#d97706', fontWeight: 'bold'}}>⚠️ O cliente pediu {demandaReal.qtd_bonificada_cliente} item(ns) bonificado(s).</span>
+                                           <span style={{display: 'block', fontSize: '10px', color: '#d97706', fontWeight: 'bold'}}>⚠️ Pedido de bonificação:</span>
+                                           {demandaReal.lojas.filter(l => l.qtd_bonificada_cliente > 0).map(l => (
+                                              <span key={l.loja_id} style={{ display: 'block', fontSize: '9px', color: '#b45309' }}>
+                                                 - <b>{l.nome_fantasia}</b>: {l.qtd_pedida} pagos + {l.qtd_bonificada_cliente} bonificados
+                                              </span>
+                                           ))}
                                         </div>
                                         <div style={{ display: 'flex', gap: '5px' }}>
                                           <button onClick={() => {
@@ -1270,7 +1351,7 @@ export default function PlanilhaCompras() {
                                               ACEITAR
                                           </button>
                                           <button onClick={() => rejeitarBonificacaoGrupo(nomeItem, demandaReal.lojas)} style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '5px 10px', borderRadius: '6px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}>
-                                              RECUSAR
+                                              RECUSAR E AJUSTAR TOTAL
                                           </button>
                                         </div>
                                      </div>
@@ -1357,9 +1438,6 @@ export default function PlanilhaCompras() {
                                    ✖ DESFAZER
                                  </button>
                              </div>
-                             <button onClick={(e) => marcarFaltaFeitoPorFornecedor(peds, forn, e)} style={{ background: '#fef2f2', color: '#ef4444', border: '1px dashed #fecaca', padding: '6px 10px', borderRadius: '6px', fontWeight: 'bold', fontSize: '9px', cursor: 'pointer', width: '100%', marginTop: '5px' }}>
-                                🚫 MARCAR FALTA
-                             </button>
                           </div>
                        ))}
                     </div>
@@ -1736,19 +1814,24 @@ export default function PlanilhaCompras() {
               <button onClick={() => setItemModal(null)} style={{ background: '#f1f5f9', border: 'none', width: '35px', height: '35px', borderRadius: '50%', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
             </div>
 
+            {/* 💡 ATUALIZAÇÃO 1: Detalhes das lojas na Bonificação no modal individual */}
             {itemModal.qtd_bonificada_cliente > 0 && !dadosCompra.temBonificacao && (
-               <div style={{ background: '#fef3c7', border: '1px solid #fde68a', padding: '15px', borderRadius: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                 <div>
-                    <strong style={{ color: '#d97706', fontSize: '12px', display: 'block' }}>⚠️ O cliente informou bonificação!</strong>
-                    <span style={{ fontSize: '11px', color: '#b45309' }}>Total de itens bonificados: <b>{itemModal.qtd_bonificada_cliente}</b></span>
+               <div style={{ background: '#fef3c7', border: '1px solid #fde68a', padding: '15px', borderRadius: '12px', marginBottom: '20px' }}>
+                 <strong style={{ color: '#d97706', fontSize: '13px', display: 'block', marginBottom: '10px' }}>⚠️ O cliente informou bonificação!</strong>
+                 <div style={{ fontSize: '11px', color: '#b45309', marginBottom: '15px' }}>
+                   {itemModal.lojas.filter(l => l.qtd_bonificada_cliente > 0).map(loja => (
+                     <div key={loja.loja_id} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #fcd34d', paddingBottom: '4px', marginBottom: '4px' }}>
+                       <span>🏪 {loja.nome_fantasia}</span>
+                       <span>Pagos: <b>{loja.qtd_pedida}</b> | Bonif: <b>{loja.qtd_bonificada_cliente}</b> | Total: <b>{loja.qtd_pedida + loja.qtd_bonificada_cliente}</b></span>
+                     </div>
+                   ))}
                  </div>
-                 {/* 💡 RECUSAR BONIFICAÇÃO (MODAL) */}
-                 <div style={{ display: 'flex', gap: '5px' }}>
-                   <button onClick={aceitarBonificacaoCliente} style={{ background: '#f97316', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>
-                     ACEITAR
+                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                   <button onClick={aceitarBonificacaoCliente} style={{ background: '#f97316', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>
+                     ACEITAR BONIFICAÇÃO
                    </button>
-                   <button onClick={rejeitarBonificacaoCliente} style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>
-                     RECUSAR
+                   <button onClick={rejeitarBonificacaoCliente} style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>
+                     RECUSAR E AJUSTAR TOTAL
                    </button>
                  </div>
                </div>
@@ -1838,7 +1921,6 @@ export default function PlanilhaCompras() {
         </div>
       )}
 
-      {/* 💡 MODAL: ADICIONAR ITEM MANUAL (Corrigido e Validado) */}
       {modalAdicionarItem && (
           <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 11000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
               <div style={{ background: '#fff', width: '100%', maxWidth: '500px', borderRadius: '20px', padding: '20px', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
