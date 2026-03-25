@@ -52,18 +52,8 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
 
   const dispararAutoSave = async (pValor, pPesoCaixa, pFornecedor, acaoForcada = null) => {
     setStatusAviso('⏳');
-
-    let finalValor = pValor;
-    let finalAcao = acaoForcada;
-
-    // 💡 REGRA DO PREÇO ANTIGO: Se estiver vazio e não for uma ação de "S/ Preço" ou "Falta", resgata o anterior
-    if (!finalValor && !finalAcao && produto.preco_anterior && produto.preco_anterior !== 'R$ 0,00') {
-        finalValor = produto.preco_anterior.replace('R$ ', '');
-        finalAcao = 'mantido';
-        setPreco(finalValor);
-    }
     
-    let v = String(finalValor || '').replace(/[^\d,.]/g, '').trim();
+    let v = String(pValor || '').replace(/[^\d,.]/g, '').trim();
     if (v.includes('.') && !v.includes(',')) v = v.replace('.', ','); 
     v = v.replace(/[^\d,]/g, ''); 
     
@@ -82,8 +72,8 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
 
     let statusCalculado = produto.status_cotacao;
 
-    if (finalAcao) {
-      statusCalculado = finalAcao;
+    if (acaoForcada) {
+      statusCalculado = acaoForcada;
     } else {
       if (precoFinal === 'R$ 0,00') {
         statusCalculado = 'pendente';
@@ -100,7 +90,7 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
     }
 
     const payload = {
-      preco: finalAcao === 'sem_preco' || finalAcao === 'falta' ? 'R$ 0,00' : precoFinal,
+      preco: acaoForcada === 'sem_preco' || acaoForcada === 'falta' ? 'R$ 0,00' : precoFinal,
       peso_caixa: pPesoCaixa,
       fornecedor_nome: fornFinal,
       status_cotacao: statusCalculado
@@ -121,10 +111,6 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
       setStatusAviso('❌');
       console.error("Erro Supabase:", error);
     }
-  };
-
-  const handleBlur = () => {
-    dispararAutoSave(preco, pesoCaixa, fornecedor);
   };
 
   const acaoRapida = (acao) => {
@@ -148,7 +134,7 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
             nextInput.focus();
             nextInput.select();
         }
-    }, 50);
+    }, 100); 
   };
 
   const matchPeso = String(pesoCaixa).match(/^([A-Z]+)\s+(.+)$/);
@@ -190,29 +176,33 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
             id={`preco-${index}`}
             type="text" 
             value={preco} 
-            onChange={e => {
-                // 💡 LETRA 'F' AUTOMÁTICA PARA FALTA
-                const val = e.target.value;
-                if (val.toLowerCase() === 'f') {
-                    setPreco('');
-                    acaoRapida('falta');
-                    pularParaProximo();
-                } else {
-                    setPreco(val);
-                }
-            }} 
-            onBlur={(e) => {
-                if (e.relatedTarget !== fornecedorRef.current) {
-                    handleBlur();
-                }
-            }}
+            onChange={e => setPreco(e.target.value)} 
             onKeyDown={e => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (!preco && !fornecedor) {
-                        acaoRapida('mantido');
+                    if (e.repeat) return; 
+
+                    const valLimpo = preco.trim().toLowerCase();
+
+                    // 1. Letra F: Aciona a falta direto e pula
+                    if (valLimpo === 'f') {
+                        setPreco('');
+                        dispararAutoSave('', pesoCaixa, fornecedor, 'falta');
                         pularParaProximo();
-                    } else if (fornecedorRef.current) {
+                        return;
+                    }
+
+                    // 2. Vazio: Resgata o preço antigo e pula direto
+                    if (!valLimpo) {
+                        const pAntigo = produto.preco_anterior && produto.preco_anterior !== 'R$ 0,00' ? produto.preco_anterior.replace('R$ ', '') : '';
+                        setPreco(pAntigo);
+                        dispararAutoSave(pAntigo, pesoCaixa, fornecedor, 'mantido');
+                        pularParaProximo();
+                        return;
+                    }
+
+                    // 3. Preenchido normalmente: Vai para Fornecedor
+                    if (fornecedorRef.current) {
                         fornecedorRef.current.focus();
                     }
                 }
@@ -229,10 +219,10 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
             type="text"
             value={fornecedor}
             onChange={e => setFornecedor(e.target.value)}
-            onBlur={handleBlur}
             onKeyDown={e => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
+                    if (e.repeat) return;
                     
                     if (produto.unidade_medida === 'KG') {
                         const pesoInput = document.getElementById(`peso-${index}`);
@@ -242,7 +232,7 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
                         }
                     }
                     
-                    handleBlur();
+                    dispararAutoSave(preco, pesoCaixa, fornecedor);
                     pularParaProximo();
                 }
             }}
@@ -258,11 +248,11 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
               type="text" 
               value={pesoVisual} 
               onChange={e => setPesoCaixa(`${siglaMedidaVisual} ${e.target.value}`)} 
-              onBlur={handleBlur}
               onKeyDown={e => {
                   if (e.key === 'Enter') {
                       e.preventDefault();
-                      handleBlur(); 
+                      if (e.repeat) return;
+                      dispararAutoSave(preco, pesoCaixa, fornecedor); 
                       pularParaProximo();
                   }
               }}
