@@ -10,7 +10,7 @@ const normalizarParaBusca = (str) => {
 // ============================================================================
 // COMPONENTE: LINHA DO PRODUTO
 // ============================================================================
-const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda, fornecedoresBd }) => {
+const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBorda, fornecedoresBd }) => {
   const [preco, setPreco] = useState(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
   const [pesoCaixa, setPesoCaixa] = useState(produto.peso_caixa || '');
   const [fornecedor, setFornecedor] = useState(produto.fornecedor_nome || '');
@@ -56,8 +56,7 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda, forn
       }
     }
 
-    // 💡 AUTO-CORRETOR DE FORNECEDOR PARA EVITAR O "X" VERMELHO DO SUPABASE
-    let fornFinal = pFornecedor ? pFornecedor.trim().toUpperCase() : null;
+    let fornFinal = (pFornecedor && pFornecedor.trim() !== '') ? pFornecedor.trim().toUpperCase() : null;
     if (fornFinal) {
         const limpo = normalizarParaBusca(fornFinal);
         const oficial = (fornecedoresBd || []).find(f => normalizarParaBusca(f.nome_fantasia) === limpo || normalizarParaBusca(f.nome_completo) === limpo);
@@ -80,7 +79,7 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda, forn
     const { error } = await supabase.from('produtos').update(payload).eq('id', produto.id);
     if (!error) {
       setStatusAviso('✅');
-      setFornecedor(fornFinal || ''); // Atualiza o input com o nome corrigido do banco
+      setFornecedor(fornFinal || ''); 
       setTimeout(() => setStatusAviso(''), 2000);
     } else {
       setStatusAviso('❌');
@@ -135,22 +134,27 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda, forn
             </div>
           </div>
         </div>
-        <div style={{ fontSize: '12px' }}>{statusAviso}</div>
+        <div style={{ fontSize: '12px', fontWeight: 'bold' }}>{statusAviso}</div>
       </div>
 
       <div style={{ display: 'flex', gap: '10px' }}>
         <div style={{ position: 'relative', flex: 1.2 }}>
           <span style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8', fontWeight: 'bold', fontSize: '11px' }}>R$</span>
           <input 
+            id={`preco-${index}`}
             type="text" 
             value={preco} 
             onChange={e => setPreco(e.target.value)} 
-            onBlur={handleBlur}
+            onBlur={(e) => {
+                // Só salva no blur se o foco não estiver indo para o fornecedor
+                if (e.relatedTarget !== fornecedorRef.current) {
+                    handleBlur();
+                }
+            }}
             onKeyDown={e => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
                     if (fornecedorRef.current) fornecedorRef.current.focus();
-                    else e.target.blur();
                 }
             }}
             placeholder={produto.preco_anterior && produto.preco_anterior !== 'R$ 0,00' ? produto.preco_anterior.replace('R$ ', '') : "0,00"}
@@ -166,8 +170,30 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda, forn
             value={fornecedor}
             onChange={e => setFornecedor(e.target.value)}
             onBlur={handleBlur}
-            onKeyDown={e => e.key === 'Enter' && e.target.blur()}
-            placeholder="Fornecedor..."
+            onKeyDown={e => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    
+                    // Se for KG, pula pro peso. Se não, salva e vai pro próximo.
+                    if (produto.unidade_medida === 'KG') {
+                        const pesoInput = document.getElementById(`peso-${index}`);
+                        if (pesoInput) {
+                            pesoInput.focus();
+                            return;
+                        }
+                    }
+                    
+                    handleBlur(); // Salva
+                    const nextInput = document.getElementById(`preco-${index + 1}`);
+                    if (nextInput) {
+                        nextInput.focus();
+                        nextInput.select();
+                    } else {
+                        e.target.blur();
+                    }
+                }
+            }}
+            placeholder="FORNECEDOR..."
             style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: '#f8fafc', boxSizing: 'border-box', textTransform: 'uppercase' }}
           />
         </div>
@@ -175,11 +201,24 @@ const LinhaProduto = React.memo(({ produto, abrirModal, aoSalvar, corBorda, forn
         {produto.unidade_medida === 'KG' && (
           <div style={{ position: 'relative', width: '90px' }}>
             <input 
+              id={`peso-${index}`}
               type="text" 
               value={pesoVisual} 
               onChange={e => setPesoCaixa(`${siglaMedidaVisual} ${e.target.value}`)} 
               onBlur={handleBlur}
-              onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+              onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleBlur(); // Salva
+                      const nextInput = document.getElementById(`preco-${index + 1}`);
+                      if (nextInput) {
+                          nextInput.focus();
+                          nextInput.select();
+                      } else {
+                          e.target.blur();
+                      }
+                  }
+              }}
               placeholder="Ex: 20"
               style={{ width: '100%', padding: '10px 30px 10px 10px', borderRadius: '8px', border: '1px solid #eab308', outline: 'none', fontWeight: 'bold', fontSize: '14px', backgroundColor: '#fefce8', boxSizing: 'border-box' }}
             />
@@ -252,7 +291,6 @@ export default function Precificacao() {
   async function carregarDados(silencioso = false) {
     if (!silencioso) setCarregando(true);
     try {
-      // 💡 Carregamos os fornecedores para abastecer o Datalist e o Corretor
       const { data: fornData } = await supabase.from('fornecedores').select('id, nome_fantasia, nome_completo').order('nome_fantasia', { ascending: true });
       if (fornData) setFornecedoresBd(fornData);
 
@@ -513,8 +551,7 @@ export default function Precificacao() {
         pesoCaixaFinal = `${formModal.tipo_medida_kg} ${formModal.peso_caixa}`;
     }
 
-    // 💡 AUTO-CORRETOR TAMBÉM NO MODAL
-    let fornFinalModal = formModal.fornecedor ? formModal.fornecedor.trim().toUpperCase() : null;
+    let fornFinalModal = (formModal.fornecedor && formModal.fornecedor.trim() !== '') ? formModal.fornecedor.trim().toUpperCase() : null;
     if (fornFinalModal) {
         const strBusca = normalizarParaBusca(fornFinalModal);
         const oficial = fornecedoresBd.find(f => normalizarParaBusca(f.nome_fantasia) === strBusca || normalizarParaBusca(f.nome_completo) === strBusca);
@@ -539,9 +576,13 @@ export default function Precificacao() {
 
     setCarregando(true);
     const { error } = await supabase.from('produtos').update(payload).eq('id', prodModal.id);
-    if (error) alert("Erro: " + error.message);
     
-    handleAtualizarLista(prodModal.id, payload);
+    if (error) {
+      alert("Erro Supabase: " + error.message);
+    } else {
+      handleAtualizarLista(prodModal.id, payload);
+    }
+    
     setCarregando(false);
     setModalAberto(false);
   };
@@ -681,9 +722,10 @@ export default function Precificacao() {
 
       {/* 📝 LISTA RENDERIZADA */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {produtosRenderizados.map(p => (
+        {produtosRenderizados.map((p, index) => (
            <LinhaProduto 
              key={p.id} 
+             index={index}
              produto={p} 
              corBorda={CONFIG_ABAS.find(a => a.id === p.status_cotacao)?.cor || '#3b82f6'}
              abrirModal={abrirEdicaoCompleta} 
