@@ -72,6 +72,13 @@ export default function PlanilhaCompras() {
 
   const [itensSelecionados, setItensSelecionados] = useState([]);
   const [nomeFornecedorLote, setNomeFornecedorLote] = useState('');
+
+  // 💡 NOVOS STATES PARA O MODAL DE AGRUPAMENTO FRACIONADO (POR LOJA)
+  const [modalFracionarLoteAberto, setModalFracionarLoteAberto] = useState(false);
+  const [fracionarLojasDisp, setFracionarLojasDisp] = useState([]); 
+  const [fracionarLojasSelecionadas, setFracionarLojasSelecionadas] = useState([]); 
+  const [fracionarFornecedor, setFracionarFornecedor] = useState('');
+  const [fracionarAtribuicoes, setFracionarAtribuicoes] = useState({}); // Mapeia { lojaId: fornecedor }
   
   const [agrupamentos, setAgrupamentos] = useState(() => {
     try {
@@ -126,14 +133,13 @@ export default function PlanilhaCompras() {
     localStorage.setItem('nomes_personalizados_virtus', JSON.stringify(nomesPersonalizados));
   }, [nomesPersonalizados]);
 
-
-  // 💡 FILTRO INTELIGENTE NÍVEL MÁXIMO: Ignora acentos, espaços, símbolos e pontuações em todas as abas
+  // 💡 FILTRO INTELIGENTE NÍVEL MÁXIMO
   const removerAcentos = (str) => {
     if (!str) return '';
     return String(str)
       .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "") // Tira os acentos
-      .replace(/[^a-zA-Z0-9]/g, '')    // Tira os espaços, traços e barras
+      .replace(/[\u0300-\u036f]/g, "") 
+      .replace(/[^a-zA-Z0-9]/g, '')    
       .toLowerCase();
   };
 
@@ -176,7 +182,6 @@ export default function PlanilhaCompras() {
       removerAcentos(f.nome_completo) === nomeLimpo
     );
     
-    // Devolve o nome já corrigido com os acentos oficiais do banco!
     if (fornecedorOficial) {
         return (fornecedorOficial.nome_fantasia || fornecedorOficial.nome_completo).toUpperCase().trim();
     }
@@ -204,7 +209,7 @@ export default function PlanilhaCompras() {
   };
 
   const marcarFaltaDoAgrupamento = async (nomeItem, lojasDoItem, grupoId) => {
-      if(!window.confirm(`Deseja marcar FALTA para o item "${nomeItem}" em todas as lojas deste grupo?`)) return;
+      if(!window.confirm(`Deseja marcar FALTA para o item "${nomeItem}" nas lojas selecionadas deste grupo?`)) return;
       setCarregando(true);
       
       const promessas = lojasDoItem.map(l => supabase.from('pedidos').update({ status_compra: 'falta', qtd_atendida: 0, custo_unit: 'FALTA' }).eq('id', l.id_pedido));
@@ -234,7 +239,6 @@ export default function PlanilhaCompras() {
     carregarDados();
   };
 
-  // 💡 ATUALIZAÇÃO 1: Tratamento detalhado da Bonificação no Cliente Único
   const rejeitarBonificacaoCliente = async () => {
      setCarregando(true);
      const promessas = [];
@@ -270,7 +274,6 @@ export default function PlanilhaCompras() {
      setCarregando(false);
   };
 
-  // 💡 ATUALIZAÇÃO 1: Tratamento detalhado da Bonificação no Agrupamento
   const rejeitarBonificacaoGrupo = async (nomeItem, lojasDoItem) => {
      setCarregando(true);
      const promessas = [];
@@ -677,7 +680,6 @@ export default function PlanilhaCompras() {
     }));
   };
 
-  // 💡 ATUALIZAÇÃO 2: Lógica para forçar a quantidade fracionada como o novo Pedido Total
   const atualizarPedidoTotalLoja = async (idPedido, novaQuantidade, nomeLoja) => {
       const qtdNum = Number(novaQuantidade);
       if (isNaN(qtdNum) || qtdNum < 0) return alert('Quantidade inválida.');
@@ -707,7 +709,7 @@ export default function PlanilhaCompras() {
     let fornecedorFinal = '';
     if (!dadosCompra.isFaltaGeral) {
         fornecedorFinal = verificarFornecedorCadastrado(dadosCompra.fornecedor);
-        if (!fornecedorFinal) return; // Cancela se o usuário não aceitou
+        if (!fornecedorFinal) return; 
     }
 
     let precoLimpo = dadosCompra.valor_unit.replace(/[^\d,.-]/g, '').trim();
@@ -766,7 +768,7 @@ export default function PlanilhaCompras() {
     let fornecedorFinal = '';
     if (temCompra) {
         fornecedorFinal = verificarFornecedorCadastrado(dadosCompra.fornecedor);
-        if (!fornecedorFinal) return; // Cancela se o usuário não aceitou
+        if (!fornecedorFinal) return; 
     }
 
     let precoLimpo = dadosCompra.valor_unit.replace(/[^\d,.-]/g, '').trim();
@@ -930,13 +932,16 @@ export default function PlanilhaCompras() {
 
         if (demandaItem) {
            demandaItem.lojas.forEach(loja => {
-               promessas.push(supabase.from('pedidos').update({
-                   fornecedor_compra: grupo.fornecedor,
-                   custo_unit: precoFinal,
-                   qtd_atendida: loja.qtd_pedida, 
-                   qtd_bonificada: loja.qtd_bonificada_cliente || 0,
-                   status_compra: isBoleto ? 'boleto' : 'atendido'
-               }).eq('id', loja.id_pedido));
+               // 💡 Considerar apenas as lojas restritas do grupo (se houver agrupamento fracionado)
+               if (!grupo.lojasRestritas || grupo.lojasRestritas.includes(loja.loja_id)) {
+                   promessas.push(supabase.from('pedidos').update({
+                       fornecedor_compra: grupo.fornecedor,
+                       custo_unit: precoFinal,
+                       qtd_atendida: loja.qtd_pedida, 
+                       qtd_bonificada: loja.qtd_bonificada_cliente || 0,
+                       status_compra: isBoleto ? 'boleto' : 'atendido'
+                   }).eq('id', loja.id_pedido));
+               }
            });
         }
     });
@@ -963,7 +968,9 @@ export default function PlanilhaCompras() {
           const demandaItem = demandas.find(d => d.nome === nomeItem);
           if (demandaItem) {
               demandaItem.lojas.forEach(loja => {
-                  promessas.push(supabase.from('pedidos').update({ status_compra: 'pendente', custo_unit: '' }).eq('id', loja.id_pedido));
+                  if (!grupo.lojasRestritas || grupo.lojasRestritas.includes(loja.loja_id)) {
+                      promessas.push(supabase.from('pedidos').update({ status_compra: 'pendente', custo_unit: '' }).eq('id', loja.id_pedido));
+                  }
               });
           }
       });
@@ -998,7 +1005,6 @@ export default function PlanilhaCompras() {
      } else { window.html2pdf().set(opt).from(elemento).save(); }
   };
 
-  // 💡 ATUALIZAÇÃO 2: Renderização das Lojas com Botão de "USAR COMO TOTAL"
   const renderListaLojasModal = () => (
     <div style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0', marginTop: '10px' }}>
       <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#111', display: 'block', marginBottom: '15px', textTransform: 'uppercase' }}>
@@ -1080,6 +1086,81 @@ export default function PlanilhaCompras() {
     }
   };
 
+  // 💡 LÓGICA DO NOVO MODAL DE FRACIONAMENTO POR LOJA
+  const abrirModalFracionarLote = () => {
+      const lojasSet = new Map();
+      itensSelecionados.forEach(nomeItem => {
+          const d = demandas.find(x => x.nome === nomeItem);
+          if (d) {
+              d.lojas.forEach(l => {
+                  if (!lojasSet.has(l.loja_id)) {
+                      lojasSet.set(l.loja_id, { id: l.loja_id, nome: l.nome_fantasia });
+                  }
+              });
+          }
+      });
+      setFracionarLojasDisp(Array.from(lojasSet.values()));
+      setFracionarLojasSelecionadas([]);
+      setFracionarFornecedor('');
+      setFracionarAtribuicoes({});
+      setModalFracionarLoteAberto(true);
+  };
+
+  const toggleLojaFracionada = (lojaId) => {
+      if (fracionarAtribuicoes[lojaId]) return; // Impede clicar se já atribuiu
+      setFracionarLojasSelecionadas(prev => 
+          prev.includes(lojaId) ? prev.filter(id => id !== lojaId) : [...prev, lojaId]
+      );
+  };
+
+  const atribuirFornecedorLojas = () => {
+      if (fracionarLojasSelecionadas.length === 0) return alert("Selecione pelo menos uma loja para atribuir.");
+      if (!fracionarFornecedor.trim()) return alert("Digite o nome do fornecedor.");
+      
+      const fornecedorFinal = verificarFornecedorCadastrado(fracionarFornecedor);
+      if (!fornecedorFinal) return;
+
+      setFracionarAtribuicoes(prev => {
+          const newAtrib = { ...prev };
+          fracionarLojasSelecionadas.forEach(id => newAtrib[id] = fornecedorFinal);
+          return newAtrib;
+      });
+
+      setFracionarLojasSelecionadas([]);
+      setFracionarFornecedor('');
+  };
+
+  const resetarAtribuicao = (lojaId) => {
+      setFracionarAtribuicoes(prev => {
+          const newAtrib = { ...prev };
+          delete newAtrib[lojaId];
+          return newAtrib;
+      });
+  };
+
+  const finalizarAgrupamentoFracionado = () => {
+      const fornecedoresAtribuidos = new Set(Object.values(fracionarAtribuicoes));
+      const novosGrupos = [];
+
+      fornecedoresAtribuidos.forEach(forn => {
+          const lojasDoForn = Object.keys(fracionarAtribuicoes).filter(id => fracionarAtribuicoes[id] === forn).map(Number);
+          
+          novosGrupos.push({
+              id: Date.now() + Math.random(),
+              fornecedor: forn,
+              itens: itensSelecionados,
+              lojasRestritas: lojasDoForn, // 💡 O Segredo: O grupo sabe que é só para algumas lojas
+              status: 'pendente'
+          });
+      });
+
+      setAgrupamentos(prev => [...prev, ...novosGrupos]);
+      setModalFracionarLoteAberto(false);
+      setItensSelecionados([]);
+      mostrarNotificacao('Itens separados por fornecedor/loja com sucesso!', 'sucesso');
+      setAbaAtiva('pedidos_fornecedor');
+  };
+
   if (carregando && demandas.length === 0 && pedidosFeitos.length === 0) {
     return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif' }}>🔄 Carregando...</div>;
   }
@@ -1092,7 +1173,7 @@ export default function PlanilhaCompras() {
   }
 
   return (
-    <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '120px', padding: '10px' }}>
+    <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto', fontFamily: 'sans-serif', paddingBottom: '180px', padding: '10px' }}>
       
       <datalist id="lista-fornecedores">
         {fornecedoresOficiais.map(f => {
@@ -1214,10 +1295,10 @@ export default function PlanilhaCompras() {
                     {item.demanda}
                   </div>
                  <strong style={{ fontSize: '13px', color: '#111', lineHeight: '1.2' }}>{item.nome}</strong>
-<span style={{ fontSize: '12px', color: '#f97316', fontWeight: '900', marginTop: '3px' }}>{calcularPrecoFinalSugestao(item.nome)}</span>
-{item.fornecedor_sugerido && item.fornecedor_sugerido !== 'Não cadastrado' && (
-   <span style={{ fontSize: '10px', color: '#8b5cf6', fontWeight: 'bold', marginTop: '2px' }}>🏢 {item.fornecedor_sugerido}</span>
-)}
+                 <span style={{ fontSize: '12px', color: '#f97316', fontWeight: '900', marginTop: '3px' }}>{calcularPrecoFinalSugestao(item.nome)}</span>
+                 {item.fornecedor_sugerido && item.fornecedor_sugerido !== 'Não cadastrado' && (
+                    <span style={{ fontSize: '10px', color: '#8b5cf6', fontWeight: 'bold', marginTop: '2px' }}>🏢 {item.fornecedor_sugerido}</span>
+                 )}
                   <span style={{ fontSize: '10px', color: item.isResto ? '#ef4444' : '#64748b', fontWeight: item.isResto ? 'bold' : 'normal', marginTop: '5px' }}>
                     {item.isResto ? 'RESTA COMPRAR' : `${item.lojas.length} Loja(s)`}
                   </span>
@@ -1249,6 +1330,14 @@ export default function PlanilhaCompras() {
                  <div style={{ flex: 1 }}>
                     <strong style={{ display: 'block', fontSize: '14px', color: '#111' }}>{item.nome}</strong>
                     <small style={{ color: '#666', fontSize: '11px' }}>{item.demanda} {item.unidade} • {item.lojas.length} Loja(s)</small>
+                    
+                    {/* 💡 ATUALIZAÇÃO 3: Informações de Fornecedor e Bonificação aqui na aba */}
+                    {item.fornecedor_sugerido && item.fornecedor_sugerido !== 'Não cadastrado' && (
+                       <span style={{ fontSize: '10px', color: '#8b5cf6', fontWeight: 'bold', display: 'block', marginTop: '2px' }}>🏢 {item.fornecedor_sugerido}</span>
+                    )}
+                    {item.qtd_bonificada_cliente > 0 && (
+                       <span style={{ fontSize: '10px', color: '#16a34a', fontWeight: 'bold', display: 'block', marginTop: '2px' }}>🎁 Possui Bonificação</span>
+                    )}
                  </div>
               </div>
             )})}
@@ -1263,6 +1352,18 @@ export default function PlanilhaCompras() {
                   <strong style={{ color: '#8b5cf6' }}>{itensSelecionados.length} Itens Selecionados</strong>
                   <button onClick={() => setItensSelecionados([])} style={{ background: 'none', border: 'none', color: '#ef4444', fontWeight: 'bold' }}>Limpar</button>
                </div>
+               
+               {/* 💡 ATUALIZAÇÃO 3: Botão de agrupar fracionado por Loja */}
+               <button onClick={abrirModalFracionarLote} style={{ width: '100%', background: '#f59e0b', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '13px' }}>
+                  🧩 AGRUPAR FRACIONADO (POR LOJA)
+               </button>
+               
+               <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <div style={{flex: 1, borderTop: '1px solid #e2e8f0'}}></div>
+                  <span style={{fontSize: '9px', color: '#94a3b8', fontWeight: 'bold'}}>OU AGRUPAR TODOS</span>
+                  <div style={{flex: 1, borderTop: '1px solid #e2e8f0'}}></div>
+               </div>
+
                <div style={{ display: 'flex', gap: '10px' }}>
                   <input list="lista-fornecedores" placeholder="Nome do Fornecedor..." value={nomeFornecedorLote} onChange={e => setNomeFornecedorLote(e.target.value)} style={{ flex: 1, padding: '15px', borderRadius: '12px', border: '2px solid #e2e8f0', outline: 'none', textTransform: 'uppercase', fontWeight: 'bold' }} />
                   <button onClick={criarGrupoFornecedor} style={{ background: '#8b5cf6', color: '#fff', border: 'none', padding: '0 20px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>AGRUPAR</button>
@@ -1285,8 +1386,11 @@ export default function PlanilhaCompras() {
                  const dItem = demandas.find(d => d.nome === nomeItem);
                  if(dItem) {
                     dItem.lojas.forEach(l => {
-                       if(!lojasDoGrupo[l.nome_fantasia]) lojasDoGrupo[l.nome_fantasia] = { id: l.loja_id, itens: [] };
-                       lojasDoGrupo[l.nome_fantasia].itens.push({ nome: nomeItem, qtd: l.qtd_pedida, unidade: dItem.unidade });
+                       // 💡 Lógica de restrição do Agrupamento Fracionado
+                       if (!grupo.lojasRestritas || grupo.lojasRestritas.includes(l.loja_id)) {
+                           if(!lojasDoGrupo[l.nome_fantasia]) lojasDoGrupo[l.nome_fantasia] = { id: l.loja_id, itens: [] };
+                           lojasDoGrupo[l.nome_fantasia].itens.push({ nome: nomeItem, qtd: l.qtd_pedida, unidade: dItem.unidade });
+                       }
                     });
                  }
               });
@@ -1298,6 +1402,7 @@ export default function PlanilhaCompras() {
                     <h3 style={{ margin: 0, color: '#111', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
                       🏢 {grupo.fornecedor} 
                       <span style={{background: '#f1f5f9', color: '#64748b', fontSize: '11px', padding: '3px 8px', borderRadius: '8px'}}>{grupo.itens.length} itens</span>
+                      {grupo.lojasRestritas && <span style={{background: '#fef3c7', color: '#d97706', fontSize: '9px', padding: '3px 6px', borderRadius: '6px', fontWeight: 'bold'}}>Fracionado</span>}
                     </h3>
                     <span style={{ color: '#ccc', transform: expandido ? 'rotate(90deg)' : 'none', transition: '0.2s', fontSize: '18px' }}>❯</span>
                  </div>
@@ -1313,32 +1418,40 @@ export default function PlanilhaCompras() {
                         {grupo.itens.map(nomeItem => {
                            const demandaReal = demandas.find(d => d.nome === nomeItem);
                            if (!demandaReal) return null;
-                           const temBonificacao = demandaReal.qtd_bonificada_cliente > 0;
+
+                           // 💡 Filtra as lojas que pertencem a este agrupamento fracionado (ou pega todas se não for fracionado)
+                           const lojasFiltradas = grupo.lojasRestritas 
+                              ? demandaReal.lojas.filter(l => grupo.lojasRestritas.includes(l.loja_id))
+                              : demandaReal.lojas;
                            
-                           // 💡 Mostra a info de Peso se for KG
+                           if (lojasFiltradas.length === 0) return null;
+
+                           const demandaCalculada = lojasFiltradas.reduce((sum, l) => sum + l.qtd_pedida, 0);
+                           const bonifCalculada = lojasFiltradas.reduce((sum, l) => sum + l.qtd_bonificada_cliente, 0);
+                           const temBonificacao = bonifCalculada > 0;
+                           
                            const prodDB = produtosBd.find(p => p.nome.toUpperCase() === nomeItem);
                            let pesoInfo = '';
                            if (prodDB && prodDB.unidade_medida === 'KG' && prodDB.peso_caixa) {
-                              pesoInfo = `(Caixa de ${prodDB.peso_caixa}Kg) - Total Kg: ${demandaReal.demanda * parseFloat(prodDB.peso_caixa)}`;
+                              pesoInfo = `(Caixa de ${prodDB.peso_caixa}Kg) - Total Kg: ${demandaCalculada * parseFloat(prodDB.peso_caixa)}`;
                            }
 
                            return (
                              <div key={nomeItem} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '10px', marginBottom: '10px', borderBottom: '1px solid #e2e8f0', backgroundColor: temBonificacao ? '#fefce8' : 'transparent', padding: temBonificacao ? '10px' : '0', borderRadius: '8px' }}>
                                 <div style={{ flex: 1 }}>
                                   <strong style={{ display: 'block', fontSize: '13px', color: '#111' }}>{nomeItem}</strong>
-<small style={{ color: '#8b5cf6', fontWeight: '900', fontSize: '12px', display: 'block', marginTop: '2px' }}>{calcularPrecoFinalSugestao(nomeItem)}</small>
-{prodDB && prodDB.fornecedor_nome && (
-   <small style={{ color: '#8b5cf6', fontWeight: 'bold', fontSize: '10px', display: 'block' }}>🏢 {prodDB.fornecedor_nome}</small>
-)}
-                                   <small style={{ color: '#f97316', fontWeight: 'bold', fontSize: '10px', display: 'block' }}>Pediram: {demandaReal.demanda} {demandaReal.unidade}</small>
+                                  <small style={{ color: '#8b5cf6', fontWeight: '900', fontSize: '12px', display: 'block', marginTop: '2px' }}>{calcularPrecoFinalSugestao(nomeItem)}</small>
+                                  {prodDB && prodDB.fornecedor_nome && (
+                                     <small style={{ color: '#8b5cf6', fontWeight: 'bold', fontSize: '10px', display: 'block' }}>🏢 {prodDB.fornecedor_nome}</small>
+                                  )}
+                                   <small style={{ color: '#f97316', fontWeight: 'bold', fontSize: '10px', display: 'block' }}>Pediram: {demandaCalculada} {demandaReal.unidade}</small>
                                    {pesoInfo && <small style={{ color: '#8b5cf6', fontWeight: 'bold', fontSize: '9px', display: 'block', marginTop: '2px' }}>{pesoInfo}</small>}
                                    
-                                   {/* 💡 ATUALIZAÇÃO 1: Detalhes das lojas na Bonificação no agrupamento */}
                                    {temBonificacao && (
                                      <div style={{ marginTop: '5px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
                                         <div>
                                            <span style={{display: 'block', fontSize: '10px', color: '#d97706', fontWeight: 'bold'}}>⚠️ Pedido de bonificação:</span>
-                                           {demandaReal.lojas.filter(l => l.qtd_bonificada_cliente > 0).map(l => (
+                                           {lojasFiltradas.filter(l => l.qtd_bonificada_cliente > 0).map(l => (
                                               <span key={l.loja_id} style={{ display: 'block', fontSize: '9px', color: '#b45309' }}>
                                                  - <b>{l.nome_fantasia}</b>: {l.qtd_pedida} pagos + {l.qtd_bonificada_cliente} bonificados
                                               </span>
@@ -1350,7 +1463,7 @@ export default function PlanilhaCompras() {
                                           }} style={{ background: '#f97316', color: '#fff', border: 'none', padding: '5px 10px', borderRadius: '6px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}>
                                               ACEITAR
                                           </button>
-                                          <button onClick={() => rejeitarBonificacaoGrupo(nomeItem, demandaReal.lojas)} style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '5px 10px', borderRadius: '6px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}>
+                                          <button onClick={() => rejeitarBonificacaoGrupo(nomeItem, lojasFiltradas)} style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '5px 10px', borderRadius: '6px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}>
                                               RECUSAR E AJUSTAR TOTAL
                                           </button>
                                         </div>
@@ -1359,7 +1472,7 @@ export default function PlanilhaCompras() {
 
                                 </div>
                                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                                  <button onClick={() => marcarFaltaDoAgrupamento(nomeItem, demandaReal.lojas, grupo.id)} style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer' }} title="Marcar falta em todas as lojas">
+                                  <button onClick={() => marcarFaltaDoAgrupamento(nomeItem, lojasFiltradas, grupo.id)} style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer' }} title="Marcar falta em todas as lojas">
                                       🚫 FALTA
                                   </button>
                                   
@@ -1608,6 +1721,55 @@ export default function PlanilhaCompras() {
         </div>
       )}
 
+      {/* 💡 NOVO MODAL: AGRUPAR FRACIONADO POR LOJA */}
+      {modalFracionarLoteAberto && (
+          <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 11000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+              <div style={{ background: '#fff', width: '100%', maxWidth: '500px', borderRadius: '20px', padding: '20px', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                      <h3 style={{ margin: 0, fontSize: '18px', color: '#111' }}>🧩 Agrupar Fracionado (Por Loja)</h3>
+                      <button onClick={() => setModalFracionarLoteAberto(false)} style={{ background: '#eee', border: 'none', borderRadius: '50%', width: '30px', height: '30px', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
+                  </div>
+
+                  <div style={{ flex: 1, overflowY: 'auto', marginBottom: '15px', paddingRight: '5px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '10px' }}>SELECIONE AS LOJAS PARA ATRIBUIR O FORNECEDOR:</label>
+                      <button onClick={() => setFracionarLojasSelecionadas(fracionarLojasDisp.filter(l => !fracionarAtribuicoes[l.id]).map(l => l.id))} style={{marginBottom: '10px', fontSize: '10px', padding: '6px 12px', background: '#e2e8f0', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', color: '#475569'}}>Selecionar Todas as Restantes</button>
+                      
+                      {fracionarLojasDisp.map(loja => {
+                          const isAtribuido = !!fracionarAtribuicoes[loja.id];
+                          const isSelecionado = fracionarLojasSelecionadas.includes(loja.id);
+                          return (
+                              <div key={loja.id} onClick={() => toggleLojaFracionada(loja.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: isAtribuido ? '#dcfce7' : (isSelecionado ? '#f3e8ff' : '#f8fafc'), borderBottom: '1px solid #e2e8f0', borderRadius: '8px', marginBottom: '5px', cursor: isAtribuido ? 'default' : 'pointer' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                      {!isAtribuido && <input type="checkbox" checked={isSelecionado} readOnly style={{ width: '18px', height: '18px', accentColor: '#8b5cf6', pointerEvents: 'none' }} />}
+                                      <span style={{ fontSize: '14px', fontWeight: 'bold', color: isAtribuido ? '#166534' : '#334155', textDecoration: isAtribuido ? 'line-through' : 'none' }}>{loja.nome}</span>
+                                  </div>
+                                  {isAtribuido && (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                          <span style={{fontSize: '11px', background: '#166534', color: '#fff', padding: '3px 8px', borderRadius: '6px', fontWeight: 'bold'}}>🏢 {fracionarAtribuicoes[loja.id]}</span>
+                                          <button onClick={(e) => { e.stopPropagation(); resetarAtribuicao(loja.id); }} style={{ background: 'none', border: 'none', color: '#ef4444', fontWeight: '900', fontSize: '16px', cursor: 'pointer' }}>✕</button>
+                                      </div>
+                                  )}
+                              </div>
+                          )
+                      })}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                      <input list="lista-fornecedores" placeholder="Nome do Fornecedor..." value={fracionarFornecedor} onChange={e => setFracionarFornecedor(e.target.value)} style={{ flex: 1, padding: '15px', borderRadius: '12px', border: '2px solid #e2e8f0', outline: 'none', textTransform: 'uppercase', fontWeight: 'bold', fontSize: '14px' }} />
+                      <button onClick={atribuirFornecedorLojas} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '0 20px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '12px' }}>ATRIBUIR</button>
+                  </div>
+
+                  {Object.keys(fracionarAtribuicoes).length === fracionarLojasDisp.length && fracionarLojasDisp.length > 0 ? (
+                      <button onClick={finalizarAgrupamentoFracionado} style={{ width: '100%', padding: '18px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '14px' }}>
+                          FINALIZAR PEDIDO FRACIONADO
+                      </button>
+                  ) : (
+                      <div style={{ textAlign: 'center', fontSize: '12px', color: '#ef4444', fontWeight: 'bold', padding: '10px', background: '#fef2f2', borderRadius: '8px' }}>Atribua fornecedor a todas as lojas para finalizar.</div>
+                  )}
+              </div>
+          </div>
+      )}
+
       {modalNomesFornecedor && (
          <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 11000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
             <div style={{ background: '#fff', width: '100%', maxWidth: '400px', borderRadius: '20px', padding: '20px', maxHeight: '80vh', overflowY: 'auto' }}>
@@ -1814,7 +1976,6 @@ export default function PlanilhaCompras() {
               <button onClick={() => setItemModal(null)} style={{ background: '#f1f5f9', border: 'none', width: '35px', height: '35px', borderRadius: '50%', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
             </div>
 
-            {/* 💡 ATUALIZAÇÃO 1: Detalhes das lojas na Bonificação no modal individual */}
             {itemModal.qtd_bonificada_cliente > 0 && !dadosCompra.temBonificacao && (
                <div style={{ background: '#fef3c7', border: '1px solid #fde68a', padding: '15px', borderRadius: '12px', marginBottom: '20px' }}>
                  <strong style={{ color: '#d97706', fontSize: '13px', display: 'block', marginBottom: '10px' }}>⚠️ O cliente informou bonificação!</strong>

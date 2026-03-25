@@ -52,7 +52,6 @@ export default function MenuCliente({ usuario, tema }) {
   const [precosLiberados, setPrecosLiberados] = useState(false);
   const [buscaMenu, setBuscaMenu] = useState('');
   
-  // 💡 MUDANÇA: O carrinho não começa mais do LocalStorage, ele começa vazio e será puxado do banco
   const [carrinho, setCarrinho] = useState([]);
 
   const [produtoExpandido, setProdutoExpandido] = useState(null);
@@ -63,10 +62,13 @@ export default function MenuCliente({ usuario, tema }) {
   const [modalCarrinhoAberto, setModalCarrinhoAberto] = useState(false);
   const [modalRevisaoAberto, setModalRevisaoAberto] = useState(false);
   const [enviandoPedido, setEnviandoPedido] = useState(false);
+  const [bloqueiaCliqueProduto, setBloqueiaCliqueProduto] = useState(false); 
   
   const [listaEnviadaHoje, setListaEnviadaHoje] = useState(null);
   const [modoVisualizacao, setModoVisualizacao] = useState(false); 
   const [itemEditandoId, setItemEditandoId] = useState(null);
+
+  const [textoCopiado, setTextoCopiado] = useState(false); 
 
   const [navState, setNavState] = useState({ show: true, shrink: false });
   const ultimoScroll = useRef(0);
@@ -130,7 +132,6 @@ export default function MenuCliente({ usuario, tema }) {
     if ("Notification" in window) setPermissaoPush(Notification.permission);
   }, []);
 
-  // 💡 FUNÇÃO: REGISTRO DE LOG NO BANCO
   const registrarLogCarrinho = async (acao, nomeItem, qtdItem) => {
     try {
       await supabase.from('logs_carrinho').insert([{
@@ -208,11 +209,9 @@ export default function MenuCliente({ usuario, tema }) {
     if (temPesoExtra && numeroPeso > 0) {
       const precoFechado = precoBase * numeroPeso;
       
-      // 💡 MUDANÇA: Exibe a tag do produto final e o cálculo de KG abaixo
-      // Converte o KG em CX, SC, BDJ, etc... Se não for KG, usa o próprio tipo.
       let nomeUnidadeDisplay = String(produto.unidade_medida || 'UN').toUpperCase();
       if (nomeUnidadeDisplay === 'KG') {
-         nomeUnidadeDisplay = 'CX'; // Padrão se for vendido por peso fechado
+         nomeUnidadeDisplay = 'CX'; 
       }
       
       return { 
@@ -248,11 +247,29 @@ export default function MenuCliente({ usuario, tema }) {
 
     const agora = Date.now();
     if (agora - dataUltimoCarregamento.current < 2000) return;
-    if (silencioso && agora - dataUltimoCarregamento.current < 8000) return;
     
     dataUltimoCarregamento.current = agora;
 
     try {
+      // 💡 ATUALIZAÇÃO SILENCIOSA (POLLING LEVE DE 5 EM 5 SEGUNDOS)
+      if (silencioso) {
+        const { data: pUpdates } = await supabase.from('produtos').select('id, preco, status_cotacao, promocao, novidade');
+        if (pUpdates) {
+           setProdutos(prevProdutos => {
+               const mapUpdates = new Map(pUpdates.map(u => [u.id, u]));
+               return prevProdutos.map(p => {
+                   const upd = mapUpdates.get(p.id);
+                   if (upd) {
+                       return { ...p, preco: upd.preco, status_cotacao: upd.status_cotacao, promocao: upd.promocao, novidade: upd.novidade };
+                   }
+                   return p;
+               });
+           });
+        }
+        return; // Encerra aqui na atualização silenciosa para não recarregar banners e loja
+      }
+
+      // CARREGAMENTO NORMAL (INICIAL)
       const { data: configData } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
       if (configData) setPrecosLiberados(configData.precos_liberados);
 
@@ -280,8 +297,6 @@ export default function MenuCliente({ usuario, tema }) {
     } catch (e) { console.error("Erro VIRTUS:", e); }
   }, [codLoja, hoje]); 
 
-  // 💡 NOVA FUNÇÃO: SINCRONIZAÇÃO DO CARRINHO NA NUVEM
-// 💡 ONDE MUDAR: Função syncCarrinhoNuvem
   const syncCarrinhoNuvem = useCallback(async () => {
     if (!codLoja) return;
     try {
@@ -291,7 +306,6 @@ export default function MenuCliente({ usuario, tema }) {
         .eq('loja_id', codLoja);
 
       if (!error && itensNuvem) {
-          // 💡 AGRUPAMENTO INTELIGENTE: Evita que itens apareçam repetidos no State
           const mapa = {};
           itensNuvem.forEach(n => {
             const id = n.produto_id;
@@ -310,17 +324,17 @@ export default function MenuCliente({ usuario, tema }) {
 
   useEffect(() => { 
       carregarDados(); 
-      syncCarrinhoNuvem(); // Puxa logo no início
+      syncCarrinhoNuvem(); 
   }, [carregarDados, syncCarrinhoNuvem]);
   
+  // 💡 ATUALIZAÇÃO SILENCIOSA: A cada 5 segundos
   useEffect(() => {
     const radar = setInterval(() => {
         carregarDados(true);
-    }, 20000);
+    }, 5000);
     return () => clearInterval(radar);
   }, [carregarDados]);
 
-  // 💡 MUDANÇA: Sincronização do carrinho a cada 1 segundo
   useEffect(() => {
      const intervaloSync = setInterval(() => {
          syncCarrinhoNuvem();
@@ -358,28 +372,43 @@ export default function MenuCliente({ usuario, tema }) {
     setQtdBonificada(isNaN(val) || val < 0 ? 0 : val);
   };
 
-  // 💡 MUDANÇA: Função salva/atualiza direto no Banco 'carrinho_nuvem'
+  // 💡 BLINDAGEM DE CARRINHO: Contra Multiplicação e Aberturas Acidentais
   const salvarNoCarrinho = async () => {
+    if (bloqueiaCliqueProduto) return; 
+    setBloqueiaCliqueProduto(true);
+
     const qtdFinal = parseInt(quantidade, 10) || 1;
     const bonifFinal = temBonificacao ? (parseInt(qtdBonificada, 10) || 0) : 0;
-    
     const bonificacaoSegura = Math.min(qtdFinal, bonifFinal);
     const qtdCobrada = Math.max(0, qtdFinal - bonificacaoSegura);
 
     const infosVenda = tratarInfosDeVenda(produtoExpandido);
     
     if (produtoExpandido.status_cotacao === 'falta') {
-      if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está marcado como EM FALTA. Deseja adicionar ao pedido mesmo assim?`)) return;
+      if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está marcado como EM FALTA. Deseja adicionar ao pedido mesmo assim?`)) {
+          setBloqueiaCliqueProduto(false); 
+          return;
+      }
     } else if (produtoExpandido.status_cotacao === 'sem_preco' || infosVenda.precoBase === 0) {
-      if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está SEM PREÇO definido hoje. O valor final será atualizado posteriormente. Deseja confirmar?`)) return;
+      if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está SEM PREÇO definido hoje. O valor final será atualizado posteriormente. Deseja confirmar?`)) {
+          setBloqueiaCliqueProduto(false); 
+          return;
+      }
     }
     
     const valorTotalItem = infosVenda.precoBase * qtdCobrada;
     const isEditando = carrinhoSeguro.find(i => i.id === produtoExpandido.id);
 
-    // Grava na Nuvem Compartilhada
+    // Evita consumo de internet se abriu e não mudou nada
+    if (isEditando && isEditando.quantidade === qtdFinal && isEditando.qtd_bonificada === bonificacaoSegura) {
+        setProdutoExpandido(null);
+        setTimeout(() => setBloqueiaCliqueProduto(false), 500);
+        return;
+    }
+
     try {
         if (isEditando) {
+            // Se já existe, garante atualizar substituindo valores (ao invés de deletar e somar)
             await supabase.from('carrinho_nuvem').update({
                 quantidade: qtdFinal,
                 qtd_bonificada: bonificacaoSegura,
@@ -387,8 +416,9 @@ export default function MenuCliente({ usuario, tema }) {
                 total: valorTotalItem,
                 unidade_medida: infosVenda.unidadeFinal
             }).eq('loja_id', codLoja).eq('produto_id', produtoExpandido.id);
-            registrarLogCarrinho('ALTEROU (MODAL)', produtoExpandido.nome, qtdFinal);
+            registrarLogCarrinho('ATUALIZOU (MODAL)', produtoExpandido.nome, qtdFinal);
         } else {
+            // Se não existe, insere pela primeira vez
             await supabase.from('carrinho_nuvem').insert([{
                 loja_id: codLoja,
                 produto_id: produtoExpandido.id,
@@ -401,13 +431,21 @@ export default function MenuCliente({ usuario, tema }) {
             }]);
             registrarLogCarrinho('ADICIONOU (MODAL)', produtoExpandido.nome, qtdFinal);
         }
-        syncCarrinhoNuvem(); // Força a atualização local na mesma hora
+        
+        // 💡 ALERTA INTELIGENTE DE BONIFICAÇÃO
+        if (bonificacaoSegura > 0) {
+            mostrarNotificacao(`⚠️ Atenção: Você adicionou ${bonificacaoSegura} bonificações em ${produtoExpandido.nome}. Verifique se está correto.`, 'alerta');
+        } else {
+            mostrarNotificacao(`✅ ${produtoExpandido.nome} salvo no carrinho.`, 'sucesso');
+        }
+
+        syncCarrinhoNuvem(); 
     } catch(e) { console.error(e); }
     
     setProdutoExpandido(null);
+    setTimeout(() => setBloqueiaCliqueProduto(false), 1000);
   };
 
-  // 💡 MUDANÇA: Altera Qtd pelos Botões direto no Banco
   const alterarQtdCart = async (id, delta) => {
     const itemAtual = carrinhoSeguro.find(i => i.id === id);
     if (!itemAtual) return;
@@ -427,7 +465,6 @@ export default function MenuCliente({ usuario, tema }) {
     } catch(e) { console.error(e); }
   };
 
-  // 💡 MUDANÇA: Altera Qtd pelo Input direto no Banco
   const alterarQtdCartInput = async (id, valor) => {
     const itemAtual = carrinhoSeguro.find(i => i.id === id);
     if (!itemAtual) return;
@@ -447,7 +484,6 @@ export default function MenuCliente({ usuario, tema }) {
     } catch(e) { console.error(e); }
   };
 
-  // 💡 MUDANÇA: Remove Item direto no Banco
   const removerItemCarrinho = async (item) => {
     try {
         await supabase.from('carrinho_nuvem').delete().eq('loja_id', codLoja).eq('produto_id', item.id);
@@ -456,7 +492,6 @@ export default function MenuCliente({ usuario, tema }) {
     } catch(e) { console.error(e); }
   };
 
-  // 💡 MUDANÇA: Limpa Carrinho direto no Banco
   const zerarCarrinho = async () => {
     if (window.confirm("⚠️ Tem certeza que deseja apagar todos os itens do carrinho?")) {
       try {
@@ -488,14 +523,12 @@ export default function MenuCliente({ usuario, tema }) {
     setModalRevisaoAberto(true);
   };
 
-  // 💡 ONDE MUDAR: Início da função confirmarEnvio
   const confirmarEnvio = async () => {
     if (!codLoja) return alert("🚨 ERRO: Seu usuário não tem uma Loja vinculada.");
     setEnviandoPedido(true);
     enviandoRef.current = true; 
     
     try {
-      // 💡 DEDUPLICAÇÃO: Agrupa o carrinho antes de mandar para o banco de pedidos
       const mapaFinal = {};
       carrinhoSeguro.forEach(item => {
         if (!mapaFinal[item.nome]) {
@@ -521,14 +554,12 @@ export default function MenuCliente({ usuario, tema }) {
 
       await supabase.from('pedidos').delete().eq('data_pedido', hoje).eq('loja_id', codLoja);
       const { error } = await supabase.from('pedidos').insert(dadosParaEnviar);
-      // ... resto da função continua igual
       if (error) throw error;
 
       registrarLogCarrinho('ENVIOU PEDIDO', 'Fechou o Carrinho', carrinhoSeguro.length); 
 
       setListaEnviadaHoje(dadosParaEnviar); 
       
-      // 💡 Limpa o Carrinho Nuvem após enviar
       await supabase.from('carrinho_nuvem').delete().eq('loja_id', codLoja);
       setCarrinho([]); 
 
@@ -560,7 +591,6 @@ export default function MenuCliente({ usuario, tema }) {
     } catch (err) { alert("Erro ao solicitar: " + err.message); }
   };
 
-  // 💡 MUDANÇA: Ao restaurar, ele salva os itens na Nuvem para os outros verem
   const importarParaCarrinho = async () => {
     if(!window.confirm("Isso vai voltar os itens para o carrinho para você ajustar. Continuar?")) return;
     try {
@@ -589,7 +619,6 @@ export default function MenuCliente({ usuario, tema }) {
         return null;
       });
 
-      // Salva no banco compartilhado
       if (payloadNuvem.length > 0) {
           await supabase.from('carrinho_nuvem').insert(payloadNuvem);
       }
@@ -602,12 +631,10 @@ export default function MenuCliente({ usuario, tema }) {
     } catch (err) { alert("Erro ao importar: " + err.message); }
   };
 
-  // 💡 NOVA FUNÇÃO: O Cliente Copia o Resumo Pós-Envio
- // 💡 ONDE MUDAR: Função copiarMeuPedidoWpp
+  // 💡 FEEDBACK VISUAL AO COPIAR O RESUMO
   const copiarMeuPedidoWpp = () => {
       if (!listaEnviadaHoje || listaEnviadaHoje.length === 0) return;
       
-      // Agrupa para o texto não sair repetido
       const agrupado = {};
       listaEnviadaHoje.forEach(it => {
           if(!agrupado[it.nome_produto]) agrupado[it.nome_produto] = {...it};
@@ -627,20 +654,21 @@ export default function MenuCliente({ usuario, tema }) {
           msg += `\n`;
       });
       
-      // 💡 MÉTODO DE CÓPIA INFALÍVEL (Funciona em todos os celulares)
       const textArea = document.createElement("textarea");
       textArea.value = msg;
       document.body.appendChild(textArea);
       textArea.select();
-      textArea.setSelectionRange(0, 99999); // Para mobile
+      textArea.setSelectionRange(0, 99999); 
       try {
           document.execCommand('copy');
-          alert("✅ Resumo do pedido copiado!");
+          setTextoCopiado(true);
+          setTimeout(() => setTextoCopiado(false), 3000); // 💡 Volta ao normal em 3s
       } catch (err) {
           alert("Erro ao copiar. Tente novamente.");
       }
       document.body.removeChild(textArea);
   };
+  
   const salvarNovaSenha = async () => {
     if(!dadosSenha.antiga || !dadosSenha.nova || !dadosSenha.confirma) return setErroSenha("Preencha todos os campos.");
     if(dadosSenha.nova !== dadosSenha.confirma) return setErroSenha("A nova senha não confere.");
@@ -689,8 +717,10 @@ export default function MenuCliente({ usuario, tema }) {
         </div>
         <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
           
-          {/* 💡 NOVO BOTÃO DE COPIAR PARA O CLIENTE */}
-          <button onClick={copiarMeuPedidoWpp} style={{ background: '#25d366', border: 'none', padding: '18px', borderRadius: '15px', color: '#fff', fontWeight: 'bold' }}>📋 COPIAR RESUMO P/ WHATSAPP</button>
+          {/* 💡 BOTÃO COM FEEDBACK VISUAL */}
+          <button onClick={copiarMeuPedidoWpp} style={{ background: textoCopiado ? '#16a34a' : '#25d366', border: 'none', padding: '18px', borderRadius: '15px', color: '#fff', fontWeight: 'bold', transition: '0.3s' }}>
+             {textoCopiado ? '✅ RESUMO COPIADO!' : '📋 COPIAR RESUMO P/ WHATSAPP'}
+          </button>
 
           <button onClick={() => carregarDados(false)} style={{ background: configDesign.cores.inputFundo, border: `1px solid ${configDesign.cores.borda}`, padding: '18px', borderRadius: '15px', color: configDesign.cores.textoForte, fontWeight: 'bold' }}>🔄 ATUALIZAR STATUS AGORA</button>
           
@@ -942,7 +972,7 @@ export default function MenuCliente({ usuario, tema }) {
                      )}
                   </div>
 
-                  <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px' }}>
+                  <button onClick={salvarNoCarrinho} style={{ width: '100%', padding: '22px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '15px', opacity: bloqueiaCliqueProduto ? 0.7 : 1 }}>
                     {carrinhoSeguro.find(i => i.id === produtoExpandido.id) ? 'ATUALIZAR QUANTIDADE' : 'ADICIONAR AO CARRINHO'}
                   </button>
                 </div>
