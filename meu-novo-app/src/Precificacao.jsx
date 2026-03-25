@@ -8,6 +8,32 @@ const normalizarParaBusca = (str) => {
 };
 
 // ============================================================================
+// COMPONENTE: SCROLL HORIZONTAL COM O MOUSE
+// ============================================================================
+const MenuHorizontal = ({ children, style }) => {
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleWheel = (e) => {
+      if (e.deltaY !== 0) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, []);
+
+  return (
+    <div ref={scrollRef} style={{ overflowX: 'auto', scrollbarWidth: 'none', ...style }}>
+      {children}
+    </div>
+  );
+};
+
+// ============================================================================
 // COMPONENTE: LINHA DO PRODUTO
 // ============================================================================
 const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBorda, fornecedoresBd }) => {
@@ -26,8 +52,18 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
 
   const dispararAutoSave = async (pValor, pPesoCaixa, pFornecedor, acaoForcada = null) => {
     setStatusAviso('⏳');
+
+    let finalValor = pValor;
+    let finalAcao = acaoForcada;
+
+    // 💡 REGRA DO PREÇO ANTIGO: Se estiver vazio e não for uma ação de "S/ Preço" ou "Falta", resgata o anterior
+    if (!finalValor && !finalAcao && produto.preco_anterior && produto.preco_anterior !== 'R$ 0,00') {
+        finalValor = produto.preco_anterior.replace('R$ ', '');
+        finalAcao = 'mantido';
+        setPreco(finalValor);
+    }
     
-    let v = String(pValor || '').replace(/[^\d,.]/g, '').trim();
+    let v = String(finalValor || '').replace(/[^\d,.]/g, '').trim();
     if (v.includes('.') && !v.includes(',')) v = v.replace('.', ','); 
     v = v.replace(/[^\d,]/g, ''); 
     
@@ -46,8 +82,8 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
 
     let statusCalculado = produto.status_cotacao;
 
-    if (acaoForcada) {
-      statusCalculado = acaoForcada;
+    if (finalAcao) {
+      statusCalculado = finalAcao;
     } else {
       if (precoFinal === 'R$ 0,00') {
         statusCalculado = 'pendente';
@@ -64,7 +100,7 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
     }
 
     const payload = {
-      preco: acaoForcada === 'sem_preco' || acaoForcada === 'falta' ? 'R$ 0,00' : precoFinal,
+      preco: finalAcao === 'sem_preco' || finalAcao === 'falta' ? 'R$ 0,00' : precoFinal,
       peso_caixa: pPesoCaixa,
       fornecedor_nome: fornFinal,
       status_cotacao: statusCalculado
@@ -103,6 +139,16 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
       setPreco('');
       dispararAutoSave('', pesoCaixa, fornecedor, 'falta');
     }
+  };
+
+  const pularParaProximo = () => {
+    setTimeout(() => {
+        const nextInput = document.getElementById(`preco-${index + 1}`);
+        if (nextInput) {
+            nextInput.focus();
+            nextInput.select();
+        }
+    }, 50);
   };
 
   const matchPeso = String(pesoCaixa).match(/^([A-Z]+)\s+(.+)$/);
@@ -144,9 +190,18 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
             id={`preco-${index}`}
             type="text" 
             value={preco} 
-            onChange={e => setPreco(e.target.value)} 
+            onChange={e => {
+                // 💡 LETRA 'F' AUTOMÁTICA PARA FALTA
+                const val = e.target.value;
+                if (val.toLowerCase() === 'f') {
+                    setPreco('');
+                    acaoRapida('falta');
+                    pularParaProximo();
+                } else {
+                    setPreco(val);
+                }
+            }} 
             onBlur={(e) => {
-                // Só salva no blur se o foco não estiver indo para o fornecedor
                 if (e.relatedTarget !== fornecedorRef.current) {
                     handleBlur();
                 }
@@ -154,7 +209,12 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
             onKeyDown={e => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (fornecedorRef.current) fornecedorRef.current.focus();
+                    if (!preco && !fornecedor) {
+                        acaoRapida('mantido');
+                        pularParaProximo();
+                    } else if (fornecedorRef.current) {
+                        fornecedorRef.current.focus();
+                    }
                 }
             }}
             placeholder={produto.preco_anterior && produto.preco_anterior !== 'R$ 0,00' ? produto.preco_anterior.replace('R$ ', '') : "0,00"}
@@ -174,7 +234,6 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
                 if (e.key === 'Enter') {
                     e.preventDefault();
                     
-                    // Se for KG, pula pro peso. Se não, salva e vai pro próximo.
                     if (produto.unidade_medida === 'KG') {
                         const pesoInput = document.getElementById(`peso-${index}`);
                         if (pesoInput) {
@@ -183,14 +242,8 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
                         }
                     }
                     
-                    handleBlur(); // Salva
-                    const nextInput = document.getElementById(`preco-${index + 1}`);
-                    if (nextInput) {
-                        nextInput.focus();
-                        nextInput.select();
-                    } else {
-                        e.target.blur();
-                    }
+                    handleBlur();
+                    pularParaProximo();
                 }
             }}
             placeholder="FORNECEDOR..."
@@ -209,14 +262,8 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
               onKeyDown={e => {
                   if (e.key === 'Enter') {
                       e.preventDefault();
-                      handleBlur(); // Salva
-                      const nextInput = document.getElementById(`preco-${index + 1}`);
-                      if (nextInput) {
-                          nextInput.focus();
-                          nextInput.select();
-                      } else {
-                          e.target.blur();
-                      }
+                      handleBlur(); 
+                      pularParaProximo();
                   }
               }}
               placeholder="Ex: 20"
@@ -675,8 +722,8 @@ export default function Precificacao() {
 
       </div>
 
-      {/* 📑 ABAS DE STATUS */}
-      <div style={{ display: 'flex', gap: '5px', marginBottom: '15px', overflowX: 'auto', paddingBottom: '5px', scrollbarWidth: 'none' }}>
+      {/* 📑 ABAS DE STATUS - SCROLL COM O MOUSE HABILITADO */}
+      <MenuHorizontal style={{ display: 'flex', gap: '5px', marginBottom: '15px', paddingBottom: '5px' }}>
         {CONFIG_ABAS.map(aba => (
           <button 
             key={aba.id}
@@ -692,9 +739,10 @@ export default function Precificacao() {
             {aba.icone} {aba.nomeStr} ({aba.itens.length})
           </button>
         ))}
-      </div>
+      </MenuHorizontal>
 
-      <div style={{ display: 'flex', overflowX: 'auto', gap: '10px', paddingBottom: '15px', marginBottom: '10px', scrollbarWidth: 'none' }}>
+      {/* 💡 BARRA ROLÁVEL DE CATEGORIAS - SCROLL COM O MOUSE HABILITADO */}
+      <MenuHorizontal style={{ display: 'flex', gap: '10px', paddingBottom: '15px', marginBottom: '10px' }}>
          {categoriasPossiveis.map(cat => (
             <button 
                key={cat} 
@@ -714,7 +762,7 @@ export default function Precificacao() {
                {cat}
             </button>
          ))}
-      </div>
+      </MenuHorizontal>
 
       <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '12px', display: 'flex', gap: '10px', marginBottom: '15px', boxShadow: '0 2px 5px rgba(0,0,0,0.02)' }}>
         <span>🔍</span><input placeholder="Buscar item..." value={busca} onChange={e => setBusca(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
@@ -851,7 +899,9 @@ export default function Precificacao() {
             </div>
 
             <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '10px' }}>FOTOS (Obrigatório para Promoção ou Novidade)</label>
-            <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '10px', scrollbarWidth: 'none' }}>
+            
+            {/* 💡 GALERIA DE FOTOS - SCROLL COM O MOUSE HABILITADO */}
+            <MenuHorizontal style={{ display: 'flex', gap: '10px', paddingBottom: '10px' }}>
               <label style={{ minWidth: '90px', height: '70px', borderRadius: '10px', border: '2px dashed #cbd5e1', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backgroundColor: '#f8fafc', textAlign: 'center', padding: '5px' }}>
                 <span style={{ fontSize: '20px', marginBottom: '2px' }}>{fazendoUpload ? '⏳' : '📸'}</span>
                 {!fazendoUpload && <span style={{ fontSize: '8px', color: '#64748b', fontWeight: 'bold' }}>Galeria ou<br/>Ctrl+V</span>}
@@ -862,7 +912,7 @@ export default function Precificacao() {
                   <button onClick={() => removerFoto(i)} style={{ position: 'absolute', top: '-5px', right: '-5px', background: '#ef4444', color: 'white', border: 'none', width: '20px', height: '20px', borderRadius: '50%', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer' }}>✕</button>
                 </div>
               ))}
-            </div>
+            </MenuHorizontal>
 
             <button onClick={salvarModal} style={{ width: '100%', padding: '20px', backgroundColor: '#111', color: 'white', border: 'none', borderRadius: '16px', fontWeight: '900', fontSize: '16px', marginTop: '10px', cursor: 'pointer' }}>
               💾 SALVAR E FECHAR
