@@ -36,7 +36,7 @@ const MenuHorizontal = ({ children, style }) => {
 // ============================================================================
 // COMPONENTE: LINHA DO PRODUTO
 // ============================================================================
-const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBorda, fornecedoresBd }) => {
+const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBorda, fornecedoresBd, abaAtiva }) => {
   const [preco, setPreco] = useState(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
   const [pesoCaixa, setPesoCaixa] = useState(produto.peso_caixa || '');
   const [fornecedor, setFornecedor] = useState(produto.fornecedor_nome || '');
@@ -113,6 +113,39 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
     }
   };
 
+  // 💡 Lógica matemática para não pular 2 linhas quando o item some da tela
+  const focarProximo = (valPreco, acaoForcada) => {
+    let statusPrevisto = produto.status_cotacao;
+    
+    if (acaoForcada) {
+        statusPrevisto = acaoForcada;
+    } else {
+        let v = String(valPreco || '').replace(/[^\d,.]/g, '').trim();
+        if (v.includes('.') && !v.includes(',')) v = v.replace('.', ','); 
+        v = v.replace(/[^\d,]/g, ''); 
+        if (!v || parseInt(v) === 0) statusPrevisto = 'pendente';
+        else statusPrevisto = 'ativo';
+    }
+
+    let abaDestino = 'pendentes';
+    if (statusPrevisto === 'ativo') abaDestino = 'prontos';
+    else if (statusPrevisto === 'mantido') abaDestino = 'mantidos';
+    else if (statusPrevisto === 'sem_preco') abaDestino = 'sem_preco';
+    else if (statusPrevisto === 'falta') abaDestino = 'falta';
+
+    // Se o item for sumir da tela atual, o próximo item vai assumir a posição (index) dele
+    const vaiSumirDaLista = abaAtiva !== 'todos' && abaAtiva !== abaDestino;
+    const targetIndex = vaiSumirDaLista ? index : index + 1;
+    
+    setTimeout(() => {
+        const nextInput = document.getElementById(`preco-${targetIndex}`);
+        if (nextInput) {
+            nextInput.focus();
+            nextInput.select();
+        }
+    }, 100);
+  };
+
   const acaoRapida = (acao) => {
     if (acao === 'mantido') {
       const pAntigo = produto.preco_anterior && produto.preco_anterior !== 'R$ 0,00' ? produto.preco_anterior.replace('R$ ', '') : '';
@@ -125,16 +158,6 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
       setPreco('');
       dispararAutoSave('', pesoCaixa, fornecedor, 'falta');
     }
-  };
-
-  const pularParaProximo = () => {
-    setTimeout(() => {
-        const nextInput = document.getElementById(`preco-${index + 1}`);
-        if (nextInput) {
-            nextInput.focus();
-            nextInput.select();
-        }
-    }, 100); 
   };
 
   const matchPeso = String(pesoCaixa).match(/^([A-Z]+)\s+(.+)$/);
@@ -188,16 +211,16 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
                     if (valLimpo === 'f') {
                         setPreco('');
                         dispararAutoSave('', pesoCaixa, fornecedor, 'falta');
-                        pularParaProximo();
+                        focarProximo('', 'falta');
                         return;
                     }
 
-                    // 2. Vazio: Resgata o preço antigo e pula direto
+                    // 2. Vazio + Enter: Resgata o preço antigo e pula direto
                     if (!valLimpo) {
                         const pAntigo = produto.preco_anterior && produto.preco_anterior !== 'R$ 0,00' ? produto.preco_anterior.replace('R$ ', '') : '';
                         setPreco(pAntigo);
                         dispararAutoSave(pAntigo, pesoCaixa, fornecedor, 'mantido');
-                        pularParaProximo();
+                        focarProximo(pAntigo, 'mantido');
                         return;
                     }
 
@@ -233,7 +256,7 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
                     }
                     
                     dispararAutoSave(preco, pesoCaixa, fornecedor);
-                    pularParaProximo();
+                    focarProximo(preco, null);
                 }
             }}
             placeholder="FORNECEDOR..."
@@ -253,7 +276,7 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
                       e.preventDefault();
                       if (e.repeat) return;
                       dispararAutoSave(preco, pesoCaixa, fornecedor); 
-                      pularParaProximo();
+                      focarProximo(preco, null);
                   }
               }}
               placeholder="Ex: 20"
@@ -765,6 +788,7 @@ export default function Precificacao() {
              key={p.id} 
              index={index}
              produto={p} 
+             abaAtiva={abaAtiva}
              corBorda={CONFIG_ABAS.find(a => a.id === p.status_cotacao)?.cor || '#3b82f6'}
              abrirModal={abrirEdicaoCompleta} 
              aoSalvar={handleAtualizarLista}
