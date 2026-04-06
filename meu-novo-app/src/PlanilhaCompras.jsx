@@ -46,6 +46,9 @@ export default function PlanilhaCompras() {
   const [buscaFornecedores, setBuscaFornecedores] = useState('');
   const [buscaFornList, setBuscaFornList] = useState(''); 
   const [buscaSelecionar, setBuscaSelecionar] = useState(''); 
+  
+  const [tipoBuscaPendentes, setTipoBuscaPendentes] = useState('produto');
+  const [tipoBuscaSelecionar, setTipoBuscaSelecionar] = useState('produto');
 
   const [demandas, setDemandas] = useState([]); 
   const [pedidosFeitos, setPedidosFeitos] = useState([]); 
@@ -657,7 +660,12 @@ export default function PlanilhaCompras() {
   const abrirModalCompra = (item) => {
     setItemModal(item);
     setAbaModal('completo');
-    setDadosCompra({ fornecedor: '', valor_unit: '', qtd_pedir: item.demanda, isFaltaGeral: false, qtdFornecedor: '', temBonificacao: false });
+    
+    // 💡 PUXAR DADOS DO SISTEMA AUTOMATICAMENTE
+    const fSugerido = (item.fornecedor_sugerido && item.fornecedor_sugerido !== 'Não cadastrado') ? item.fornecedor_sugerido : '';
+    const pSugerido = item.preco_sugerido ? item.preco_sugerido.replace('R$ ', '') : '';
+    
+    setDadosCompra({ fornecedor: fSugerido, valor_unit: pSugerido, qtd_pedir: item.demanda, isFaltaGeral: false, qtdFornecedor: '', temBonificacao: false });
     
     setLojasEnvolvidas(ordenarLojas(item.lojas).map(l => ({ ...l, qtd_receber: l.qtd_pedida, qtd_bonificada: 0, isFalta: false, isBoleto: false })));
   };
@@ -923,8 +931,14 @@ export default function PlanilhaCompras() {
 
     grupo.itens.forEach(nomeItem => {
         const demandaItem = demandas.find(d => d.nome === nomeItem);
-        const precoDigitado = precosAgrupados[`${grupoId}_${nomeItem}`];
-        if (!precoDigitado || precoDigitado === '0') tudoPreenchido = false;
+        
+        // 💡 PUXA O PREÇO DO SISTEMA SE O USUÁRIO NÃO DIGITOU NADA
+        let precoDigitado = precosAgrupados[`${grupoId}_${nomeItem}`];
+        if (precoDigitado === undefined && demandaItem && demandaItem.preco_sugerido) {
+            precoDigitado = demandaItem.preco_sugerido.replace('R$ ', '');
+        }
+
+        if (!precoDigitado || precoDigitado === '0' || precoDigitado === '0,00') tudoPreenchido = false;
 
         let precoLimpo = precoDigitado ? precoDigitado.replace(/[^\d,.-]/g, '').trim() : '';
         if (!precoLimpo.includes(',') && precoLimpo) precoLimpo += ',00';
@@ -1053,9 +1067,21 @@ export default function PlanilhaCompras() {
   );
 
   const alternarSelecaoLote = (nomeItem) => {
-    setItensSelecionados(prev => 
-      prev.includes(nomeItem) ? prev.filter(i => i !== nomeItem) : [...prev, nomeItem]
-    );
+    setItensSelecionados(prev => {
+        const isSelected = prev.includes(nomeItem);
+        const newSelection = isSelected ? prev.filter(i => i !== nomeItem) : [...prev, nomeItem];
+        
+        // 💡 AUTO-PREENCHER FORNECEDOR SELECIONADO
+        if (!isSelected && newSelection.length === 1) {
+            const itemData = demandas.find(d => d.nome === nomeItem);
+            if (itemData && itemData.fornecedor_sugerido && itemData.fornecedor_sugerido !== 'Não cadastrado') {
+                setNomeFornecedorLote(itemData.fornecedor_sugerido);
+            }
+        } else if (newSelection.length === 0) {
+            setNomeFornecedorLote('');
+        }
+        return newSelection;
+    });
   };
 
   const criarGrupoFornecedor = () => {
@@ -1278,15 +1304,30 @@ export default function PlanilhaCompras() {
 
       {abaAtiva === 'pendentes' && (
         <>
-          <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '10px 15px', display: 'flex', gap: '10px', marginBottom: '15px', border: '1px solid #e2e8f0' }}>
-            <span>🔍</span><input placeholder="Procurar pendência..." value={buscaPendentes} onChange={e => setBuscaPendentes(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
+          <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '10px 15px', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <span>🔍</span>
+              <input placeholder={tipoBuscaPendentes === 'produto' ? "Procurar por produto..." : "Procurar por fornecedor..."} value={buscaPendentes} onChange={e => setBuscaPendentes(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
+            </div>
+            <div style={{ display: 'flex', gap: '15px', paddingLeft: '25px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <input type="radio" name="tipoBuscaPendentes" checked={tipoBuscaPendentes === 'produto'} onChange={() => setTipoBuscaPendentes('produto')} /> PRODUTO
+              </label>
+              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <input type="radio" name="tipoBuscaPendentes" checked={tipoBuscaPendentes === 'fornecedor'} onChange={() => setTipoBuscaPendentes('fornecedor')} /> FORNECEDOR
+              </label>
+            </div>
           </div>
           
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px' }}>
             {demandas.length === 0 ? (
               <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '40px', color: '#22c55e', backgroundColor: '#fff', borderRadius: '16px', fontWeight: 'bold' }}>🎉 Zero pendências!</div>
             ) : (
-              demandas.filter(d => removerAcentos(d.nome).includes(removerAcentos(buscaPendentes))).map(item => (
+              demandas.filter(d => {
+                const termo = removerAcentos(buscaPendentes);
+                if (tipoBuscaPendentes === 'produto') return removerAcentos(d.nome).includes(termo);
+                return removerAcentos(d.fornecedor_sugerido).includes(termo);
+              }).map(item => (
                 <div key={item.nome} onClick={() => abrirModalCompra(item)} style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '15px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', cursor: 'pointer', borderTop: item.isResto ? '4px solid #ef4444' : '4px solid #f97316', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', position: 'relative' }}>
                   <div style={{ position: 'absolute', top: '5px', right: '5px' }}>
                     <button onClick={(e) => marcarFaltaDireto(item, e)} style={{ background: '#fef2f2', color: '#ef4444', border: 'none', padding: '4px', borderRadius: '6px', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer' }}>🚫</button>
@@ -1316,12 +1357,28 @@ export default function PlanilhaCompras() {
 
       {abaAtiva === 'selecionar_forn' && (
         <div style={{ paddingBottom: '80px' }}>
-          <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '10px 15px', display: 'flex', gap: '10px', marginBottom: '15px', border: '1px solid #e2e8f0' }}>
-            <span>🔍</span><input placeholder="Filtrar para selecionar..." value={buscaSelecionar} onChange={e => setBuscaSelecionar(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
+          <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '10px 15px', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <span>🔍</span>
+              <input placeholder={tipoBuscaSelecionar === 'produto' ? "Filtrar por produto..." : "Filtrar por fornecedor..."} value={buscaSelecionar} onChange={e => setBuscaSelecionar(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
+            </div>
+            <div style={{ display: 'flex', gap: '15px', paddingLeft: '25px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <input type="radio" name="tipoBuscaSelecionar" checked={tipoBuscaSelecionar === 'produto'} onChange={() => setTipoBuscaSelecionar('produto')} /> PRODUTO
+              </label>
+              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <input type="radio" name="tipoBuscaSelecionar" checked={tipoBuscaSelecionar === 'fornecedor'} onChange={() => setTipoBuscaSelecionar('fornecedor')} /> FORNECEDOR
+              </label>
+            </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {demandas.filter(d => removerAcentos(d.nome).includes(removerAcentos(buscaSelecionar)) && !itensJaAgrupados.includes(d.nome)).map(item => {
+            {demandas.filter(d => {
+              if (itensJaAgrupados.includes(d.nome)) return false;
+              const termo = removerAcentos(buscaSelecionar);
+              if (tipoBuscaSelecionar === 'produto') return removerAcentos(d.nome).includes(termo);
+              return removerAcentos(d.fornecedor_sugerido).includes(termo);
+            }).map(item => {
               const isSelecionado = itensSelecionados.includes(item.nome);
               
               return (
@@ -1353,7 +1410,6 @@ export default function PlanilhaCompras() {
                   <button onClick={() => setItensSelecionados([])} style={{ background: 'none', border: 'none', color: '#ef4444', fontWeight: 'bold' }}>Limpar</button>
                </div>
                
-               {/* 💡 ATUALIZAÇÃO 3: Botão de agrupar fracionado por Loja */}
                <button onClick={abrirModalFracionarLote} style={{ width: '100%', background: '#f59e0b', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '13px' }}>
                   🧩 AGRUPAR FRACIONADO (POR LOJA)
                </button>
@@ -1481,7 +1537,7 @@ export default function PlanilhaCompras() {
                                      <input 
                                        type="text" 
                                        placeholder="0,00"
-                                       value={precosAgrupados[`${grupo.id}_${nomeItem}`] || ''}
+                                       value={precosAgrupados[`${grupo.id}_${nomeItem}`] !== undefined ? precosAgrupados[`${grupo.id}_${nomeItem}`] : (demandaReal.preco_sugerido ? demandaReal.preco_sugerido.replace('R$ ', '') : '')}
                                        onChange={(e) => setPrecosAgrupados({...precosAgrupados, [`${grupo.id}_${nomeItem}`]: e.target.value})}
                                        style={{ width: '100%', padding: '10px 10px 10px 30px', borderRadius: '8px', border: '1px solid #ccc', outline: 'none', fontWeight: 'bold' }}
                                      />
@@ -1812,7 +1868,7 @@ export default function PlanilhaCompras() {
                                        [nomeOriginal]: { ...configDesteItem, usarUnidade: e.target.checked }
                                    }
                                 }));
-                             }} 
+                              }} 
                            />
                            Incluir Unidade de Medida (Ex: CX, KG) na mensagem?
                         </label>
