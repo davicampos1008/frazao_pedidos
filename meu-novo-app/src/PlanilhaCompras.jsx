@@ -723,8 +723,6 @@ export default function PlanilhaCompras() {
     let precoLimpo = dadosCompra.valor_unit.replace(/[^\d,.-]/g, '').trim();
     if (!precoLimpo.includes(',') && precoLimpo) precoLimpo += ',00';
     const precoFinal = precoLimpo ? `R$ ${precoLimpo}` : 'R$ 0,00';
-    const isAlgumBoleto = lojasEnvolvidas.some(l => l.isBoleto);
-    const statusGeral = isAlgumBoleto ? 'boleto' : 'atendido';
     const qtdDesejada = Number(dadosCompra.qtd_pedir) || 0;
 
     setItemModal(null);
@@ -739,15 +737,19 @@ export default function PlanilhaCompras() {
     } else {
       lojasEnvolvidas.forEach(loja => {
         const bonificada = Number(loja.qtd_bonificada) || 0;
+        
+        // 💡 CORREÇÃO 1: Mantém o custo como "BOLETO" e envia a informação pro banco
+        const statusGeralLoja = loja.isBoleto ? 'boleto' : 'atendido';
+        const custoFinalItem = loja.isBoleto ? 'BOLETO' : precoFinal;
 
         if (qtdRestanteParaDistribuir >= loja.qtd_pedida) {
           promessas.push(supabase.from('pedidos').update({
-            fornecedor_compra: fornecedorFinal, custo_unit: precoFinal, qtd_atendida: loja.qtd_pedida, qtd_bonificada: bonificada, status_compra: statusGeral
+            fornecedor_compra: fornecedorFinal, custo_unit: custoFinalItem, qtd_atendida: loja.qtd_pedida, qtd_bonificada: bonificada, status_compra: statusGeralLoja
           }).eq('id', loja.id_pedido));
           qtdRestanteParaDistribuir -= loja.qtd_pedida;
         } else if (qtdRestanteParaDistribuir > 0) {
           promessas.push(supabase.from('pedidos').update({
-            fornecedor_compra: fornecedorFinal, custo_unit: precoFinal, qtd_atendida: qtdRestanteParaDistribuir, qtd_bonificada: bonificada, quantidade: qtdRestanteParaDistribuir, status_compra: statusGeral
+            fornecedor_compra: fornecedorFinal, custo_unit: custoFinalItem, qtd_atendida: qtdRestanteParaDistribuir, qtd_bonificada: bonificada, quantidade: qtdRestanteParaDistribuir, status_compra: statusGeralLoja
           }).eq('id', loja.id_pedido));
 
           const resto = loja.qtd_pedida - qtdRestanteParaDistribuir;
@@ -794,8 +796,11 @@ export default function PlanilhaCompras() {
       const bonificada = Number(loja.qtd_bonificada) || 0;
       
       if (receber > 0) {
+        // 💡 CORREÇÃO 2: Trata Boleto fracionado ignorando o preço
+        const custoFinalItem = loja.isBoleto ? 'BOLETO' : precoFinal;
+        
         promessas.push(supabase.from('pedidos').update({
-          fornecedor_compra: fornecedorFinal, custo_unit: precoFinal, qtd_atendida: receber, qtd_bonificada: bonificada, quantidade: receber, status_compra: loja.isBoleto ? 'boleto' : 'atendido'
+          fornecedor_compra: fornecedorFinal, custo_unit: custoFinalItem, qtd_atendida: receber, qtd_bonificada: bonificada, quantidade: receber, status_compra: loja.isBoleto ? 'boleto' : 'atendido'
         }).eq('id', loja.id_pedido));
 
         if (receber < loja.qtd_pedida) {
@@ -932,7 +937,6 @@ export default function PlanilhaCompras() {
     grupo.itens.forEach(nomeItem => {
         const demandaItem = demandas.find(d => d.nome === nomeItem);
         
-        // 💡 PUXA O PREÇO DO SISTEMA SE O USUÁRIO NÃO DIGITOU NADA
         let precoDigitado = precosAgrupados[`${grupoId}_${nomeItem}`];
         if (precoDigitado === undefined && demandaItem && demandaItem.preco_sugerido) {
             precoDigitado = demandaItem.preco_sugerido.replace('R$ ', '');
@@ -943,14 +947,16 @@ export default function PlanilhaCompras() {
         let precoLimpo = precoDigitado ? precoDigitado.replace(/[^\d,.-]/g, '').trim() : '';
         if (!precoLimpo.includes(',') && precoLimpo) precoLimpo += ',00';
         const precoFinal = precoLimpo ? `R$ ${precoLimpo}` : 'R$ 0,00';
+        
+        // 💡 CORREÇÃO 3: Define "BOLETO" como preço final caso tipo seja boleto
+        const custoFinal = isBoleto ? 'BOLETO' : precoFinal;
 
         if (demandaItem) {
            demandaItem.lojas.forEach(loja => {
-               // 💡 Considerar apenas as lojas restritas do grupo (se houver agrupamento fracionado)
                if (!grupo.lojasRestritas || grupo.lojasRestritas.includes(loja.loja_id)) {
                    promessas.push(supabase.from('pedidos').update({
                        fornecedor_compra: grupo.fornecedor,
-                       custo_unit: precoFinal,
+                       custo_unit: custoFinal,
                        qtd_atendida: loja.qtd_pedida, 
                        qtd_bonificada: loja.qtd_bonificada_cliente || 0,
                        status_compra: isBoleto ? 'boleto' : 'atendido'
@@ -960,7 +966,8 @@ export default function PlanilhaCompras() {
         }
     });
     
-    if (!tudoPreenchido && !window.confirm("Alguns itens estão sem preço. Deseja finalizar mesmo assim?")) {
+    // 💡 CORREÇÃO 4: Se o usuário estiver fechando como Boleto, não exigiremos que os preços estejam preenchidos!
+    if (!isBoleto && !tudoPreenchido && !window.confirm("Alguns itens estão sem preço. Deseja finalizar mesmo assim?")) {
        setCarregando(false);
        return;
     }
@@ -1071,7 +1078,6 @@ export default function PlanilhaCompras() {
         const isSelected = prev.includes(nomeItem);
         const newSelection = isSelected ? prev.filter(i => i !== nomeItem) : [...prev, nomeItem];
         
-        // 💡 AUTO-PREENCHER FORNECEDOR SELECIONADO
         if (!isSelected && newSelection.length === 1) {
             const itemData = demandas.find(d => d.nome === nomeItem);
             if (itemData && itemData.fornecedor_sugerido && itemData.fornecedor_sugerido !== 'Não cadastrado') {
@@ -1112,7 +1118,6 @@ export default function PlanilhaCompras() {
     }
   };
 
-  // 💡 LÓGICA DO NOVO MODAL DE FRACIONAMENTO POR LOJA
   const abrirModalFracionarLote = () => {
       const lojasSet = new Map();
       itensSelecionados.forEach(nomeItem => {
@@ -1133,7 +1138,7 @@ export default function PlanilhaCompras() {
   };
 
   const toggleLojaFracionada = (lojaId) => {
-      if (fracionarAtribuicoes[lojaId]) return; // Impede clicar se já atribuiu
+      if (fracionarAtribuicoes[lojaId]) return; 
       setFracionarLojasSelecionadas(prev => 
           prev.includes(lojaId) ? prev.filter(id => id !== lojaId) : [...prev, lojaId]
       );
@@ -1175,7 +1180,7 @@ export default function PlanilhaCompras() {
               id: Date.now() + Math.random(),
               fornecedor: forn,
               itens: itensSelecionados,
-              lojasRestritas: lojasDoForn, // 💡 O Segredo: O grupo sabe que é só para algumas lojas
+              lojasRestritas: lojasDoForn,
               status: 'pendente'
           });
       });
@@ -1388,7 +1393,6 @@ export default function PlanilhaCompras() {
                     <strong style={{ display: 'block', fontSize: '14px', color: '#111' }}>{item.nome}</strong>
                     <small style={{ color: '#666', fontSize: '11px' }}>{item.demanda} {item.unidade} • {item.lojas.length} Loja(s)</small>
                     
-                    {/* 💡 ATUALIZAÇÃO 3: Informações de Fornecedor e Bonificação aqui na aba */}
                     {item.fornecedor_sugerido && item.fornecedor_sugerido !== 'Não cadastrado' && (
                        <span style={{ fontSize: '10px', color: '#8b5cf6', fontWeight: 'bold', display: 'block', marginTop: '2px' }}>🏢 {item.fornecedor_sugerido}</span>
                     )}
