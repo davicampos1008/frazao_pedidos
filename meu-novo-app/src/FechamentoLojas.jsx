@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
@@ -12,12 +13,14 @@ const ordenarLojas = (lojasArray) => {
     const nA = String(a.nome_fantasia || a.loja || a.nome || "").toUpperCase();
     const nB = String(b.nome_fantasia || b.loja || b.nome || "").toUpperCase();
     
+    // Garante que a loja Frazão (Teste) fique sempre no topo
     if (nA.includes('FRAZÃO')) return -1;
     if (nB.includes('FRAZÃO')) return 1;
 
     let iA = ORDEM_LOJAS.findIndex(nome => nA.includes(nome));
     let iB = ORDEM_LOJAS.findIndex(nome => nB.includes(nome));
     
+    // Se não encontrar na lista, joga pro final
     if (iA === -1) iA = 999;
     if (iB === -1) iB = 999;
     
@@ -26,6 +29,7 @@ const ordenarLojas = (lojasArray) => {
 };
 
 export default function FechamentoLojas({ isEscuro }) {
+  // 💡 FUNÇÕES DE DATA
   const obterDataLocal = () => {
     const data = new Date();
     const tzOffset = data.getTimezoneOffset() * 60000;
@@ -80,6 +84,7 @@ export default function FechamentoLojas({ isEscuro }) {
   const [fornecedorEmEdicao, setFornecedorEmEdicao] = useState(null);
   const [itensFornEditados, setItensFornEditados] = useState({});
   
+  // 💡 ESTADOS PARA ADICIONAR NOVO ITEM NO FORNECEDOR
   const [novoItemDesc, setNovoItemDesc] = useState('');
   const [novoItemQtd, setNovoItemQtd] = useState('');
   const [novoItemPreco, setNovoItemPreco] = useState('');
@@ -224,9 +229,9 @@ export default function FechamentoLojas({ isEscuro }) {
                    telefone: fInfo ? fInfo.telefone : '', 
                    totalPix: 0, 
                    totalBoleto: 0, 
-                   totalBruto: 0, 
-                   totalDescontoBonif: 0, 
-                   qtdBonificadaGeral: 0, 
+                   totalBruto: 0,
+                   totalDescontoBonif: 0,
+                   qtdBonificadaGeral: 0,
                    itensRaw: {}, 
                    itens: [], 
                    lojasEnvolvidas: {},
@@ -347,8 +352,29 @@ export default function FechamentoLojas({ isEscuro }) {
         const nomeUpper = String(p.nome_produto || '').toUpperCase();
         const idxExistente = mapaLojas[idLoja].itens.findIndex(i => i.nome === nomeUpper);
 
+        // 💡 PROTEÇÃO ANTI-FALTA: Ignora se for Falta e já existir um normal.
         if (idxExistente >= 0) {
           const it = mapaLojas[idLoja].itens[idxExistente];
+          
+          if (!it.isFalta && isFalta) {
+             return; 
+          }
+          if (it.isFalta && !isFalta) {
+             it.id_pedido = p.id;
+             it.qtdOriginal = p.quantidade;
+             it.qtdEntregue = qtdDisplay;
+             it.qtd_bonificada = qtdBonificada;
+             it.unitDisplay = unitDisplay;
+             it.totalDisplay = totalDisplay;
+             it.valorNumerico = totalItem;
+             it.isFalta = false;
+             it.isBoleto = isBoleto;
+             it.precoOriginal = precoOriginal;
+             it.isBonif = isBonif;
+             it.isPendente = false;
+             return;
+          }
+
           if (!isFalta && !isBoleto && !it.isFalta && !it.isBoleto && !isBonif && !it.isBonif) {
              const novaQtd = Number(it.qtdEntregue) + Number(qtdDisplay);
              const novaBonif = Number(it.qtd_bonificada) + qtdBonificada;
@@ -561,7 +587,7 @@ export default function FechamentoLojas({ isEscuro }) {
      carregar();
   };
 
-  const salvarEdicaoLoja = async () => {
+ const salvarEdicaoLoja = async () => {
     setCarregando(true);
     try {
       const promessas = itensEditados.map(item => {
@@ -617,10 +643,10 @@ export default function FechamentoLojas({ isEscuro }) {
       setFornecedorEmEdicao(forn.nome);
       const mapEdit = {};
       forn.itens.forEach(i => {
-          const qtdCobrada = i.qtd - i.qtdBonificada;
-          if(qtdCobrada > 0) {
-              mapEdit[i.nomeItem] = { qtd: qtdCobrada, valUnit: tratarPrecoNum(i.valUnit), total: i.totalCobrado };
-          }
+         const qtdCobrada = i.qtd - i.qtdBonificada;
+         if(qtdCobrada > 0) {
+             mapEdit[i.nomeItem] = { qtd: qtdCobrada, valUnit: tratarPrecoNum(i.valUnit), total: i.totalCobrado };
+         }
       });
       setItensFornEditados(mapEdit);
       setNovoItemDesc(''); setNovoItemQtd(''); setNovoItemPreco('');
@@ -653,6 +679,7 @@ export default function FechamentoLojas({ isEscuro }) {
           for (const nomeItem of Object.keys(itensFornEditados)) {
               const editado = itensFornEditados[nomeItem];
               
+              // 💡 INSERÇÃO DE ITEM NOVO (APENAS COBRANÇA DO FORNECEDOR)
               if (editado.isNovo) {
                   const unitStr = editado.valUnit > 0 ? `R$ ${Number(editado.valUnit).toFixed(2).replace('.', ',')}` : 'R$ 0,00';
                   promessas.push(supabase.from('pedidos').insert([{
@@ -664,7 +691,7 @@ export default function FechamentoLojas({ isEscuro }) {
                       custo_unit: unitStr,
                       status_compra: 'atendido',
                       apenas_cobranca: true,
-                      loja_id: 0 
+                      loja_id: 0 // Loja 0 para não misturar com as notas dos clientes reais
                   }]));
                   continue;
               }
@@ -845,6 +872,7 @@ export default function FechamentoLojas({ isEscuro }) {
     const isPago = f.statusPagamento === 'pago';
     const isBoletoOnly = f.totalPix === 0; 
     
+    // 💡 FILTRO DE BUSCA (FORNECEDORES)
     if (buscaFornecedores) {
         if (!normalizarBusca(f.nome).includes(normalizarBusca(buscaFornecedores))) return false;
     }
@@ -861,7 +889,6 @@ export default function FechamentoLojas({ isEscuro }) {
 
   if (carregando && fechamentos.length === 0) return <div style={{ padding: '50px', textAlign: 'center', fontFamily: 'sans-serif', color: themeText }}>🔄 Processando...</div>;
 
-  // 💡 LÓGICA DE TABELA COM FONTE GIGANTE ADAPTATIVA E SEM ASSINATURAS E BEM ESPAÇADA
   const renderTabelaDupla = (itensLoja, isMotorista) => {
     let itensFiltrados = itensLoja;
     if (isMotorista) {
@@ -874,29 +901,18 @@ export default function FechamentoLojas({ isEscuro }) {
       rows.push({ left: itensFiltrados[i], right: itensFiltrados[i + half] });
     }
 
-    // 💡 MATEMÁTICA FLUIDA APRIMORADA:
-    // Reduzido para 2400 para dar uma "gordura" excelente se o nome quebrar a linha.
-    const limiteLinhas = 22; 
-    const fonteIdeal = 90; 
-    const espacoLivre = 2400; 
-    
-    let fontSizeMot = fonteIdeal;
-    let paddingMot = 25;
+    const maxRows = Math.max(half, 20); 
+    const availableHeight = 2500; 
+    const calcFont = availableHeight / maxRows * 0.40;
+    const fontSizeMot = Math.max(18, Math.min(38, calcFont)); 
+    const paddingMot = Math.max(6, Math.min(12, calcFont * 0.15));
 
-    if (half > limiteLinhas) {
-        const alturaDaLinha = espacoLivre / (half + 1); 
-        fontSizeMot = Math.floor(alturaDaLinha * 0.45);
-        paddingMot = Math.floor(alturaDaLinha * 0.15);
-        
-        if (fontSizeMot < 22) fontSizeMot = 22; 
-    }
-
-    const thStyle = { border: '4px solid black', padding: `${paddingMot}px 10px`, textAlign: 'center', fontWeight: 'bold', fontSize: `${fontSizeMot * 0.8}px`, backgroundColor: '#e5e7eb', color: 'black' };
-    const tdStyle = { border: '4px solid black', padding: `${paddingMot}px 10px`, textAlign: 'center', fontSize: `${fontSizeMot}px`, fontWeight: '900', color: 'black', lineHeight: '1.1' };
+    const thStyle = { border: '4px solid black', padding: `${paddingMot}px 10px`, textAlign: 'center', fontWeight: 'bold', fontSize: `${fontSizeMot * 0.85}px`, backgroundColor: '#e5e7eb', color: 'black' };
+    const tdStyle = { border: '4px solid black', padding: `${paddingMot}px 10px`, textAlign: 'center', fontSize: `${fontSizeMot}px`, fontWeight: '900', color: 'black' };
     const tdDesc = { ...tdStyle, textAlign: 'left', fontSize: `${fontSizeMot + 2}px` };
 
     return (
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '20px' }}>
         <thead>
           <tr>
             <th style={{...thStyle, width: '7%'}}>QUANT.</th>
@@ -933,9 +949,11 @@ export default function FechamentoLojas({ isEscuro }) {
                   if (tDisp === 'BONIFIC.') corTotal = '#16a34a'; 
                }
 
+               // 💡 PROTEÇÃO DE IMPRESSÃO (VIA MOTORISTA = FALTA OU BONIFICAÇÃO APENAS)
                if (isMotorista) {
-                  if (item.isFalta) { } 
-                  else if (item.isBonif || String(uDisp).includes('BONIFIC.')) {
+                  if (item.isFalta) {
+                      // Já processado acima
+                  } else if (item.isBonif || String(uDisp).includes('BONIFIC.')) {
                       tDisp = 'BONIFICAÇÃO';
                       corUnit = '#16a34a';
                       corTotal = '#16a34a';
@@ -1051,6 +1069,20 @@ export default function FechamentoLojas({ isEscuro }) {
                          <div style={{ flex: 1, width: '100%', display: 'flex', flexDirection: 'column' }}>
                             {renderTabelaDupla(loja.itens, isMotorista)}
                          </div>
+
+                         {isMotorista && (
+                            <div style={{ marginTop: 'auto', paddingTop: '80px', display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end' }}>
+                                <div style={{ textAlign: 'center', width: '40%' }}>
+                                    <div style={{ borderBottom: '4px solid black', marginBottom: '15px', height: '50px' }}></div>
+                                    <span style={{ fontSize: '40px', fontWeight: 'bold', color: 'black' }}>Assinatura Entregador</span>
+                                </div>
+                                <div style={{ textAlign: 'center', width: '40%' }}>
+                                    <div style={{ borderBottom: '4px solid black', marginBottom: '15px', height: '50px' }}></div>
+                                    <span style={{ fontSize: '40px', fontWeight: 'bold', color: 'black' }}>Assinatura Conferente (Loja)</span>
+                                </div>
+                            </div>
+                         )}
+
                      </div>
                   </div>
                ))}
@@ -1086,6 +1118,7 @@ export default function FechamentoLojas({ isEscuro }) {
   return (
     <div style={{ backgroundColor: themeBg, minHeight: '100vh', padding: '10px', paddingBottom: '100px', fontFamily: 'sans-serif', transition: '0.3s' }}>
       
+      {/* TOP BAR DE SELEÇÃO MÚLTIPLA AJUSTADA PARA CELULAR */}
       {lojasSelecionadas.length > 0 && abaAtiva === 'lojas' && (
         <div style={{ position: 'sticky', top: '10px', zIndex: 100, backgroundColor: '#3b82f6', color: '#fff', padding: '15px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px', boxShadow: '0 10px 25px rgba(59,130,246,0.4)' }}>
            <div style={{textAlign: 'center'}}><strong style={{fontSize:'18px'}}>{lojasSelecionadas.length}</strong> Lojas Selecionadas</div>
@@ -1125,6 +1158,13 @@ export default function FechamentoLojas({ isEscuro }) {
             <button onClick={() => setModalMediaAberto(true)} style={{ backgroundColor: '#8b5cf6', color: '#fff', border: 'none', padding: '12px 15px', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', display: 'flex', gap: '10px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>
                 <span>📊</span> VALOR MÉDIA
             </button>
+
+            {/* 💡 AVISO DE ALTERAÇÃO */}
+      {houveAlteracao && abaAtiva === 'fornecedores' && (
+         <div style={{ maxWidth: '1000px', margin: '0 auto 15px auto', background: '#fefce8', color: '#b45309', padding: '15px', borderRadius: '12px', fontWeight: 'bold', border: '1px solid #fde68a', fontSize: '12px' }}>
+            ⚠️ VALORES ALTERADOS: Você modificou itens nas lojas ou aplicou o "Valor Média". Recomendamos conferir e clicar em "✏️ EDITAR VALORES" nos fornecedores abaixo caso seja necessário ajustar a conta.
+         </div>
+      )}
 
             {abaAtiva === 'lojas' && (
             <>
@@ -1271,6 +1311,7 @@ export default function FechamentoLojas({ isEscuro }) {
                   <div style={{ padding: '20px', borderTop: `2px solid ${themeBorder}` }}>
                     
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '25px', justifyContent: 'flex-end' }}>
+                      {/* 💡 BOTÃO DE EDIÇÃO RESTAURADO! */}
                       <button onClick={() => abrirEdicao(loja)} style={{ flex: '1 1 auto', background: isEscuro ? '#334155' : '#111', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>✏️ EDITAR ITENS (DESCONTOS)</button>
                       <button onClick={() => abrirPreviewImpressao('loja_unica', loja)} style={{ flex: '1 1 auto', background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>📄 VER PDF COMPLETO</button>
                       <button onClick={() => abrirPreviewImpressao('motorista_loja', loja)} style={{ flex: '1 1 auto', background: '#8b5cf6', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>🚚 VIA MOTORISTA (ÚNICA)</button>
@@ -1319,6 +1360,7 @@ export default function FechamentoLojas({ isEscuro }) {
       {abaAtiva === 'fornecedores' && (
         <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
           
+          {/* 💡 BARRA DE PESQUISA (FORNECEDORES) */}
           <div style={{ backgroundColor: themeCard, borderRadius: '12px', padding: '10px 15px', display: 'flex', gap: '10px', marginBottom: '15px', border: `1px solid ${themeBorder}` }}>
             <span>🔍</span>
             <input 
@@ -1341,7 +1383,7 @@ export default function FechamentoLojas({ isEscuro }) {
             ) : (
               fornecedoresExibidos.map((forn, idx) => {
                 const isPago = forn.statusPagamento === 'pago';
-                const isBoletoOnly = forn.totalPix === 0; 
+                const isBoletoOnly = forn.totalPix === 0;
                 
                 let corBorda = '#fcd34d'; 
                 let corFundo = isEscuro ? '#451a03' : '#fffbeb';
@@ -1424,6 +1466,7 @@ export default function FechamentoLojas({ isEscuro }) {
                           )}
                         </div>
 
+                        {/* 💡 ADCIONAR NOVO ITEM DO FORNECEDOR */}
                         {fornecedorEmEdicao === forn.nome && (
                             <div style={{ padding: '15px', backgroundColor: isEscuro ? '#0f172a' : '#f8fafc', borderRadius: '12px', border: `1px dashed #3b82f6`, marginBottom: '15px' }}>
                                <h5 style={{ margin: '0 0 10px 0', color: '#3b82f6', fontSize: '12px' }}>➕ Adicionar Novo Item Extra</h5>
@@ -1443,6 +1486,7 @@ export default function FechamentoLojas({ isEscuro }) {
                             </div>
                         )}
 
+                        {/* LISTAGEM DOS ITENS */}
                         <div style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                           {fornecedorEmEdicao === forn.nome ? (
                              Object.entries(itensFornEditados).map(([nomeItem, editado], k) => (
@@ -1520,6 +1564,7 @@ export default function FechamentoLojas({ isEscuro }) {
         </div>
       )}
 
+      {/* 💡 MODAL DE EDIÇÃO DA LOJA (COM TODOS OS CONTROLES E EXCLUSÃO) */}
       {lojaEmEdicao && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '10px' }}>
           <div style={{ backgroundColor: themeCard, width: '100%', maxWidth: '800px', borderRadius: '16px', padding: '20px', display: 'flex', flexDirection: 'column', maxHeight: '95vh' }}>
@@ -1600,6 +1645,7 @@ export default function FechamentoLojas({ isEscuro }) {
         </div>
       )}
 
+      {/* 💡 MODAL DE VALOR MÉDIA */}
       {modalMediaAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 11000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
           <div style={{ backgroundColor: themeCard, width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '25px', boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
@@ -1634,9 +1680,10 @@ export default function FechamentoLojas({ isEscuro }) {
         </div>
       )}
 
+      {/* DIV ESCONDIDA PARA O DOWNLOAD DE TODOS OS PDFs E DO WHATSAPP RÁPIDO */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
         {fechamentos.map(loja => (
-          <div id={`print-secreto-${loja.loja_id}`} key={loja.loja_id} style={{ width: '2480px', height: '3450px', padding: '80px', backgroundColor: '#fff', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div id={`print-secreto-${loja.loja_id}`} key={loja.loja_id} style={{ width: '2480px', height: '3450px', padding: '80px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
               <div style={{ border: '8px solid black', boxSizing: 'border-box', padding: '40px', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '8px solid black', paddingBottom: '30px', marginBottom: '20px' }}>
                       <div style={{ flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
@@ -1658,6 +1705,7 @@ export default function FechamentoLojas({ isEscuro }) {
         ))}
       </div>
 
+      {/* 🔔 MENSAGEM FLUTUANTE (TOAST) */}
       {mensagemFlutuante && (
         <div style={{
           position: 'fixed',
