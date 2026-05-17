@@ -48,7 +48,7 @@ export default function FechamentoCliente({ isEscuro, usuario }) {
   // Função para definir a cor de fundo da linha/card baseada no status seguindo o modelo do boleto
   const obterCorFundoStatus = (status, escuro) => {
     if (status === 'FALTA') return escuro ? '#331a1a' : '#fff1f1'; // Vermelho sutil
-    if (status === 'BONIFICAÇÃO' || status === 'BONIF. PARCIAL') return escuro ? '#14331e' : '#f1fff4'; // Verde sutil
+    if (status === 'BONIFICAÇÃO' || status === 'BONIFICAÇÃO_PARCIAL') return escuro ? '#14331e' : '#f1fff4'; // Verde sutil
     if (status === 'BOLETO') return escuro ? '#332414' : '#fff8f1'; // Dourado/Marrom sutil
     return 'transparent';
   };
@@ -116,7 +116,9 @@ export default function FechamentoCliente({ isEscuro, usuario }) {
   async function carregarDados() {
     setCarregando(true);
     try {
-      if (perfil?.role === 'admin') {
+      const isAdmin = perfil?.role === 'admin';
+
+      if (isAdmin) {
         const { data: lojas } = await supabase.from('lojas').select('codigo_loja, nome_fantasia');
         setLojasLiberadas(lojas || []);
         
@@ -136,10 +138,16 @@ export default function FechamentoCliente({ isEscuro, usuario }) {
         .select('*')
         .eq('data_pedido', dataBusca);
 
-      if (perfil?.role === 'cliente') {
-        query = query.eq('loja_id', perfil.loja_id);
-      } else if (lojaSelecionada) {
-        query = query.eq('loja_id', lojaSelecionada);
+      // 💡 SOLUÇÃO DO BUG: Identifica de forma imediata e sem delays a loja alvo correspondente ao perfil ativo
+      const lojaAlvo = isAdmin ? lojaSelecionada : perfil?.loja_id;
+
+      if (lojaAlvo) {
+        query = query.eq('loja_id', lojaAlvo);
+      } else {
+        setDadosFechamento(null);
+        setStatusFechamento('');
+        setCarregando(false);
+        return;
       }
 
       const { data: pedidos } = await query;
@@ -196,7 +204,7 @@ export default function FechamentoCliente({ isEscuro, usuario }) {
       let statusItem = 'OK';
       let detalhe = '';
 
-      // 💡 APLICAÇÃO DO PADRÃO IGUAL AO FECHAMENTO LOJA (ADMIN)
+      // APLICAÇÃO DO PADRÃO IGUAL AO FECHAMENTO LOJA (ADMIN)
       if (isFalta) {
         displayPreco = 'FALTA';
         statusItem = 'FALTA';
@@ -243,7 +251,7 @@ export default function FechamentoCliente({ isEscuro, usuario }) {
     });
   };
 
-  // 💡 FORMATO DE PDF ATUALIZADO COM AS INFOS DA LOJA E DATA DO FECHAMENTO
+  // FORMATO DE PDF ATUALIZADO COM AS INFOS DA LOJA E DATA DO FECHAMENTO
   const imprimirPDF = () => {
     if (!dadosFechamento) return;
     
@@ -349,35 +357,35 @@ export default function FechamentoCliente({ isEscuro, usuario }) {
 
   // Configuração visual da Label de Status do Fechamento
   const renderStatusBadge = () => {
-    let corBg = configDesign.cores.info;
+    let warmBg = configDesign.cores.info;
     let icone = '📌';
     let texto = statusFechamento;
     let subTexto = '';
 
     if (statusFechamento === 'PAGO') {
-      corBg = configDesign.cores.sucesso;
+      warmBg = configDesign.cores.sucesso;
       icone = '✅';
       subTexto = 'Tudo certo com este fechamento. Pagamento recebido!';
     } else if (statusFechamento === 'PAGAMENTO PENDENTE' || statusFechamento === 'FALTA PAGAMENTO') {
-      corBg = configDesign.cores.alerta;
+      warmBg = configDesign.cores.alerta;
       icone = '🚨';
       subTexto = 'Existe uma cobrança aguardando seu pagamento. Por favor, regularize!';
     } else if (statusFechamento === 'COBRADO') {
-      corBg = '#8b5cf6'; // Violeta cobrança
+      warmBg = '#8b5cf6'; // Violeta cobrança
       icone = '🔔';
       subTexto = 'A cobrança deste fechamento já foi enviada. Estamos aguardando confirmação.';
     } else if (statusFechamento === 'PENDÊNCIA NO PAGAMENTO' || statusFechamento === 'PENDENCIA NO PAGAMENTO') {
-      corBg = '#f97316'; // Laranja pendência
+      warmBg = '#f97316'; // Laranja pendência
       icone = '⚠️';
       subTexto = 'Há uma pendência financeira neste fechamento. Verifique com o atendimento.';
     } else if (statusFechamento === 'ENVIADO') {
-      corBg = configDesign.cores.primaria;
+      warmBg = configDesign.cores.primaria;
       icone = '📤';
       subTexto = 'Fechamento liberado para sua visualização.';
     }
 
     return (
-      <div style={{ backgroundColor: corBg, color: '#fff', padding: '15px', borderRadius: '12px', textAlign: 'center', marginBottom: '20px', boxShadow: `0 4px 15px ${corBg}40`, letterSpacing: '1px' }}>
+      <div style={{ backgroundColor: warmBg, color: '#fff', padding: '15px', borderRadius: '12px', textAlign: 'center', marginBottom: '20px', boxShadow: `0 4px 15px ${warmBg}40`, letterSpacing: '1px' }}>
         <div style={{ fontWeight: '900', fontSize: '16px' }}>{icone} STATUS DO FECHAMENTO: {texto}</div>
         {subTexto && <div style={{ fontSize: '13px', marginTop: '6px', fontWeight: 'bold', opacity: 0.9 }}>{subTexto}</div>}
       </div>
@@ -547,16 +555,16 @@ export default function FechamentoCliente({ isEscuro, usuario }) {
                       <tr key={idx} style={{ borderBottom: `1px solid ${configDesign.cores.borda}`, backgroundColor: obterCorFundoStatus(item.status, isEscuro) }}>
                         <td style={{ padding: '12px', fontSize: '14px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>{item.nome}</td>
                         <td style={{ padding: '12px', fontSize: '14px', color: configDesign.cores.textoSuave, textAlign: 'center' }}>{item.qtd} {item.und}</td>
-                        <td style={{ padding: '12px', fontSize: '14px', color: item.status === 'FALTA' ? configDesign.cores.alerta : (item.status === 'BONIFICAÇÃO' || item.status === 'BONIF. PARCIAL') ? configDesign.cores.sucesso : item.status === 'BOLETO' ? configDesign.cores.aviso : configDesign.cores.textoSuave, textAlign: 'right', fontWeight: 'bold' }}>
+                        <td style={{ padding: '12px', fontSize: '14px', color: item.status === 'FALTA' ? configDesign.cores.alerta : (item.status === 'BONIFICAÇÃO' || item.status === 'BONIFICAÇÃO_PARCIAL') ? configDesign.cores.sucesso : item.status === 'BOLETO' ? configDesign.cores.aviso : configDesign.cores.textoSuave, textAlign: 'right', fontWeight: 'bold' }}>
                           {item.unitario}
                         </td>
                         <td style={{ padding: '12px', fontSize: '14px', fontWeight: '900', color: item.status === 'FALTA' ? configDesign.cores.alerta : item.status === 'BONIFICAÇÃO' ? configDesign.cores.sucesso : item.status === 'BOLETO' ? configDesign.cores.aviso : configDesign.cores.textoForte, textAlign: 'right' }}>
                           {item.status === 'OK' || item.status === 'BONIFICAÇÃO_PARCIAL' ? formatarMoeda(item.total) : (
                             <div>
                               <span>
-                                {item.status === 'BONIFICAÇÃO_PARCIAL' ? 'BONIFIC. PARCIAL' : item.status}
+                                {item.status === 'BONIFICAÇÃO_PARCIAL' ? formatarMoeda(item.total) : item.status}
                               </span>
-                              {(item.status === 'FALTA' || item.status === 'BONIFICAÇÃO' || item.status === 'BONIFICAÇÃO_PARCIAL') && (
+                              {item.detalhe && (
                                 <div style={{ fontSize: '11px', fontWeight: 'bold', marginTop: '4px', color: item.status === 'FALTA' ? configDesign.cores.alerta : configDesign.cores.sucesso }}>{item.detalhe}</div>
                               )}
                             </div>
@@ -593,10 +601,10 @@ export default function FechamentoCliente({ isEscuro, usuario }) {
                         <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, textTransform: 'uppercase' }}>Total</div>
                         <div style={{ fontSize: '16px', fontWeight: '900', color: item.status === 'FALTA' ? configDesign.cores.alerta : item.status === 'BONIFICAÇÃO' ? configDesign.cores.sucesso : item.status === 'BOLETO' ? configDesign.cores.aviso : configDesign.cores.textoForte }}>
                           {item.status === 'OK' || item.status === 'BONIFICAÇÃO_PARCIAL' ? formatarMoeda(item.total) : (
-                             <span>{item.status === 'BONIFICAÇÃO_PARCIAL' ? 'BONIFIC. PARCIAL' : item.status}</span>
+                             <span>{item.status === 'BONIFICAÇÃO_PARCIAL' ? formatarMoeda(item.total) : item.status}</span>
                           )}
                         </div>
-                        {(item.status === 'FALTA' || item.status === 'BONIFICAÇÃO' || item.status === 'BONIFICAÇÃO_PARCIAL') && (
+                        {item.detalhe && (
                            <div style={{ fontSize: '11px', marginTop: '4px', fontWeight: 'bold', color: item.status === 'FALTA' ? configDesign.cores.alerta : configDesign.cores.sucesso }}>{item.detalhe}</div>
                         )}
                       </div>
@@ -609,7 +617,7 @@ export default function FechamentoCliente({ isEscuro, usuario }) {
             {/* RODAPÉ DA NOTA */}
             <div style={{ padding: '20px 30px', backgroundColor: isEscuro ? '#1e293b' : '#fafafa', borderTop: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
                <div style={{ fontSize: '12px', color: configDesign.cores.textoSuave }}>
-                  Dúvidas sobre os valores? Entre em contato com o financeiro.
+                  Dúvidas sobre os values? Entre em contato com o financeiro.
                </div>
                <div style={{ textAlign: 'right' }}>
                   <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, display: 'block' }}>Data da Entrega Selecionada</span>
@@ -621,9 +629,9 @@ export default function FechamentoCliente({ isEscuro, usuario }) {
       )}
     </div>
   );
+}
 
-  function dataBr(data) {
-    if (!data) return '';
-    return data.split('-').reverse().join('/');
-  }
+function dataBr(data) {
+  if (!data) return '';
+  return data.split('-').reverse().join('/');
 }
