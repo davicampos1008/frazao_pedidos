@@ -12,8 +12,8 @@ import Listas from './Listas';
 import PlanilhaCompras from './PlanilhaCompras';
 import FechamentoLojas from './FechamentoLojas';
 import PainelNotasFiscais from './PainelNotasFiscais';
-import FechamentoCliente from './FechamentoCliente';
-import ConferenciaMadrugada from './ConferenciaMadrugada'; // 💡 IMPORT NOVO
+import FechamentoCliente from './FechamentoCliente'; // 💡 TELA ADICIONADA
+import ConferenciaMadrugada from './ConferenciaMadrugada';
 
 function App() {
   const [tema, setTema] = useState(() => localStorage.getItem('temaVIRTUS') || 'claro');
@@ -218,7 +218,6 @@ function App() {
 
       {menuAberto && (
         <>
-          {/* CAMADA ADICIONADA: Fundo clicável para fechar o menu */}
           <div onClick={() => setMenuAberto(false)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9998, backdropFilter: 'blur(2px)' }}></div>
           
           <div style={{ position: 'fixed', top: 0, left: 0, width: '280px', height: '100%', backgroundColor: config.identidade.corMenuLateral, color: 'white', padding: '80px 20px 30px 20px', zIndex: 9999, display: 'flex', flexDirection: 'column', boxSizing: 'border-box', boxShadow: '10px 0 40px rgba(0,0,0,0.6)', transition: 'background-color 0.3s' }}>
@@ -232,6 +231,7 @@ function App() {
                 </>
               )}
 
+              {/* 💡 MENU PARA O CLIENTE VER A SUA PRÓPRIA NOTA */}
               {usuarioLogado.perfil === 'cliente' && (
                  <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>📄 MEU FECHAMENTO</button>
               )}
@@ -252,13 +252,12 @@ function App() {
                   <button onClick={() => navegarPara('marketing')} style={s.btnNav}>🖼️ BANNERS E MÍDIA</button>
                   <button onClick={() => navegarPara('listas')} style={s.btnNav}>📋 PAINEL DE CONFERÊNCIA</button>
                   <button onClick={() => navegarPara('compras')} style={s.btnNav}>🛒 MESA DE COMPRAS</button>
-                  
-                  {/* 💡 BOTÃO DA CONFERÊNCIA DE MADRUGADA ADICIONADO AQUI */}
                   <button onClick={() => navegarPara('madrugada')} style={{...s.btnNav, color: '#22c55e'}}>🔦 MADRUGADA (GALPÃO)</button>
-                  
                   <button onClick={() => navegarPara('fechamento')} style={s.btnNav}>🧮 GESTÃO DE FECHAMENTOS</button>
                   <button onClick={() => navegarPara('notas_fiscais')} style={s.btnNav}>🧾 PAINEL NOTAS FISCAIS</button> 
-                  <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>🏪 Nota Fiscal da Loja</button>
+                  
+                  {/* 💡 MENU PARA O ADMIN VER A NOTA FISCAL DAS LOJAS */}
+                  <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>🏪 NOTA FISCAL DA LOJA</button>
                 </>
               )}
             </div>
@@ -317,13 +316,12 @@ function App() {
         {telaAtiva === 'listas' && <Listas usuario={usuarioLogado} />}
         {telaAtiva === 'cliente' && usuarioLogado && <MenuCliente usuario={usuarioLogado} tema={tema} />}
         {telaAtiva === 'compras' && <PlanilhaCompras navegarPara={navegarPara} setTelaAtiva={setTelaAtiva} />}
-        
-        {/* 💡 RENDERIZAÇÃO DA TELA DE MADRUGADA */}
         {telaAtiva === 'madrugada' && <ConferenciaMadrugada />} 
-        
         {telaAtiva === 'fechamento' && <FechamentoLojas isEscuro={isEscuro} />}
-        {telaAtiva === 'fechamento_cliente' && <FechamentoCliente isEscuro={isEscuro} usuario={usuarioLogado} />}
         {telaAtiva === 'notas_fiscais' && <PainelNotasFiscais isEscuro={isEscuro} />}
+        
+        {/* 💡 RENDERIZAÇÃO DA NOVA TELA AQUI NA ÁREA DE CONTEÚDO */}
+        {telaAtiva === 'fechamento_cliente' && <FechamentoCliente isEscuro={isEscuro} usuario={usuarioLogado} />}
       </div>
 
       {modalConfiguracoesAberto && (

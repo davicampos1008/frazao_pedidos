@@ -10,11 +10,19 @@ export default function FechamentoCliente({ isEscuro }) {
   
   const [statusFechamento, setStatusFechamento] = useState('');
   
-  // 💡 LÓGICA DE DATAS CORRIGIDA (Busca EXATAMENTE a data do cabeçalho, sem subtrair)
+  // Obtém a data local atual
   const obterDataLocal = () => {
     const data = new Date();
     const tzOffset = data.getTimezoneOffset() * 60000;
     return new Date(data.getTime() - tzOffset).toISOString().split('T')[0];
+  };
+
+  // 💡 NOVA LÓGICA DE DATAS: Subtrai 1 dia da data selecionada
+  const obterDataAnterior = (dataString) => {
+    if (!dataString) return '';
+    const dateObj = new Date(dataString + 'T12:00:00'); // Evita bugs de fuso horário
+    dateObj.setDate(dateObj.getDate() - 1);
+    return dateObj.toISOString().split('T')[0];
   };
 
   const [dataVisivel, setDataVisivel] = useState(obterDataLocal());
@@ -29,6 +37,8 @@ export default function FechamentoCliente({ isEscuro }) {
       primaria: '#8b5cf6',
       sucesso: '#22c55e',
       alerta: '#ef4444',
+      aviso: '#f59e0b',
+      info: '#3b82f6',
       inputFundo: isEscuro ? '#0f172a' : '#f1f5f9'
     }
   };
@@ -41,20 +51,17 @@ export default function FechamentoCliente({ isEscuro }) {
     if (perfil) carregarDados();
   }, [perfil, dataVisivel, lojaSelecionada]);
 
-  // 💡 LÓGICA DE ALERTA EXTERNO PROGRAMADO (Apenas às 14h)
+  // Alerta de cobrança externa
   useEffect(() => {
-    if (dadosFechamento && statusFechamento !== 'PAGO') {
+    if (dadosFechamento && statusFechamento !== 'PAGO' && statusFechamento !== '') {
       const horaAtual = new Date().getHours();
-      
       const keyAlerta = `alerta_cobranca_${dataVisivel}_14h`;
       
       if (horaAtual === 14 && !sessionStorage.getItem(keyAlerta)) {
-        const msgExterna = `🔔 Frazão Frutas & Cia: O pagamento do fechamento (Data: ${dataBr(dataVisivel)}) ainda não consta como concluído. Por favor, verifique!`;
+        const msgExterna = `🔔 Frazão Frutas & Cia: O pagamento do fechamento (Entrega: ${dataBr(dataVisivel)}) ainda não consta como concluído.`;
         
-        // Alerta interno (Pop-up na tela)
-        alert(`🔔 AVISO FINANCEIRO:\n\nConsta em nosso sistema que o pagamento do fechamento (Data: ${dataBr(dataVisivel)}) ainda não foi concluído. Por favor, regularize e avise o setor financeiro!`);
+        alert(`🔔 AVISO FINANCEIRO:\n\nConsta em nosso sistema que o pagamento do fechamento (Entrega: ${dataBr(dataVisivel)}) ainda não foi concluído. Por favor, regularize e avise o setor financeiro!`);
         
-        // Alerta externo (Notificação Push do Celular/Sistema)
         if ("Notification" in window) {
             if (Notification.permission === "granted") {
                 new Notification("Cobrança Pendente", { body: msgExterna });
@@ -100,14 +107,13 @@ export default function FechamentoCliente({ isEscuro }) {
         setLojasLiberadas(lojas || []);
       }
 
-      // 💡 Busca pela data exata do cabeçalho e verifica se o status liberou a nota
+      const dataBusca = obterDataAnterior(dataVisivel);
+
       let query = supabase
         .from('pedidos')
         .select('*')
-        .eq('data_pedido', dataVisivel)
-        .in('status_fechamento', ['ENVIADO', 'PAGO', 'PENDENCIA']);
+        .eq('data_pedido', dataBusca);
 
-      // 💡 Restrição de visualização (Cliente vê a sua, Admin vê todas selecionáveis)
       if (perfil?.role === 'cliente') {
         query = query.eq('loja_id', perfil.loja_id);
       } else if (lojaSelecionada) {
@@ -115,7 +121,14 @@ export default function FechamentoCliente({ isEscuro }) {
       }
 
       const { data: pedidos } = await query;
-      processarPedidos(pedidos || []);
+
+      // 💡 NÃO disponibilizar se estiver pendente
+      const pedidosFiltrados = (pedidos || []).filter(p => {
+        const s = (p.status_fechamento || '').toUpperCase();
+        return s !== 'PENDENTE' && s !== 'PENDENCIA';
+      });
+
+      processarPedidos(pedidosFiltrados);
     } catch (err) {
       console.error(err);
     } finally {
@@ -132,20 +145,20 @@ export default function FechamentoCliente({ isEscuro }) {
       return;
     }
 
-    setStatusFechamento(pedidos[0].status_fechamento || 'ENVIADO');
+    setStatusFechamento((pedidos[0].status_fechamento || 'ENVIADO').toUpperCase());
 
     const itensProcessados = pedidos.map(p => {
       const valorRaw = p.preco_venda || p.custo_unit || 'R$ 0,00';
       let displayPreco = valorRaw;
       let numPreco = 0;
-      let status = 'OK';
+      let statusItem = 'OK';
 
       if (p.status_compra === 'falta') {
         displayPreco = 'FALTA';
-        status = 'FALTA';
+        statusItem = 'FALTA';
       } else if (p.status_compra === 'boleto') {
         displayPreco = 'BOLETO';
-        status = 'BOLETO';
+        statusItem = 'BOLETO';
       } else {
         const pLimpo = String(valorRaw).replace('BONIFICAÇÃO |', '').replace('R$', '').trim();
         numPreco = parseFloat(pLimpo.replace(/\./g, '').replace(',', '.')) || 0;
@@ -159,7 +172,7 @@ export default function FechamentoCliente({ isEscuro }) {
         und: p.unidade_medida || 'UN',
         unitario: displayPreco,
         total: numPreco * qtd,
-        status
+        status: statusItem
       };
     });
 
@@ -174,6 +187,77 @@ export default function FechamentoCliente({ isEscuro }) {
       window.print();
   };
 
+  // 💡 LÓGICA DE CÓPIA LIVRE PARA PLANILHAS
+  const copiarDados = (tipo) => {
+    if (!dadosFechamento) return;
+
+    let texto = '';
+    const itens = dadosFechamento.itens;
+
+    switch(tipo) {
+      case 'planilha_completa':
+        // Tabulação (\t) faz cada dado cair em uma coluna diferente no Excel
+        texto = itens.map(i => `${i.qtd}\t${i.nome}\t${i.unitario}\t${i.status === 'OK' ? formatarMoeda(i.total) : i.status}`).join('\n');
+        break;
+      case 'texto_resumo':
+        texto = itens.map(i => `${i.qtd}x ${i.nome} | Unit: ${i.unitario} | Total: ${i.status === 'OK' ? formatarMoeda(i.total) : i.status}`).join('\n');
+        break;
+      case 'col_qtd':
+        texto = itens.map(i => i.qtd).join('\n');
+        break;
+      case 'col_desc':
+        texto = itens.map(i => i.nome).join('\n');
+        break;
+      case 'col_unit':
+        texto = itens.map(i => i.unitario).join('\n');
+        break;
+      case 'col_total':
+        texto = itens.map(i => i.status === 'OK' ? formatarMoeda(i.total) : i.status).join('\n');
+        break;
+      default:
+        break;
+    }
+
+    navigator.clipboard.writeText(texto).then(() => {
+      alert('Copiado com sucesso! Agora é só colar.');
+    }).catch(() => {
+      alert('Erro ao copiar os dados.');
+    });
+  };
+
+  // Configuração visual da Label de Status do Fechamento
+  const renderStatusBadge = () => {
+    let corBg = configDesign.cores.info;
+    let icone = '📌';
+    let texto = statusFechamento;
+
+    if (statusFechamento === 'PAGO') {
+      corBg = configDesign.cores.sucesso;
+      icone = '✅';
+    } else if (statusFechamento === 'ENVIADO') {
+      corBg = configDesign.cores.aviso;
+      icone = '📤';
+    }
+
+    return (
+      <div style={{ backgroundColor: corBg, color: '#fff', padding: '15px', borderRadius: '12px', textAlign: 'center', fontWeight: '900', marginBottom: '20px', boxShadow: `0 4px 15px ${corBg}40`, letterSpacing: '1px' }}>
+        {icone} STATUS DO FECHAMENTO: {texto}
+      </div>
+    );
+  };
+
+  const btnCopiaEstilo = {
+    padding: '8px 12px',
+    backgroundColor: 'transparent',
+    border: `1px solid ${configDesign.cores.borda}`,
+    color: configDesign.cores.textoForte,
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: 'bold',
+    transition: 'all 0.2s ease',
+  };
+
   return (
     <div style={{ backgroundColor: configDesign.cores.fundoGeral, minHeight: '100vh', padding: '20px', fontFamily: 'sans-serif' }}>
       
@@ -185,7 +269,7 @@ export default function FechamentoCliente({ isEscuro }) {
               {perfil?.role === 'admin' ? '📑 Visualização Administrativa' : '🏪 Nota Fiscal da Loja'}
             </h2>
             <p style={{ margin: '5px 0 0 0', color: configDesign.cores.textoSuave, fontSize: '13px' }}>
-              Consulte aqui o seu fechamento diário liberado.
+              Mostrando o fechamento do <strong>dia anterior</strong> à data da entrega.
             </p>
           </div>
 
@@ -219,21 +303,13 @@ export default function FechamentoCliente({ isEscuro }) {
         <div style={{ textAlign: 'center', padding: '60px', backgroundColor: configDesign.cores.fundoCards, borderRadius: '20px', maxWidth: '900px', margin: '0 auto', border: `1px dashed ${configDesign.cores.borda}` }}>
            <span style={{ fontSize: '50px' }}>⏳</span>
            <h3 style={{ color: configDesign.cores.textoForte }}>Nenhum fechamento liberado</h3>
-           <p style={{ color: configDesign.cores.textoSuave }}>Seu fechamento ainda não foi liberado para esta data ou já foi concluído/ocultado.</p>
+           <p style={{ color: configDesign.cores.textoSuave }}>Seu fechamento ainda está pendente ou não há registros para o dia anterior a esta data.</p>
         </div>
       ) : (
         <div style={{ maxWidth: '900px', margin: '0 auto' }}>
           
-          {/* 💡 ALERTA VISUAL NO PAINEL DO CLIENTE */}
-          {statusFechamento === 'PAGO' ? (
-             <div style={{ backgroundColor: '#22c55e', color: '#fff', padding: '15px', borderRadius: '12px', textAlign: 'center', fontWeight: '900', marginBottom: '20px', boxShadow: '0 4px 15px rgba(34,197,94,0.3)', letterSpacing: '1px' }}>
-                ✅ PAGAMENTO CONCLUÍDO COM SUCESSO
-             </div>
-          ) : (
-             <div style={{ backgroundColor: '#ef4444', color: '#fff', padding: '15px', borderRadius: '12px', textAlign: 'center', fontWeight: '900', marginBottom: '20px', boxShadow: '0 4px 15px rgba(239,68,68,0.3)', letterSpacing: '1px' }}>
-                ⚠️ ATENÇÃO: PAGAMENTO NÃO CONCLUÍDO AINDA
-             </div>
-          )}
+          {/* 💡 ALERTA VISUAL IDENTIFICANDO A SITUAÇÃO */}
+          {renderStatusBadge()}
 
           {/* CARD PRINCIPAL */}
           <div id="area-nota-cliente" style={{ backgroundColor: configDesign.cores.fundoCards, borderRadius: '20px', border: `1px solid ${configDesign.cores.borda}`, overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.05)' }}>
@@ -243,38 +319,61 @@ export default function FechamentoCliente({ isEscuro }) {
               <div>
                 <span style={{ fontSize: '12px', fontWeight: '900', color: configDesign.cores.primaria, textTransform: 'uppercase', letterSpacing: '1px' }}>Resumo Financeiro</span>
                 <h1 style={{ margin: '5px 0 0 0', color: configDesign.cores.textoForte, fontSize: '28px', fontWeight: '900' }}>{formatarMoeda(dadosFechamento.totalGeral)}</h1>
+                <p style={{ margin: '5px 0 0 0', color: configDesign.cores.textoSuave, fontSize: '13px' }}>
+                  Referente às compras do dia: <strong>{dataBr(obterDataAnterior(dataVisivel))}</strong>
+                </p>
               </div>
               <button onClick={imprimirPDF} style={{ background: configDesign.cores.textoForte, color: isEscuro ? '#000' : '#fff', border: 'none', padding: '10px 20px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
                 📄 GERAR PDF
               </button>
             </div>
 
-            {/* TABELA DE ITENS */}
-            <div style={{ padding: '20px', overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ borderBottom: `2px solid ${configDesign.cores.borda}` }}>
-                    <th style={{ textAlign: 'left', padding: '15px 10px', fontSize: '12px', color: configDesign.cores.textoSuave }}>DESCRIÇÃO DO PRODUTO</th>
-                    <th style={{ textAlign: 'center', padding: '15px 10px', fontSize: '12px', color: configDesign.cores.textoSuave }}>QTD</th>
-                    <th style={{ textAlign: 'right', padding: '15px 10px', fontSize: '12px', color: configDesign.cores.textoSuave }}>PREÇO UNIT.</th>
-                    <th style={{ textAlign: 'right', padding: '15px 10px', fontSize: '12px', color: configDesign.cores.textoSuave }}>TOTAL</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dadosFechamento.itens.map((item, idx) => (
-                    <tr key={idx} style={{ borderBottom: `1px solid ${configDesign.cores.borda}`, backgroundColor: item.status !== 'OK' ? (isEscuro ? '#331a1a' : '#fff1f1') : 'transparent' }}>
-                      <td style={{ padding: '15px 10px', fontSize: '14px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>{item.nome}</td>
-                      <td style={{ textAlign: 'center', padding: '15px 10px', fontSize: '14px', color: configDesign.cores.textoForte }}>{item.qtd} <small>{item.und}</small></td>
-                      <td style={{ textAlign: 'right', padding: '15px 10px', fontSize: '14px', fontWeight: 'bold', color: item.status === 'FALTA' ? configDesign.cores.alerta : item.status === 'BOLETO' ? configDesign.cores.aviso : configDesign.cores.textoSuave }}>
+            {/* 💡 MENU DE OPÇÕES DE CÓPIA */}
+            <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, backgroundColor: configDesign.cores.fundoGeral }}>
+              <div style={{ fontSize: '13px', fontWeight: 'bold', color: configDesign.cores.textoSuave, marginBottom: '10px' }}>📋 COPIAR DADOS:</div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button style={btnCopiaEstilo} onClick={() => copiarDados('planilha_completa')}>Tudo (Para Planilha)</button>
+                <button style={btnCopiaEstilo} onClick={() => copiarDados('texto_resumo')}>Tudo (Para WhatsApp)</button>
+                <span style={{ width: '1px', backgroundColor: configDesign.cores.borda, margin: '0 5px' }}></span>
+                <button style={btnCopiaEstilo} onClick={() => copiarDados('col_qtd')}>Só QTD</button>
+                <button style={btnCopiaEstilo} onClick={() => copiarDados('col_desc')}>Só Descrição</button>
+                <button style={btnCopiaEstilo} onClick={() => copiarDados('col_unit')}>Só Unitário</button>
+                <button style={btnCopiaEstilo} onClick={() => copiarDados('col_total')}>Só Total</button>
+              </div>
+            </div>
+
+            {/* 💡 LISTA DE ITENS EM UMA COLUNA SÓ */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {dadosFechamento.itens.map((item, idx) => (
+                <div key={idx} style={{ padding: '15px', borderRadius: '12px', border: `1px solid ${configDesign.cores.borda}`, backgroundColor: item.status !== 'OK' ? (isEscuro ? '#331a1a' : '#fff1f1') : (isEscuro ? '#0f172a' : '#ffffff') }}>
+                  
+                  {/* Linha Superior: Nome e Quantidade */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>
+                      {item.nome}
+                    </div>
+                    <div style={{ backgroundColor: configDesign.cores.fundoGeral, padding: '4px 10px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', color: configDesign.cores.textoSuave, border: `1px solid ${configDesign.cores.borda}`, whiteSpace: 'nowrap', marginLeft: '10px' }}>
+                      {item.qtd} {item.und}
+                    </div>
+                  </div>
+
+                  {/* Linha Inferior: Valores (Com pontilhado de separação) */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: `1px dashed ${configDesign.cores.borda}`, paddingTop: '10px' }}>
+                    <div>
+                      <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, textTransform: 'uppercase' }}>Valor Unit.</div>
+                      <div style={{ fontSize: '14px', fontWeight: 'bold', color: item.status === 'FALTA' ? configDesign.cores.alerta : item.status === 'BOLETO' ? configDesign.cores.aviso : configDesign.cores.textoSuave }}>
                         {item.unitario}
-                      </td>
-                      <td style={{ textAlign: 'right', padding: '15px 10px', fontSize: '14px', fontWeight: '900', color: configDesign.cores.textoForte }}>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, textTransform: 'uppercase' }}>Total</div>
+                      <div style={{ fontSize: '16px', fontWeight: '900', color: configDesign.cores.textoForte }}>
                         {item.status === 'OK' ? formatarMoeda(item.total) : item.status}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
 
             {/* RODAPÉ DA NOTA */}
@@ -283,7 +382,7 @@ export default function FechamentoCliente({ isEscuro }) {
                   Dúvidas sobre os valores? Entre em contato com o financeiro.
                </div>
                <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, display: 'block' }}>Data da Entrega</span>
+                  <span style={{ fontSize: '11px', color: configDesign.cores.textoSuave, display: 'block' }}>Data da Entrega Selecionada</span>
                   <strong style={{ color: configDesign.cores.textoForte }}>{dataBr(dataVisivel)}</strong>
                </div>
             </div>
