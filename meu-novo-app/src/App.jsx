@@ -228,13 +228,10 @@ function App() {
                 <>
                   <button onClick={() => navegarPara('inicio')} style={s.btnNav}>🏠 INÍCIO</button>
                   <button onClick={() => navegarPara('cliente')} style={s.btnNav}>📱 APP COMPRAS</button>
+                  <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>📄 MEU FECHAMENTO</button>
                 </>
               )}
 
-              {/* 💡 MENU DE FECHAMENTO LIBERADO PARA O CLIENTE E USUÁRIO */}
-              {(usuarioLogado.perfil === 'cliente' || usuarioLogado.perfil === 'usuario') && (
-                 <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>📄 MEU FECHAMENTO</button>
-              )}
 
               {usuarioLogado.perfil === 'faturista' && (
                  <button onClick={() => navegarPara('notas_fiscais')} style={s.btnNav}>🧾 PAINEL NOTAS FISCAIS</button>
