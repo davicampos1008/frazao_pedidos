@@ -702,6 +702,21 @@ export default function PlanilhaCompras() {
       setCarregando(false);
   };
 
+  const excluirPedidoLojaModal = async (idPedido, nomeLoja) => {
+      if (!window.confirm(`Tem certeza que deseja EXCLUIR DEFINITIVAMENTE o pedido deste item para a loja ${nomeLoja}?`)) return;
+      setCarregando(true);
+      
+      // Exclui completamente a requisição do banco de dados
+      await supabase.from('pedidos').delete().eq('id', idPedido);
+      
+      // Remove da lista exibida na tela
+      setLojasEnvolvidas(prev => prev.filter(l => l.id_pedido !== idPedido));
+      
+      mostrarNotificacao(`✅ Item excluído da lista da loja ${nomeLoja}.`, 'sucesso');
+      carregarDados(true);
+      setCarregando(false);
+  };
+
   const aceitarBonificacaoCliente = () => {
      setDadosCompra({...dadosCompra, temBonificacao: true});
      setLojasEnvolvidas(lojasEnvolvidas.map(l => ({
@@ -1050,6 +1065,13 @@ export default function PlanilhaCompras() {
                     >
                         USAR COMO<br/>TOTAL
                     </button>
+                    <button
+                        onClick={() => excluirPedidoLojaModal(loja.id_pedido, loja.nome_fantasia)}
+                        title="Excluir este item da lista desta loja"
+                        style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 6px', fontSize: '9px', cursor: 'pointer', fontWeight: 'bold', lineHeight: '1.2' }}
+                    >
+                        EXCLUIR DA<br/>LISTA
+                    </button>
                 </div>
               </div>
             )}
@@ -1350,7 +1372,7 @@ export default function PlanilhaCompras() {
                   </span>
                   {item.qtd_bonificada_cliente > 0 && (
                      <span style={{ fontSize: '10px', color: '#16a34a', background: '#dcfce7', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold', marginTop: '5px' }}>
-                       🎁 {item.qtd_bonificada_cliente} Bonif. Solicitada
+                        🎁 {item.qtd_bonificada_cliente} Bonif. Solicitada
                      </span>
                   )}
                 </div>
