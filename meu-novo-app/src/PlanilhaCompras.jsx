@@ -888,10 +888,14 @@ export default function PlanilhaCompras() {
 
        const nomeWhats = getNomeExibicaoWhatsApp(f.nome, i.nome, exibicaoUnidade);
        const precoNum = tratarPrecoNum(i.valor_unit);
-       const totalLinha = (i.qtd - (i.qtd_bonificada || 0)) * precoNum;
+       
+       // 💡 CORREÇÃO 5: Multiplica a QTD TOTAL (não subtrai a bonificação) para exibir no item bruto
+       const totalLinhaBruto = i.qtd * precoNum;
 
-       msg += `${i.qtd} ${nomeWhats} - ${i.valor_unit} (Total: ${formatarMoeda(totalLinha)})`;
-       if (i.qtd_bonificada > 0) msg += ` (🎁 +${i.qtd_bonificada})`;
+       msg += `${i.qtd} ${nomeWhats} - ${i.valor_unit} (Total: ${formatarMoeda(totalLinhaBruto)})`;
+       
+       // 💡 CORREÇÃO 6: Remove o presentinho e adapta a frase de bonificação
+       if (i.qtd_bonificada > 0) msg += ` (${i.qtd_bonificada} BONIFICAÇÕES)`;
        msg += `\n`;
     });
 
@@ -925,7 +929,9 @@ export default function PlanilhaCompras() {
 
         const nomeWhats = getNomeExibicaoWhatsApp(fNome, i.nome, exibicaoUnidade);
         msg += `${i.qtd} ${nomeWhats}`;
-        if (i.qtd_bonificada > 0) msg += ` (🎁 +${i.qtd_bonificada})`;
+        
+        // 💡 CORREÇÃO 7: Remove o presentinho da cópia da loja tbm
+        if (i.qtd_bonificada > 0) msg += ` (${i.qtd_bonificada} BONIFICAÇÕES)`;
         msg += `\n`;
     });
     msg += `\n${placaBase} ${comp ? '- ' + comp : ''}`;
@@ -963,7 +969,7 @@ export default function PlanilhaCompras() {
         if (!precoLimpo.includes(',') && precoLimpo) precoLimpo += ',00';
         const precoFinal = precoLimpo ? `R$ ${precoLimpo}` : 'R$ 0,00';
         
-        // 💡 CORREÇÃO 3: Define "BOLETO" como preço final caso tipo seja boleto
+        // 💡 CORREÇÃO 8: Define "BOLETO" como preço final caso tipo seja boleto
         const custoFinal = isBoleto ? 'BOLETO' : precoFinal;
 
         if (demandaItem) {
@@ -981,7 +987,7 @@ export default function PlanilhaCompras() {
         }
     });
     
-    // 💡 CORREÇÃO 4: Se o usuário estiver fechando como Boleto, não exigiremos que os preços estejam preenchidos!
+    // 💡 CORREÇÃO 9: Se for Boleto, não exige preço preenchido
     if (!isBoleto && !tudoPreenchido && !window.confirm("Alguns itens estão sem preço. Deseja finalizar mesmo assim?")) {
        setCarregando(false);
        return;
@@ -1372,7 +1378,7 @@ export default function PlanilhaCompras() {
                   </span>
                   {item.qtd_bonificada_cliente > 0 && (
                      <span style={{ fontSize: '10px', color: '#16a34a', background: '#dcfce7', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold', marginTop: '5px' }}>
-                        🎁 {item.qtd_bonificada_cliente} Bonif. Solicitada
+                       🎁 {item.qtd_bonificada_cliente} Bonif. Solicitada
                      </span>
                   )}
                 </div>
