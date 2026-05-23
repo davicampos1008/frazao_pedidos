@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
-// 💡 BLOCO DE ORDENAÇÃO GLOBAL DAS LOJAS
 const ORDEM_LOJAS = [
   "FLAMINGO", "PARANOÁ", "411", "404", "QE15", "QE30", 
   "QUALIDADE", "XEPA", "MANSÕES", "Q6", "VARJÃO", "215", "313", "307"
@@ -10,18 +9,15 @@ const ORDEM_LOJAS = [
 const ordenarLojas = (lojasArray) => {
   if (!Array.isArray(lojasArray)) return lojasArray;
   return [...lojasArray].sort((a, b) => {
-    // 💡 Agora ele encontra o nome em qualquer formato
     const nA = String(a.nome_fantasia || a.loja || a.nome || a.nome_loja || "").toUpperCase();
     const nB = String(b.nome_fantasia || b.loja || b.nome || b.nome_loja || "").toUpperCase();
     
-    // Garante que a loja Frazão (Teste) fique sempre no topo
     if (nA.includes('FRAZÃO')) return -1;
     if (nB.includes('FRAZÃO')) return 1;
 
     let iA = ORDEM_LOJAS.findIndex(nome => nA.includes(nome));
     let iB = ORDEM_LOJAS.findIndex(nome => nB.includes(nome));
     
-    // Se não encontrar na lista, joga pro final
     if (iA === -1) iA = 999;
     if (iB === -1) iB = 999;
     
@@ -30,11 +26,18 @@ const ordenarLojas = (lojasArray) => {
 };
 
 export default function Listas() {
-  // 💡 LÓGICA DE DATA FIXA E SELECIONÁVEL
   const obterDataLocal = () => {
     const data = new Date();
     const tzOffset = data.getTimezoneOffset() * 60000;
     return new Date(data.getTime() - tzOffset).toISOString().split('T')[0];
+  };
+
+  const calcularDataPosterior = (dataString) => {
+    if (!dataString) return '';
+    const [ano, mes, dia] = dataString.split('-');
+    const dataObj = new Date(ano, mes - 1, dia);
+    dataObj.setDate(dataObj.getDate() + 1);
+    return dataObj.toLocaleDateString('pt-BR');
   };
 
   const [dataFiltro, setDataFiltro] = useState(() => {
@@ -42,17 +45,15 @@ export default function Listas() {
   });
   const dataBr = dataFiltro.split('-').reverse().join('/');
 
-  // 💡 ONDE MUDAR: No useEffect que já existe perto do topo do arquivo
   useEffect(() => {
     localStorage.setItem('virtus_listas_data', dataFiltro);
-    carregarDados(); // Carregamento inicial (com loading)
+    carregarDados();
 
-    // Criar o intervalo de 1 segundo (silencioso)
     const intervalo = setInterval(() => {
         carregarDados(true); 
     }, 1000);
 
-    return () => clearInterval(intervalo); // Limpa o timer ao fechar a tela
+    return () => clearInterval(intervalo);
   }, [dataFiltro]);
 
   const [lojas, setLojas] = useState([]);
@@ -61,9 +62,13 @@ export default function Listas() {
   const [modalAberto, setModalAberto] = useState(null);
   const [carregando, setCarregando] = useState(true);
 
-  // 💡 ESTADOS PARA EDIÇÃO DA LISTA
   const [editandoLista, setEditandoLista] = useState(false);
   const [listaEditada, setListaEditada] = useState({});
+
+  const [modalDevolverAberto, setModalDevolverAberto] = useState(false);
+  const [historicoDevolver, setHistoricoDevolver] = useState([]);
+  const [lojaParaDevolver, setLojaParaDevolver] = useState(null);
+  const [snapshotSelecionado, setSnapshotSelecionado] = useState(null);
 
   const extrairNum = (valor) => {
     if (valor === null || valor === undefined) return null;
@@ -76,10 +81,9 @@ export default function Listas() {
     return str.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
   };
 
-  // 💡 ONDE MUDAR: Na definição da função carregarDados
   async function carregarDados(silencioso = false) {
     try {
-      if (!silencioso) setCarregando(true); // Só mostra "Carregando" se não for silencioso
+      if (!silencioso) setCarregando(true);
       
       const { data: dLojas } = await supabase.from('lojas').select('*').order('nome_fantasia', { ascending: true });
       const { data: dPedidos } = await supabase.from('pedidos').select('*').eq('data_pedido', dataFiltro); 
@@ -91,13 +95,13 @@ export default function Listas() {
         lojasDb.unshift({ id: 99999, codigo_loja: '00', nome_fantasia: 'FRAZÃO (TESTE)' });
       }
 
-      setLojas(ordenarLojas(lojasDb)); // 💡 APLICA A ORDENAÇÃO AQUI ANTES DE SALVAR NA TELA
+      setLojas(ordenarLojas(lojasDb));
       setPedidosDia(dPedidos || []);
       setProdutosBd(dProdutos || []); 
     } catch (err) { 
       console.error("Erro:", err); 
     } finally { 
-      if (!silencioso) setCarregando(false); // Só tira o "Carregando" se ele foi ativado
+      if (!silencioso) setCarregando(false);
     }
   }
 
@@ -134,7 +138,13 @@ export default function Listas() {
     const pLoja = pedidosDia.filter(p => extrairNum(p.loja_id) === extrairNum(modalAberto.codigo_loja));
     const nomeOperador = pLoja.length > 0 ? pLoja[0].nome_usuario : 'Operador';
     const cabecalho = `*LOJA:* ${modalAberto.nome_fantasia}\n*RESPONSÁVEL:* ${nomeOperador}`;
-    const corpo = pLoja.map(i => `- ${i.quantidade} ${String(i.unidade || i.unidade_medida).toUpperCase()} : ${formatarNomeItem(String(i.nome || i.nome_produto))}`).join('\n');
+    const corpo = pLoja.map(i => {
+        let texto = `- ${i.quantidade} ${String(i.unidade || i.unidade_medida).toUpperCase()} : ${formatarNomeItem(String(i.nome || i.nome_produto))}`;
+        if (i.qtd_bonificada_cliente > 0) {
+            texto += ` (🎁 Pediu +${i.qtd_bonificada_cliente} Bonif.)`;
+        }
+        return texto;
+    }).join('\n');
     navigator.clipboard.writeText(`${cabecalho}\n\n${corpo}`);
     alert("✅ Lista copiada!");
   };
@@ -214,6 +224,15 @@ export default function Listas() {
     
     setCarregando(true);
     try {
+        const { data: { user } } = await supabase.auth.getUser();
+        await supabase.from('logs_carrinho').insert([{
+            loja_id: extrairNum(modalAberto.codigo_loja),
+            login_responsavel: user?.email || 'Equipe Adm',
+            acao: 'APAGOU ITEM (EQUIPE)',
+            item_nome: nomeItem,
+            quantidade: 0
+        }]);
+
         await supabase.from('pedidos').delete().eq('id', idPedido);
         
         const novaListaEditada = { ...listaEditada };
@@ -231,12 +250,30 @@ export default function Listas() {
     setCarregando(true);
     try {
       const promessas = [];
+      const { data: { user } } = await supabase.auth.getUser();
+      const userName = user?.email || 'Equipe Adm';
+
       for (const idPedido of Object.keys(listaEditada)) {
+        const itemAntes = pedidosDia.find(p => p.id === parseInt(idPedido));
+        const itemAgora = listaEditada[idPedido];
+
+        if (itemAntes && (Number(itemAntes.quantidade) !== Number(itemAgora.quantidade) || itemAntes.nome_produto !== itemAgora.nome.toUpperCase())) {
+            promessas.push(
+                supabase.from('logs_carrinho').insert([{
+                    loja_id: extrairNum(modalAberto.codigo_loja),
+                    login_responsavel: userName,
+                    acao: `MODIFICOU ITEM (EQUIPE) [De: ${itemAntes.quantidade}x ${itemAntes.nome_produto} Para: ${itemAgora.quantidade}x ${itemAgora.nome.toUpperCase()}]`,
+                    item_nome: itemAgora.nome.toUpperCase(),
+                    quantidade: Number(itemAgora.quantidade)
+                }])
+            );
+        }
+
         promessas.push(
           supabase.from('pedidos')
           .update({ 
-              quantidade: Number(listaEditada[idPedido].quantidade),
-              nome_produto: listaEditada[idPedido].nome.toUpperCase() 
+              quantidade: Number(itemAgora.quantidade),
+              nome_produto: itemAgora.nome.toUpperCase() 
           })
           .eq('id', idPedido) 
         );
@@ -271,7 +308,11 @@ export default function Listas() {
 
       data.forEach((log) => {
         const hora = new Date(log.created_at).toLocaleTimeString('pt-BR');
-        resumoLog += `[${hora}] ${log.login_responsavel} ${log.acao}: ${log.quantidade}x ${formatarNomeItem(log.item_nome)}\n`;
+        let textoAcao = `[${hora}] ${log.login_responsavel} ${log.acao}: ${log.quantidade}x ${formatarNomeItem(log.item_nome)}`;
+        if (log.qtd_bonificada && Number(log.qtd_bonificada) > 0) {
+            textoAcao += ` (🎁 +${log.qtd_bonificada} Bonif.)`;
+        }
+        resumoLog += textoAcao + '\n';
       });
 
       navigator.clipboard.writeText(resumoLog);
@@ -282,154 +323,160 @@ export default function Listas() {
     }
   };
 
-  const forcarRetornoCarrinho = async (lojaAlvo) => {
-    if (!lojaAlvo) return;
-    if (!window.confirm(`Tem certeza que deseja FORÇAR o retorno da lista para o carrinho da loja ${lojaAlvo.nome_fantasia}?\n\nOs itens aparecerão imediatamente na tela do cliente.`)) return;
-    
-    setCarregando(true);
-    try {
-      const lojaAbertaPedidos = pedidosDia.filter(p => extrairNum(p.loja_id) === extrairNum(lojaAlvo.codigo_loja));
-      const payloadNuvem = [];
+  const verHistoricoEquipe = async (lojaAlvo) => {
+      setCarregando(true);
+      try {
+          const { data: logs, error } = await supabase
+              .from('logs_carrinho')
+              .select('*')
+              .eq('loja_id', extrairNum(lojaAlvo.codigo_loja))
+              .ilike('acao', '%(EQUIPE)%')
+              .gte('created_at', `${dataFiltro}T00:00:00Z`)
+              .lte('created_at', `${dataFiltro}T23:59:59Z`)
+              .order('created_at', { ascending: true });
 
-      lojaAbertaPedidos.forEach(dbItem => {
-        const prodOriginal = produtosBd.find(p => p.nome === dbItem.nome_produto || p.nome === dbItem.nome);
-        
-        if (prodOriginal) {
-          let pUnit = parseFloat(String(prodOriginal.preco || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
-          let precoFinalItem = pUnit;
-          let undFinal = prodOriginal.unidade_medida || 'UN';
+          if (error) throw error;
 
-          const temPesoExtra = prodOriginal.peso_caixa && String(prodOriginal.peso_caixa).trim() !== '';
-          const numeroPeso = temPesoExtra ? parseFloat(String(prodOriginal.peso_caixa).replace(/[^\d.]/g, '')) : 0;
-          
-          if (temPesoExtra && numeroPeso > 0) {
-              precoFinalItem = pUnit * numeroPeso;
-              if (undFinal === 'KG') undFinal = 'CX'; 
+          if (!logs || logs.length === 0) {
+              alert(`Nenhuma modificação feita pela equipe na loja ${lojaAlvo.nome_fantasia} hoje.`);
+              setCarregando(false);
+              return;
           }
 
-          const bonif = Number(dbItem.qtd_bonificada) || 0;
-          const qtdCobrada = Math.max(0, Number(dbItem.quantidade) - bonif);
+          let resumoHistorico = `*HISTÓRICO DE MODIFICAÇÕES DA EQUIPE - ${lojaAlvo.nome_fantasia}*\nData: ${dataBr}\n\n`;
 
-          payloadNuvem.push({
-              loja_id: extrairNum(lojaAlvo.codigo_loja),
-              produto_id: prodOriginal.id,
-              nome: prodOriginal.nome,
-              quantidade: dbItem.quantidade,
-              qtd_bonificada: bonif,
-              valorUnit: precoFinalItem,
-              total: precoFinalItem * qtdCobrada,
-              unidade_medida: dbItem.unidade_medida || undFinal
+          logs.forEach(log => {
+              const hora = new Date(log.created_at).toLocaleTimeString('pt-BR');
+              resumoHistorico += `[${hora}] ${log.login_responsavel}\n👉 ${log.acao}\n\n`;
           });
-        }
-      });
 
-      if (payloadNuvem.length > 0) {
-          await supabase.from('carrinho_nuvem').delete().eq('loja_id', extrairNum(lojaAlvo.codigo_loja));
-          const { error: errNuvem } = await supabase.from('carrinho_nuvem').insert(payloadNuvem);
-          if (errNuvem) throw errNuvem;
+          navigator.clipboard.writeText(resumoHistorico);
+          alert("✅ Histórico da equipe copiado para a área de transferência!");
+          setCarregando(false);
+      } catch (err) {
+          alert("Erro ao buscar histórico da equipe: " + err.message);
+          setCarregando(false);
       }
-
-      await supabase.from('pedidos')
-        .delete()
-        .eq('data_pedido', dataFiltro) 
-        .eq('loja_id', extrairNum(lojaAlvo.codigo_loja));
-
-      alert("✅ Carrinho forçado com sucesso! A loja já pode ver e editar os itens no aplicativo.");
-      fecharModal();
-      carregarDados();
-    } catch (err) {
-      alert("Erro ao forçar retorno: " + err.message);
-      setCarregando(false);
-    }
   };
 
-  const resgatarRascunhoLog = async (lojaAlvo) => {
-    if (!lojaAlvo) return;
-    if (!window.confirm(`🚨 SALVA-VIDAS: Isso vai reconstruir o carrinho da loja ${lojaAlvo.nome_fantasia} com os itens exatos que estavam lá logo antes do cliente clicar em "Esvaziar Carrinho" pela última vez. Continuar?`)) return;
+  const abrirModalDevolver = async (lojaAlvo) => {
+      setCarregando(true);
+      try {
+          const { data: logs, error } = await supabase
+              .from('logs_carrinho')
+              .select('*')
+              .eq('loja_id', extrairNum(lojaAlvo.codigo_loja))
+              .gte('created_at', `${dataFiltro}T00:00:00Z`)
+              .lte('created_at', `${dataFiltro}T23:59:59Z`)
+              .order('created_at', { ascending: true });
 
-    setCarregando(true);
-    try {
-        const { data: logs, error } = await supabase
-            .from('logs_carrinho')
-            .select('*')
-            .eq('loja_id', extrairNum(lojaAlvo.codigo_loja))
-            .gte('created_at', `${dataFiltro}T00:00:00Z`)
-            .lte('created_at', `${dataFiltro}T23:59:59Z`)
-            .order('created_at', { ascending: true });
+          if (error) throw error;
 
-        if (error) throw error;
+          let cart = {};
+          const historyStates = [];
 
-        if (!logs || logs.length === 0) {
-            alert("Nenhum histórico de cliques encontrado para esta loja hoje.");
-            setCarregando(false);
-            return;
-        }
+          (logs || []).forEach(log => {
+              if (log.acao === 'ZEROU CARRINHO' || log.acao === 'ENVIOU PEDIDO') {
+                  cart = {};
+              } else if (log.acao === 'REMOVEU' || log.acao.includes('APAGOU')) {
+                  delete cart[log.item_nome];
+              } else {
+                  cart[log.item_nome] = {
+                      quantidade: log.quantidade,
+                      qtd_bonificada: log.qtd_bonificada || 0
+                  };
+              }
 
-        let carrinhoTemporario = {};
-        let ultimoCarrinhoAntesDeZerar = {};
+              historyStates.push({
+                  logId: log.id,
+                  hora: log.created_at,
+                  acao: log.acao,
+                  responsavel: log.login_responsavel,
+                  item_nome: log.item_nome,
+                  quantidade: log.quantidade,
+                  qtd_bonificada: log.qtd_bonificada || 0,
+                  estadoCarrinho: JSON.parse(JSON.stringify(cart))
+              });
+          });
 
-        logs.forEach(log => {
-            if (log.acao === 'ZEROU CARRINHO' || log.acao === 'ENVIOU PEDIDO') {
-                if (Object.keys(carrinhoTemporario).length > 0) {
-                    ultimoCarrinhoAntesDeZerar = { ...carrinhoTemporario };
-                }
-                carrinhoTemporario = {}; 
-            } else if (log.acao === 'REMOVEU') {
-                delete carrinhoTemporario[log.item_nome];
-            } else {
-                carrinhoTemporario[log.item_nome] = log.quantidade;
-            }
-        });
+          setHistoricoDevolver(historyStates.reverse());
+          setLojaParaDevolver(lojaAlvo);
+          setModalDevolverAberto(true);
+      } catch (err) {
+          alert("Erro ao puxar histórico: " + err.message);
+      } finally {
+          setCarregando(false);
+      }
+  };
 
-        const itensParaResgatar = Object.keys(ultimoCarrinhoAntesDeZerar).length > 0 
-            ? ultimoCarrinhoAntesDeZerar 
-            : carrinhoTemporario;
+  const confirmarDevolucao = async (snapshot) => {
+      if (!window.confirm("🚨 ATENÇÃO: Deseja devolver exatamente ESTA VERSÃO do carrinho para o cliente?\n\nOs itens voltarão para o aplicativo dele exatamente como estavam neste momento.")) return;
+      
+      setCarregando(true);
+      try {
+          const lojaId = extrairNum(lojaParaDevolver.codigo_loja);
+          const cartItems = snapshot.estadoCarrinho;
+          const payloadNuvem = [];
 
-        const payloadNuvem = [];
-        Object.keys(itensParaResgatar).forEach(nomeItem => {
-            const prodOriginal = produtosBd.find(p => p.nome === nomeItem);
-            if (prodOriginal) {
-                let pUnit = parseFloat(String(prodOriginal.preco || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
-                let precoFinalItem = pUnit;
-                let undFinal = prodOriginal.unidade_medida || 'UN';
+          let textoCopia = `*ITENS DEVOLVIDOS - ${lojaParaDevolver.nome_fantasia}*\n\n`;
 
-                const temPesoExtra = prodOriginal.peso_caixa && String(prodOriginal.peso_caixa).trim() !== '';
-                const numeroPeso = temPesoExtra ? parseFloat(String(prodOriginal.peso_caixa).replace(/[^\d.]/g, '')) : 0;
-                
-                if (temPesoExtra && numeroPeso > 0) {
-                    precoFinalItem = pUnit * numeroPeso;
-                    if (undFinal === 'KG') undFinal = 'CX'; 
-                }
+          Object.keys(cartItems).forEach(nomeItem => {
+              const prodOriginal = produtosBd.find(p => p.nome === nomeItem);
+              const itemCart = cartItems[nomeItem];
 
-                payloadNuvem.push({
-                    loja_id: extrairNum(lojaAlvo.codigo_loja),
-                    produto_id: prodOriginal.id,
-                    nome: prodOriginal.nome,
-                    quantidade: itensParaResgatar[nomeItem],
-                    qtd_bonificada: 0,
-                    valorUnit: precoFinalItem,
-                    total: precoFinalItem * itensParaResgatar[nomeItem],
-                    unidade_medida: undFinal
-                });
-            }
-        });
+              if (prodOriginal) {
+                  let pUnit = parseFloat(String(prodOriginal.preco || '0').replace('R$ ', '').replace(/\./g, '').replace(',', '.')) || 0;
+                  let precoFinalItem = pUnit;
+                  let undFinal = prodOriginal.unidade_medida || 'UN';
 
-        if (payloadNuvem.length === 0) {
-            alert("O histórico não possui itens válidos para restaurar. O carrinho antes de zerar estava vazio.");
-            setCarregando(false);
-            return;
-        }
+                  const temPesoExtra = prodOriginal.peso_caixa && String(prodOriginal.peso_caixa).trim() !== '';
+                  const numeroPeso = temPesoExtra ? parseFloat(String(prodOriginal.peso_caixa).replace(/[^\d.]/g, '')) : 0;
+                  
+                  if (temPesoExtra && numeroPeso > 0) {
+                      precoFinalItem = pUnit * numeroPeso;
+                      if (undFinal === 'KG') undFinal = 'CX'; 
+                  }
 
-        await supabase.from('carrinho_nuvem').delete().eq('loja_id', extrairNum(lojaAlvo.codigo_loja));
-        await supabase.from('carrinho_nuvem').insert(payloadNuvem);
-        await supabase.from('pedidos').delete().eq('data_pedido', dataFiltro).eq('loja_id', extrairNum(lojaAlvo.codigo_loja));
+                  const bonif = Number(itemCart.qtd_bonificada) || 0;
+                  const qtdBruta = Number(itemCart.quantidade) || 0;
+                  const qtdCobrada = Math.max(0, qtdBruta - bonif);
 
-        alert(`✅ Ufa! Carrinho reconstruído com ${payloadNuvem.length} itens resgatados do último "save". O cliente já pode voltar ao app e finalizar a compra.`);
-        carregarDados();
-    } catch (err) {
-        alert("Erro ao resgatar rascunho: " + err.message);
-        setCarregando(false);
-    }
+                  payloadNuvem.push({
+                      loja_id: lojaId,
+                      produto_id: prodOriginal.id,
+                      nome: prodOriginal.nome,
+                      quantidade: qtdBruta,
+                      qtd_bonificada: bonif,
+                      valorUnit: precoFinalItem,
+                      total: precoFinalItem * qtdCobrada,
+                      unidade_medida: undFinal
+                  });
+
+                  textoCopia += `- ${qtdBruta}x ${formatarNomeItem(nomeItem)} `;
+                  if (bonif > 0) textoCopia += `(🎁 ${bonif} Bonif.)`;
+                  textoCopia += '\n';
+              }
+          });
+
+          if (payloadNuvem.length > 0) {
+              await supabase.from('carrinho_nuvem').delete().eq('loja_id', lojaId);
+              const { error: errNuvem } = await supabase.from('carrinho_nuvem').insert(payloadNuvem);
+              if (errNuvem) throw errNuvem;
+          }
+
+          await supabase.from('pedidos').delete().eq('data_pedido', dataFiltro).eq('loja_id', lojaId);
+
+          navigator.clipboard.writeText(textoCopia);
+          alert("✅ Carrinho devolvido com sucesso! A lista de itens foi copiada para o WhatsApp.");
+          
+          setModalDevolverAberto(false);
+          setSnapshotSelecionado(null);
+          fecharModal();
+          carregarDados();
+      } catch (err) {
+          alert("Erro ao forçar retorno: " + err.message);
+          setCarregando(false);
+      }
   };
 
   const fecharModal = () => {
@@ -493,7 +540,18 @@ export default function Listas() {
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px dashed #e2e8f0' }}>
                 <div>
                   <strong style={{ fontSize: '14px', display: 'block' }}>{formatarNomeItem(item.nome)}</strong>
-                  <span style={{ fontSize: '11px', color: '#64748b', background: '#e2e8f0', padding: '2px 8px', borderRadius: '10px' }}>Pedida por {item.qtdLojas} loja(s)</span>
+                  <div style={{ display: 'flex', gap: '5px', alignItems: 'center', marginTop: '4px' }}>
+                     <span style={{ fontSize: '10px', color: '#64748b', background: '#e2e8f0', padding: '2px 8px', borderRadius: '10px', fontWeight: 'bold' }}>Pedida por {item.qtdLojas} loja(s)</span>
+                     {item.totalBonificacoesCliente > 0 && (
+                        <span style={{ fontSize: '10px', color: item.statusBonificacao === 'aceita' ? '#16a34a' : item.statusBonificacao === 'rejeitada' ? '#ef4444' : '#d97706', background: item.statusBonificacao === 'aceita' ? '#dcfce7' : item.statusBonificacao === 'rejeitada' ? '#fef2f2' : '#fef3c7', padding: '2px 8px', borderRadius: '10px', fontWeight: 'bold', display: 'flex', gap: '4px', alignItems: 'center' }}>
+                            🎁 {item.totalBonificacoesCliente} Bonif. 
+                            {item.statusBonificacao === 'aceita' && '✅'}
+                            {item.statusBonificacao === 'rejeitada' && '❌'}
+                            {item.statusBonificacao === 'pendente' && '⏳'}
+                            {item.statusBonificacao === 'parcial' && '⚠️'}
+                        </span>
+                     )}
+                  </div>
                 </div>
                 <div style={{ background: '#fef3c7', color: '#92400e', padding: '6px 12px', borderRadius: '10px', fontWeight: '900', fontSize: '16px' }}>
                   {item.total} <small style={{fontSize: '11px'}}>{item.unidade}</small>
@@ -557,7 +615,7 @@ export default function Listas() {
                   <button 
                       onClick={(e) => {
                           e.stopPropagation();
-                          forcarRetornoCarrinho(loja);
+                          abrirModalDevolver(loja);
                       }}
                       style={{ flex: 1, background: '#ef4444', color: 'white', border: 'none', padding: '10px', borderRadius: '8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
                       title="Devolve o pedido que foi finalizado de volta ao carrinho"
@@ -568,12 +626,12 @@ export default function Listas() {
                   <button 
                       onClick={(e) => {
                           e.stopPropagation();
-                          resgatarRascunhoLog(loja);
+                          verHistoricoEquipe(loja);
                       }}
-                      style={{ flex: 1, background: '#eab308', color: '#111', border: 'none', padding: '10px', borderRadius: '8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
-                      title="Resgata os cliques mesmo se o carrinho foi esvaziado"
+                      style={{ flex: 1, background: '#111', color: '#fff', border: 'none', padding: '10px', borderRadius: '8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
+                      title="Mostra quem da equipe alterou o pedido"
                   >
-                      🛟 RESGATAR
+                      🧑‍💻 EQUIPE
                   </button>
               </div>
             </div>
@@ -595,40 +653,81 @@ export default function Listas() {
             </div>
             
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
-              {lojaAbertaPedidos.map((item, i) => (
-                <div key={item.id} style={{ padding: '12px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
-                  
-                  {editandoLista ? (
-                    <>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-                        <button onClick={() => deletarItemUnicoLocal(item.id, listaEditada[item.id]?.nome || item.nome)} style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '8px', padding: '8px 10px', cursor: 'pointer', fontWeight: 'bold' }}>🗑️</button>
-                        
-                        <input 
-                          list="lista-produtos"
-                          placeholder="Pesquisar produto..."
-                          type="text" 
-                          value={listaEditada[item.id]?.nome || ''} 
-                          onChange={(e) => setListaEditada({...listaEditada, [item.id]: { ...listaEditada[item.id], nome: e.target.value }})} 
-                          style={{ flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '13px', textTransform: 'uppercase' }} 
-                        />
-                      </div>
-                      <input 
-                        type="number" 
-                        value={listaEditada[item.id]?.quantidade !== undefined ? listaEditada[item.id].quantidade : item.quantidade} 
-                        onChange={(e) => setListaEditada({...listaEditada, [item.id]: { ...listaEditada[item.id], quantidade: e.target.value }})} 
-                        style={{ width: '60px', padding: '8px', textAlign: 'center', borderRadius: '8px', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '14px' }} 
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <span style={{fontSize: '14px', fontWeight: 'bold'}}>{formatarNomeItem(String(item.nome || item.nome_produto || ""))}</span>
-                      <span style={{background: '#111', color: '#fff', padding: '4px 10px', borderRadius: '8px', fontWeight: '900', fontSize: '14px'}}>
-                        {item.quantidade} <small style={{fontSize:'10px', color: '#aaa'}}>{item.unidade || item.unidade_medida}</small>
-                      </span>
-                    </>
-                  )}
-                </div>
-              ))}
+              {lojaAbertaPedidos.map((item, i) => {
+                 const bonifPedida = Number(item.qtd_bonificada_cliente) || 0;
+                 const bonifAceita = Number(item.qtd_bonificada) || 0;
+                 const isPendente = item.status_compra === 'pendente';
+                 
+                 let statusBonif = '';
+                 let corBonif = '';
+                 let fundoBonif = '';
+                 if (bonifPedida > 0) {
+                     if (isPendente) {
+                         statusBonif = '⏳ Pendente';
+                         corBonif = '#d97706';
+                         fundoBonif = '#fef3c7';
+                     } else if (bonifAceita >= bonifPedida) {
+                         statusBonif = '✅ Aceita';
+                         corBonif = '#16a34a';
+                         fundoBonif = '#dcfce7';
+                     } else if (bonifAceita > 0) {
+                         statusBonif = `⚠️ Parcial (${bonifAceita})`;
+                         corBonif = '#ea580c';
+                         fundoBonif = '#ffedd5';
+                     } else {
+                         statusBonif = '❌ Recusada';
+                         corBonif = '#ef4444';
+                         fundoBonif = '#fef2f2';
+                     }
+                 }
+
+                 return (
+                    <div key={item.id} style={{ padding: '12px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                      
+                      {editandoLista ? (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                            <button onClick={() => deletarItemUnicoLocal(item.id, listaEditada[item.id]?.nome || item.nome)} style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '8px', padding: '8px 10px', cursor: 'pointer', fontWeight: 'bold' }}>🗑️</button>
+                            
+                            <input 
+                              list="lista-produtos"
+                              placeholder="Pesquisar produto..."
+                              type="text" 
+                              value={listaEditada[item.id]?.nome || ''} 
+                              onChange={(e) => setListaEditada({...listaEditada, [item.id]: { ...listaEditada[item.id], nome: e.target.value }})} 
+                              style={{ flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '13px', textTransform: 'uppercase' }} 
+                            />
+                          </div>
+                          <input 
+                            type="number" 
+                            value={listaEditada[item.id]?.quantidade !== undefined ? listaEditada[item.id].quantidade : item.quantidade} 
+                            onChange={(e) => setListaEditada({...listaEditada, [item.id]: { ...listaEditada[item.id], quantidade: e.target.value }})} 
+                            style={{ width: '60px', padding: '8px', textAlign: 'center', borderRadius: '8px', border: '1px solid #ccc', fontWeight: 'bold', fontSize: '14px' }} 
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                             <span style={{fontSize: '14px', fontWeight: 'bold', display: 'block'}}>{formatarNomeItem(String(item.nome || item.nome_produto || ""))}</span>
+                             {bonifPedida > 0 && (
+                                <div style={{display: 'flex', gap: '5px', alignItems: 'center', marginTop: '4px'}}>
+                                   <span style={{fontSize: '10px', color: '#d97706', fontWeight: 'bold'}}>
+                                      🎁 Pediu {bonifPedida} Bonif.
+                                   </span>
+                                   <span style={{fontSize: '9px', background: fundoBonif, color: corBonif, padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold'}}>
+                                      {statusBonif}
+                                   </span>
+                                </div>
+                             )}
+                          </div>
+                          <span style={{background: '#111', color: '#fff', padding: '4px 10px', borderRadius: '8px', fontWeight: '900', fontSize: '14px'}}>
+                            {item.quantidade} <small style={{fontSize:'10px', color: '#aaa'}}>{item.unidade || item.unidade_medida}</small>
+                          </span>
+                        </>
+                      )}
+                    </div>
+                 )
+              })}
             </div>
 
             <div style={{ padding: '20px', borderTop: '1px solid #eee', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -663,8 +762,6 @@ export default function Listas() {
                     ✏️ EDITAR ITENS (NÓS MESMOS)
                   </button>
 
-              
-
                   <button onClick={liberarLojaParaRefazer} style={{ width: '100%', padding: '15px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
                     🔓 LIBERAR LOJA PARA EDITAR
                   </button>
@@ -684,6 +781,102 @@ export default function Listas() {
           </div>
         </div>
       )}
+
+      {/* 💡 MÁQUINA DO TEMPO (MODAL DE DEVOLVER) */}
+      {modalDevolverAberto && (
+          <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 12000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', backdropFilter: 'blur(4px)' }}>
+              <div style={{ backgroundColor: '#fff', width: '100%', maxWidth: '800px', maxHeight: '90vh', borderRadius: '25px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  
+                  <div style={{ padding: '25px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc' }}>
+                      <div>
+                          <h3 style={{ margin: 0, fontSize: '18px' }}>MÁQUINA DO TEMPO (DEVOLVER)</h3>
+                          <span style={{fontSize: '12px', color: '#f97316', fontWeight: 'bold'}}>Selecione a versão exata do carrinho que deseja devolver para o cliente.</span>
+                      </div>
+                      <button onClick={() => {setModalDevolverAberto(false); setSnapshotSelecionado(null);}} style={{ border: 'none', background: '#e2e8f0', borderRadius: '50%', width: '35px', height: '35px', fontWeight: 'bold', cursor: 'pointer' }}>✕</button>
+                  </div>
+
+                  <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+                      {/* Lado Esquerdo: Lista de Snaphots */}
+                      <div style={{ width: '45%', borderRight: '1px solid #eee', overflowY: 'auto', padding: '15px', background: '#f1f5f9' }}>
+                          <h4 style={{ margin: '0 0 15px 0', fontSize: '13px', color: '#64748b' }}>Linha do Tempo de Ações:</h4>
+                          
+                          {historicoDevolver.length === 0 ? (
+                              <div style={{textAlign: 'center', color: '#999', fontSize: '12px', padding: '20px'}}>Nenhum histórico encontrado para hoje.</div>
+                          ) : (
+                              historicoDevolver.map((snap, i) => (
+                                  <div 
+                                      key={i} 
+                                      onClick={() => setSnapshotSelecionado(snap)}
+                                      style={{ 
+                                          backgroundColor: snapshotSelecionado?.logId === snap.logId ? '#e0e7ff' : '#fff', 
+                                          border: `2px solid ${snapshotSelecionado?.logId === snap.logId ? '#3b82f6' : '#e2e8f0'}`, 
+                                          padding: '12px', 
+                                          borderRadius: '12px', 
+                                          marginBottom: '10px', 
+                                          cursor: 'pointer',
+                                          boxShadow: snapshotSelecionado?.logId === snap.logId ? '0 4px 10px rgba(59,130,246,0.1)' : 'none'
+                                      }}
+                                  >
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#3b82f6' }}>
+                                              {new Date(snap.hora).toLocaleTimeString('pt-BR')}
+                                          </span>
+                                          <span style={{ fontSize: '10px', color: '#94a3b8' }}>{snap.responsavel}</span>
+                                      </div>
+                                      <strong style={{ fontSize: '12px', display: 'block', color: '#111' }}>{snap.acao}</strong>
+                                      <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '4px' }}>{Object.keys(snap.estadoCarrinho).length} itens no carrinho neste momento</span>
+                                  </div>
+                              ))
+                          )}
+                      </div>
+
+                      {/* Lado Direito: Preview do Carrinho */}
+                      <div style={{ width: '55%', padding: '20px', overflowY: 'auto', backgroundColor: '#fff' }}>
+                          {!snapshotSelecionado ? (
+                              <div style={{textAlign: 'center', color: '#94a3b8', fontSize: '13px', marginTop: '100px'}}>
+                                  👈 Selecione um momento no histórico ao lado para visualizar os itens e devolver.
+                              </div>
+                          ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                                  <h4 style={{ margin: '0 0 15px 0', fontSize: '14px', color: '#111' }}>
+                                      Itens do carrinho às {new Date(snapshotSelecionado.hora).toLocaleTimeString('pt-BR')}
+                                  </h4>
+                                  
+                                  <div style={{ flex: 1 }}>
+                                      {Object.keys(snapshotSelecionado.estadoCarrinho).length === 0 ? (
+                                          <div style={{textAlign: 'center', color: '#ef4444', fontSize: '12px', padding: '20px', background: '#fef2f2', borderRadius: '12px'}}>
+                                              O carrinho estava VAZIO neste momento.
+                                          </div>
+                                      ) : (
+                                          Object.keys(snapshotSelecionado.estadoCarrinho).map((nome, idx) => {
+                                              const itemC = snapshotSelecionado.estadoCarrinho[nome];
+                                              return (
+                                                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
+                                                      <div>
+                                                          <strong style={{fontSize: '12px'}}>{formatarNomeItem(nome)}</strong>
+                                                          {itemC.qtd_bonificada > 0 && <span style={{fontSize: '10px', color: '#d97706', display: 'block'}}>🎁 {itemC.qtd_bonificada} Bonif.</span>}
+                                                      </div>
+                                                      <span style={{background: '#f8fafc', padding: '4px 10px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px', border: '1px solid #e2e8f0'}}>
+                                                          {itemC.quantidade}
+                                                      </span>
+                                                  </div>
+                                              )
+                                          })
+                                      )}
+                                  </div>
+
+                                  <button onClick={() => confirmarDevolucao(snapshotSelecionado)} style={{ width: '100%', marginTop: '20px', padding: '15px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '13px', boxShadow: '0 4px 15px rgba(239,68,68,0.3)' }}>
+                                      🔙 DEVOLVER ESTE CARRINHO PARA O CLIENTE
+                                  </button>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+
+              </div>
+          </div>
+      )}
+
     </div>
   );
 }

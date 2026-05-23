@@ -19,8 +19,8 @@ export default function MenuCliente({ usuario, tema }) {
       inputFundo: isEscuro ? '#0f172a' : '#f1f5f9',
       promocao: '#eab308',      
       novidade: '#a855f7',      
-      sucesso: '#22c55e',       
-      alerta: '#ef4444'         
+      sucesso: '#22c55e',        
+      alerta: '#ef4444'          
     },
     cards: {
       raioBorda: '16px',
@@ -545,6 +545,7 @@ export default function MenuCliente({ usuario, tema }) {
         nome_produto: item.nome, 
         quantidade: item.quantidade || 1,
         qtd_bonificada: item.qtd_bonificada || 0,
+        bonificacao: item.qtd_bonificada || 0, // Adicionado como backup
         unidade_medida: item.unidade_medida || 'UN', 
         data_pedido: hoje, 
         solicitou_refazer: false, 
@@ -938,7 +939,7 @@ export default function MenuCliente({ usuario, tema }) {
 
                   {temBonificacao && bonifSeguraExp > 0 && (
                      <span style={{color: configDesign.cores.sucesso, fontSize: '11px', fontWeight: 'bold', display: 'block'}}>
-                        Desconto: -{formatarMoeda(valorEconomiaExp)}
+                       Desconto: -{formatarMoeda(valorEconomiaExp)}
                      </span>
                   )}
                 </div>
