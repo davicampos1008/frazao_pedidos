@@ -14,6 +14,7 @@ import FechamentoLojas from './FechamentoLojas';
 import PainelNotasFiscais from './PainelNotasFiscais';
 import FechamentoCliente from './FechamentoCliente'; // 💡 TELA ADICIONADA
 import ConferenciaMadrugada from './ConferenciaMadrugada';
+import ImagensProdutos from './ImagensProdutos';
 
 function App() {
   const [tema, setTema] = useState(() => localStorage.getItem('temaVIRTUS') || 'claro');
@@ -247,6 +248,7 @@ function App() {
                   <button onClick={() => navegarPara('produtos')} style={s.btnNav}>🍎 GESTÃO DE PRODUTOS</button>
                   <button onClick={() => navegarPara('precificacao')} style={s.btnNav}>💲 PRECIFICAÇÃO</button>
                   <button onClick={() => navegarPara('marketing')} style={s.btnNav}>🖼️ BANNERS E MÍDIA</button>
+                  <button onClick={() => navegarPara('ImagensProdutos')} style={s.btnNav}>📸 GALERIA DE IMAGENS</button>
                   <button onClick={() => navegarPara('listas')} style={s.btnNav}>📋 PAINEL DE CONFERÊNCIA</button>
                   <button onClick={() => navegarPara('compras')} style={s.btnNav}>🛒 MESA DE COMPRAS</button>
                   <button onClick={() => navegarPara('madrugada')} style={{...s.btnNav, color: '#22c55e'}}>🔦 MADRUGADA (GALPÃO)</button>
@@ -317,7 +319,8 @@ function App() {
         {telaAtiva === 'madrugada' && <ConferenciaMadrugada />} 
         {telaAtiva === 'fechamento' && <FechamentoLojas isEscuro={isEscuro} />}
         {telaAtiva === 'notas_fiscais' && <PainelNotasFiscais isEscuro={isEscuro} />}
-        
+        {telaAtiva === 'ImagensProdutos' && <ImagensProdutos isEscuro={isEscuro} />}
+
         {/* 💡 RENDERIZAÇÃO DA TELA DE FECHAMENTO */}
         {telaAtiva === 'fechamento_cliente' && <FechamentoCliente isEscuro={isEscuro} usuario={usuarioLogado} />}
       </div>
