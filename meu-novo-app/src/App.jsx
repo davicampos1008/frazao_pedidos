@@ -15,6 +15,7 @@ import PainelNotasFiscais from './PainelNotasFiscais';
 import FechamentoCliente from './FechamentoCliente'; // 💡 TELA ADICIONADA
 import ConferenciaMadrugada from './ConferenciaMadrugada';
 import ImagensProdutos from './ImagensProdutos';
+import ConfigCaixas from './ConfigCaixas'; // 💡 NOVA TELA ADICIONADA AQUI
 
 function App() {
   const [tema, setTema] = useState(() => localStorage.getItem('temaVIRTUS') || 'claro');
@@ -246,6 +247,7 @@ function App() {
                   <button onClick={() => navegarPara('usuarios')} style={s.btnNav}>👥 GESTÃO DE USUÁRIOS</button>
                   <button onClick={() => navegarPara('fornecedores')} style={s.btnNav}>📦 FORNECEDORES</button>
                   <button onClick={() => navegarPara('produtos')} style={s.btnNav}>🍎 GESTÃO DE PRODUTOS</button>
+                  <button onClick={() => navegarPara('config_caixas')} style={s.btnNav}>📦 SETUP CAIXARIA</button> {/* 💡 NOVO BOTÃO AQUI */}
                   <button onClick={() => navegarPara('precificacao')} style={s.btnNav}>💲 PRECIFICAÇÃO</button>
                   <button onClick={() => navegarPara('marketing')} style={s.btnNav}>🖼️ BANNERS E MÍDIA</button>
                   <button onClick={() => navegarPara('ImagensProdutos')} style={s.btnNav}>📸 GALERIA DE IMAGENS</button>
@@ -320,6 +322,9 @@ function App() {
         {telaAtiva === 'fechamento' && <FechamentoLojas isEscuro={isEscuro} />}
         {telaAtiva === 'notas_fiscais' && <PainelNotasFiscais isEscuro={isEscuro} />}
         {telaAtiva === 'ImagensProdutos' && <ImagensProdutos isEscuro={isEscuro} />}
+        
+        {/* 💡 RENDERIZAÇÃO DA TELA DE CAIXAS ADICIONADA AQUI */}
+        {telaAtiva === 'config_caixas' && <ConfigCaixas />}
 
         {/* 💡 RENDERIZAÇÃO DA TELA DE FECHAMENTO */}
         {telaAtiva === 'fechamento_cliente' && <FechamentoCliente isEscuro={isEscuro} usuario={usuarioLogado} />}
