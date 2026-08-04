@@ -68,8 +68,6 @@ export default function PainelNotasFiscais({ isEscuro }) {
   
   const [inputsNF, setInputsNF] = useState({});
   const [busca, setBusca] = useState('');
-  
-  const [alertasNomesParecidos, setAlertasNomesParecidos] = useState([]);
 
   const [expandidoNF, setExpandidoNF] = useState(null);
   const [expandidoLoja, setExpandidoLoja] = useState(null);
@@ -93,10 +91,13 @@ export default function PainelNotasFiscais({ isEscuro }) {
     return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s/g, '').toLowerCase();
   };
 
+  // 💡 FUNÇÃO QUE ENTENDE CRÉDITO (VALORES NEGATIVOS)
   const tratarPrecoNum = (p) => {
-    let precoCln = String(p || '0').replace('R$', '').trim();
-    if (precoCln.includes('BONIFICAÇÃO |')) precoCln = precoCln.split('|')[1].trim();
-    return parseFloat(precoCln.replaceAll('.', '').replace(',', '.')) || 0;
+    if (!p || typeof p !== 'string') return 0;
+    const isNegative = String(p).includes('-'); 
+    let strClean = String(p).replace(/[R$\-\s]/g, '').trim().replace(/\./g, '').replace(',', '.');
+    let num = parseFloat(strClean) || 0;
+    return isNegative ? -Math.abs(num) : num;
   };
 
   const buscarFornecedorSimilar = (nomeBusca, listaBd) => {
@@ -176,12 +177,12 @@ export default function PainelNotasFiscais({ isEscuro }) {
           }
       }
 
-      // 💡 LÓGICA DE FORNECEDORES IDÊNTICA À TELA DE FECHAMENTO (Sincronizando Total, Qtd, Preço e Bonif)
+      // 💡 LÓGICA DE FORNECEDORES (AGORA ACEITA CRÉDITO E SUBTRAI DO TOTAL)
       const mapaForn = {};
       const initNFs = {};
       
       pedidos.forEach(p => {
-        if (p.apenas_cobranca) return; // Ignora itens marcados como apenas cobrança do total
+        if (p.apenas_cobranca) return; 
 
         let fNomeOriginal = String(p.fornecedor_compra || 'DESCONHECIDO').toUpperCase();
         if (fNomeOriginal.startsWith('ALERTA|')) fNomeOriginal = fNomeOriginal.replace('ALERTA|', '');
@@ -230,49 +231,48 @@ export default function PainelNotasFiscais({ isEscuro }) {
            baseVal = baseVal.split('|')[1] ? baseVal.split('|')[1].trim() : 'R$ 0,00';
         }
 
-        const valNum = tratarPrecoNum(baseVal);
+        const valNum = tratarPrecoNum(baseVal); // Agora permite números negativos (Crédito)
 
-        const keyItem = `${p.nome_produto}_${isBoleto}`;
+        const keyItem = `${p.nome_produto}_${isBoleto}_${valNum}`;
         if (!mapaForn[fNomeOficial].itensRaw[keyItem]) {
             mapaForn[fNomeOficial].itensRaw[keyItem] = {
                 nomeItem: p.nome_produto,
                 unidade: p.unidade_medida || 'UN',
                 qtd: 0,
                 qtdBonificada: 0,
-                maxValNum: 0, 
+                maxValNum: valNum, // Atualizado para suportar o valNum negativo
                 isBoleto: isBoleto
             };
         }
 
         const raw = mapaForn[fNomeOficial].itensRaw[keyItem];
-        raw.qtd += Number(p.qtd_atendida || 0); // Puxa a Qtd Atendida real, já com edição
+        raw.qtd += Number(p.qtd_atendida || 0);
         raw.qtdBonificada += qtdBonifFornecedor;
-        if (valNum > raw.maxValNum) {
-            raw.maxValNum = valNum;
-        }
-
-        if (p.nota_fiscal && !mapaForn[fNomeOficial].nota_fiscal) {
-            mapaForn[fNomeOficial].nota_fiscal = p.nota_fiscal;
-            initNFs[fNomeOficial] = p.nota_fiscal;
-        }
       });
 
       Object.values(mapaForn).forEach(forn => {
           Object.values(forn.itensRaw).forEach(raw => {
               const qtdCobradaForn = Math.max(0, raw.qtd - raw.qtdBonificada);
+              
+              // O total cobrado vai ser negativo se a unidade for crédito (negativa)
               const totalItemFornCobrado = qtdCobradaForn * raw.maxValNum;
 
               if (qtdCobradaForn > 0) {
                   forn.itens.push({
                       nome: raw.nomeItem,
                       und: raw.unidade,
-                      qtd: qtdCobradaForn,
+                      qtd: raw.qtd,
+                      qtdBonificada: raw.qtdBonificada,
+                      qtdCobrada: qtdCobradaForn,
                       preco_unit: raw.maxValNum,
                       total: totalItemFornCobrado,
-                      isBoleto: raw.isBoleto
+                      isBoleto: raw.isBoleto,
+                      isCredito: raw.maxValNum < 0
                   });
               }
           });
+          
+          // O total vai subtrair automaticamente porque o "total" da linha já está negativo!
           forn.total = forn.itens.reduce((acc, item) => acc + item.total, 0);
           delete forn.itensRaw;
       });
@@ -291,10 +291,10 @@ export default function PainelNotasFiscais({ isEscuro }) {
          });
       }
 
-      // 💡 LÓGICA DE LOJAS IDÊNTICA À TELA DE FECHAMENTOS
+      // 💡 LÓGICA DE LOJAS (ATUALIZADA PARA LER CRÉDITO E EXIBIR BONIFICAÇÕES)
       const mapaLoja = {};
       pedidos.forEach(p => {
-        if (p.apenas_cobranca) return; // Ignora apenas cobrança para as Lojas
+        if (p.apenas_cobranca) return; 
 
         const idLoja = parseInt(String(p.loja_id).match(/\d+/)?.[0]);
         if (!idLoja || idLoja <= 1) return; 
@@ -307,13 +307,12 @@ export default function PainelNotasFiscais({ isEscuro }) {
         }
 
         const isBoleto = p.status_compra === 'boleto';
-        
-        // Puxando valores corrigidos (qtd_atendida reflete edições manuais)
         const qtdFinal = Number(p.qtd_atendida || p.quantidade || 0); 
         const qtdBonificada = Number(p.qtd_bonificada) || 0;
         
         let unitParaLoja = p.preco_venda || p.custo_unit || 'R$ 0,00';
         let totalItem = 0;
+        let isCredito = false;
 
         if (String(unitParaLoja).includes('BONIFICAÇÃO |')) {
           const precoOriginal = unitParaLoja.split('|')[1] ? unitParaLoja.split('|')[1].trim() : 'R$ 0,00';
@@ -322,27 +321,34 @@ export default function PainelNotasFiscais({ isEscuro }) {
           totalItem = restCobrado > 0 ? restCobrado * pUnit : 0;
         } else if (!isBoleto) {
           const valNum = tratarPrecoNum(unitParaLoja);
+          if (valNum < 0) isCredito = true;
           const restCobrado = Math.max(0, qtdFinal - qtdBonificada);
           totalItem = restCobrado * valNum; 
         }
 
-        const itemExLoja = mapaLoja[nomeLoja].itens.find(i => i.nome === p.nome_produto && i.isBoleto === isBoleto);
+        const valParaComparar = tratarPrecoNum(String(unitParaLoja).replace('BONIFICAÇÃO |', ''));
+        const itemExLoja = mapaLoja[nomeLoja].itens.find(i => i.nome === p.nome_produto && i.isBoleto === isBoleto && i.valRef === valParaComparar);
         
         if (itemExLoja) {
             itemExLoja.qtd += qtdFinal;
+            itemExLoja.qtdBonificada += qtdBonificada;
             itemExLoja.total += totalItem;
         } else {
             mapaLoja[nomeLoja].itens.push({
               nome: p.nome_produto,
               qtd: qtdFinal,
+              qtdBonificada: qtdBonificada,
               und: p.unidade_medida,
               total: totalItem,
-              isBoleto: isBoleto
+              valRef: valParaComparar,
+              isBoleto: isBoleto,
+              isCredito: isCredito
             });
         }
       });
 
       Object.values(mapaLoja).forEach(loja => {
+          // O total vai subtrair os itens de crédito porque eles já estão com valor total negativo
           loja.total = loja.itens.reduce((acc, item) => acc + item.total, 0);
       });
 
@@ -486,8 +492,15 @@ export default function PainelNotasFiscais({ isEscuro }) {
                                   <tbody>
                                       {l.itens.map((item, idx) => (
                                           <tr key={idx} style={{ borderBottom: '1px dashed #eee' }}>
-                                              <td style={{ padding: '4px', fontSize: '12px' }}>{item.qtd} {item.und} - {item.nome} {item.isBoleto && <b style={{color: '#d97706'}}>(BOLETO)</b>}</td>
-                                              <td style={{ padding: '4px', fontSize: '12px', textAlign: 'right', fontWeight: 'bold' }}>{formatarMoeda(item.total)}</td>
+                                              <td style={{ padding: '4px', fontSize: '12px', color: item.isCredito ? '#ef4444' : '#111' }}>
+                                                  {item.qtd} {item.und} - {item.nome} 
+                                                  {item.qtdBonificada > 0 && <span style={{color: '#16a34a', fontWeight: 'bold', marginLeft: '5px'}}>🎁 ({item.qtdBonificada} BONIF)</span>}
+                                                  {item.isBoleto && <b style={{color: '#d97706', marginLeft: '5px'}}>(BOLETO)</b>}
+                                                  {item.isCredito && <b style={{color: '#ef4444', marginLeft: '5px'}}>⚠️ (CRÉDITO)</b>}
+                                              </td>
+                                              <td style={{ padding: '4px', fontSize: '12px', textAlign: 'right', fontWeight: 'bold', color: item.isCredito ? '#ef4444' : '#111' }}>
+                                                  {formatarMoeda(item.total)}
+                                              </td>
                                           </tr>
                                       ))}
                                   </tbody>
@@ -626,8 +639,13 @@ export default function PainelNotasFiscais({ isEscuro }) {
                         <div style={{ background: configDesign.cores.fundoCards, padding: '15px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '15px', border: `1px solid ${configDesign.cores.borda}` }}>
                           <h4 style={{ margin: '0 0 10px 0', fontSize: '12px', color: configDesign.cores.textoSuave }}>ITENS DO PEDIDO</h4>
                           {f.itens.map((item, idx) => (
-                              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: configDesign.cores.textoForte, borderBottom: `1px dashed ${configDesign.cores.borda}`, paddingBottom: '5px' }}>
-                                <span>{item.qtd} {item.und} - <b>{item.nome}</b> {item.isBoleto && <span style={{color: configDesign.cores.alerta}}>(BOLETO)</span>}</span>
+                              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: item.isCredito ? configDesign.cores.alerta : configDesign.cores.textoForte, borderBottom: `1px dashed ${configDesign.cores.borda}`, paddingBottom: '5px' }}>
+                                <span>
+                                    {item.qtd} {item.und} - <b>{item.nome}</b> 
+                                    {item.qtdBonificada > 0 && <span style={{color: configDesign.cores.sucesso, fontWeight: 'bold', marginLeft: '5px'}}>🎁 ({item.qtdBonificada} BONIF)</span>}
+                                    {item.isBoleto && <span style={{color: configDesign.cores.alerta, marginLeft: '5px'}}>(BOLETO)</span>}
+                                    {item.isCredito && <span style={{color: configDesign.cores.alerta, fontWeight: 'bold', marginLeft: '5px'}}>⚠️ (CRÉDITO)</span>}
+                                </span>
                                 <span>{formatarMoeda(item.preco_unit)} = <b>{formatarMoeda(item.total)}</b></span>
                               </div>
                           ))}
@@ -674,6 +692,14 @@ export default function PainelNotasFiscais({ isEscuro }) {
       {abaAtiva === 'fechamento_lojas' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
           
+          <div style={{ backgroundColor: '#fefce8', color: '#b45309', padding: '15px', borderRadius: '12px', border: '1px solid #fde68a', fontSize: '13px', fontWeight: 'bold', marginBottom: '10px' }}>
+              ⚠️ AVISO PARA FECHAMENTO:
+              <ul style={{ margin: '5px 0 0 0', paddingLeft: '20px' }}>
+                <li>Itens com a tag <b style={{color: '#16a34a'}}>🎁 (BONIF)</b> indicam que a loja ganhou unidades de graça. Essas unidades já foram subtraídas da cobrança.</li>
+                <li>Itens com a tag <b style={{color: '#ef4444'}}>⚠️ (CRÉDITO)</b> significam que é um valor NEGATIVO que a loja tem a receber. Ele já está abatendo o valor final da nota.</li>
+              </ul>
+          </div>
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
              <button onClick={() => setLojaImpressao('TODAS')} style={{ background: '#111', color: '#fff', border: 'none', padding: '12px 20px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
                📥 GERAR PDF (TODAS AS LOJAS)
@@ -703,9 +729,14 @@ export default function PainelNotasFiscais({ isEscuro }) {
                       </div>
 
                       {l.itens.map((item, idx) => (
-                          <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: configDesign.cores.textoSuave, borderBottom: `1px dashed ${configDesign.cores.borda}`, paddingBottom: '5px' }}>
-                            <span>{item.qtd} {item.und} - {item.nome} {item.isBoleto && <b style={{color: configDesign.cores.alerta}}>(BOLETO)</b>}</span>
-                            <span>{formatarMoeda(item.total)}</span>
+                          <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: item.isCredito ? configDesign.cores.alerta : configDesign.cores.textoSuave, borderBottom: `1px dashed ${configDesign.cores.borda}`, paddingBottom: '5px' }}>
+                            <span>
+                                {item.qtd} {item.und} - {item.nome} 
+                                {item.qtdBonificada > 0 && <span style={{color: configDesign.cores.sucesso, fontWeight: 'bold', marginLeft: '5px'}}>🎁 ({item.qtdBonificada} BONIF)</span>}
+                                {item.isBoleto && <b style={{color: configDesign.cores.aviso, marginLeft: '5px'}}>(BOLETO)</b>}
+                                {item.isCredito && <b style={{color: configDesign.cores.alerta, marginLeft: '5px'}}>⚠️ (CRÉDITO)</b>}
+                            </span>
+                            <span style={{fontWeight: 'bold'}}>{formatarMoeda(item.total)}</span>
                           </div>
                       ))}
                     </div>

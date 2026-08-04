@@ -65,8 +65,16 @@ export default function ConfigCaixas() {
       .toLowerCase();
   };
 
-  // 💡 FUNÇÃO CORRIGIDA: Salva e muda de aba instantaneamente, sem recarregar a tela
-  const salvarConfiguracao = async (idProduto, valor, nomeProduto) => {
+  // 💡 FUNÇÃO CORRIGIDA: Salva e muda de aba instantaneamente, sem recarregar a tela e suporta fração
+  const salvarConfiguracao = async (idProduto, valorRaw, nomeProduto) => {
+    // Transforma vírgula em ponto para cálculo/banco e valida se é número válido
+    let valorStr = String(valorRaw).replace(',', '.');
+    let valor = parseFloat(valorStr);
+
+    if (isNaN(valor) || valor < 0) {
+        return alert('Digite um valor numérico válido (ex: 0.5 ou 1,5).');
+    }
+
     // 1. Altera a tela instantaneamente (o item sai de pendente e vai pra pronto na hora)
     setProdutos(prev => prev.map(p => 
       p.id === idProduto ? { ...p, unidades_por_caixa: valor } : p
@@ -198,7 +206,7 @@ export default function ConfigCaixas() {
                           <span style={{ fontSize: '10px', background: '#dcfce7', color: '#166534', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
                             {produto.unidades_por_caixa === 0 ? '❌ Sem Caixa' : 
                              produto.unidades_por_caixa === 1 ? '📦 1 = 1 Cx' : 
-                             `📦 ${produto.unidades_por_caixa} = 1 Cx`}
+                             `📦 ${String(produto.unidades_por_caixa).replace('.', ',')} = 1 Cx`}
                           </span>
                         )}
                       </div>
@@ -223,21 +231,22 @@ export default function ConfigCaixas() {
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569' }}>Agrupados:</span>
+                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569' }}>Qtd/Fração:</span>
                           <input 
-                            type="number" 
-                            placeholder="Qtd..." 
-                            value={valoresEditando[produto.id] !== undefined ? valoresEditando[produto.id] : (produto.unidades_por_caixa > 1 ? produto.unidades_por_caixa : '')}
+                            type="text" 
+                            inputMode="decimal"
+                            placeholder="Ex: 0,5" 
+                            value={valoresEditando[produto.id] !== undefined ? valoresEditando[produto.id] : (produto.unidades_por_caixa && produto.unidades_por_caixa !== 1 && produto.unidades_por_caixa !== 0 ? String(produto.unidades_por_caixa).replace('.', ',') : '')}
                             onChange={(e) => setValoresEditando({...valoresEditando, [produto.id]: e.target.value})}
-                            style={{ width: '60px', padding: '6px', borderRadius: '6px', border: '1px solid #ccc', textAlign: 'center', fontSize: '12px', fontWeight: 'bold' }}
+                            style={{ width: '65px', padding: '6px', borderRadius: '6px', border: '1px solid #ccc', textAlign: 'center', fontSize: '12px', fontWeight: 'bold' }}
                           />
                           <span style={{ fontSize: '10px', color: '#64748b' }}>= 1 Cx</span>
                           
                           <button 
                             onClick={() => {
-                              const valorNum = parseInt(valoresEditando[produto.id]);
-                              if (!valorNum || valorNum <= 1) return alert('Digite um valor maior que 1 para agrupar (ex: 20).');
-                              salvarConfiguracao(produto.id, valorNum, produto.nome);
+                              const inputValor = valoresEditando[produto.id];
+                              if (!inputValor) return alert('Digite um valor, como 20 ou 0,5.');
+                              salvarConfiguracao(produto.id, inputValor, produto.nome);
                             }}
                             style={{ marginLeft: 'auto', background: '#3b82f6', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
                           >

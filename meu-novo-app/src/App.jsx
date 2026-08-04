@@ -16,6 +16,7 @@ import FechamentoCliente from './FechamentoCliente'; // 💡 TELA ADICIONADA
 import ConferenciaMadrugada from './ConferenciaMadrugada';
 import ImagensProdutos from './ImagensProdutos';
 import ConfigCaixas from './ConfigCaixas'; // 💡 NOVA TELA ADICIONADA AQUI
+import PagamentosC6 from './PagamentosC6';
 
 function App() {
   const [tema, setTema] = useState(() => localStorage.getItem('temaVIRTUS') || 'claro');
@@ -243,6 +244,7 @@ function App() {
                 <>
                   <hr style={{ border: '0.5px solid #333', margin: '10px 0' }} />
                   <p style={{ fontSize: '10px', color: config.identidade.corDestaque, fontWeight: '900', letterSpacing: '1px' }}>ADMINISTRAÇÃO</p>
+                  <button onClick={() => navegarPara('pagamentos_c6')} style={s.btnNav}>💳 ARQUIVO C6 BANK</button>
                   <button onClick={() => navegarPara('lojas')} style={s.btnNav}>🏪 GESTÃO DE LOJAS</button>
                   <button onClick={() => navegarPara('usuarios')} style={s.btnNav}>👥 GESTÃO DE USUÁRIOS</button>
                   <button onClick={() => navegarPara('fornecedores')} style={s.btnNav}>📦 FORNECEDORES</button>
@@ -324,7 +326,8 @@ function App() {
         {telaAtiva === 'ImagensProdutos' && <ImagensProdutos isEscuro={isEscuro} />}
         
         {/* 💡 RENDERIZAÇÃO DA TELA DE CAIXAS ADICIONADA AQUI */}
-        {telaAtiva === 'config_caixas' && <ConfigCaixas />}
+        {telaAtiva === 'config_caixas' && <ConfigCaixas isEscuro={isEscuro} />}
+        {telaAtiva === 'pagamentos_c6' && <PagamentosC6 isEscuro={isEscuro} />}
 
         {/* 💡 RENDERIZAÇÃO DA TELA DE FECHAMENTO */}
         {telaAtiva === 'fechamento_cliente' && <FechamentoCliente isEscuro={isEscuro} usuario={usuarioLogado} />}
