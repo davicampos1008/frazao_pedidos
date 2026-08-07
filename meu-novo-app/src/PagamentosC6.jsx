@@ -16,7 +16,6 @@ const calcularDataPosterior = (dataString) => {
   return dataObj.toLocaleDateString('pt-BR');
 };
 
-// 💡 MÁSCARA QUE LIDA CORRETAMENTE COM NÚMEROS NEGATIVOS (CRÉDITO)
 const tratarPrecoNum = (p) => {
   if (!p || typeof p !== 'string') return 0;
   const isNegative = String(p).includes('-'); // Verifica se é um crédito
@@ -32,9 +31,21 @@ const formatarMoeda = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency
 const formatarChavePix = (chave) => {
   if (!chave) return '';
   const c = String(chave).trim();
+  
   if (c.includes('@')) return c;
   if (c.length === 36 && c.includes('-')) return c;
-  return c.replace(/[.\-\/\(\)\s]/g, '');
+  
+  // Limpa caracteres especiais
+  const apenasNumeros = c.replace(/[.\-\/\(\)\s+]/g, '');
+  
+  // 💡 VERIFICA SE É TELEFONE PARA ADICIONAR O +55 OBRIGATÓRIO DO C6
+  // Celular no Brasil tem 11 dígitos (DDD + 9 + número) ou 10 dígitos (Fixo/Antigos).
+  if (apenasNumeros.length === 10 || apenasNumeros.length === 11) {
+      return `+55${apenasNumeros}`;
+  }
+
+  // Se for CPF (11) ou CNPJ (14), cai aqui sem o +55.
+  return apenasNumeros;
 };
 
 const isChavePixSuspeita = (chave) => {
@@ -95,7 +106,6 @@ export default function PagamentosC6({ isEscuro }) {
                baseVal = baseVal.split('|')[1] ? baseVal.split('|')[1].trim() : 'R$ 0,00';
             }
             
-            // 💡 LÊ O VALOR CORRETAMENTE, INCLUINDO NEGATIVOS (CRÉDITO)
             const valNum = tratarPrecoNum(baseVal);
   
             if (!mapaForn[fNome]) {
@@ -120,7 +130,6 @@ export default function PagamentosC6({ isEscuro }) {
               if (p.status_pagamento === 'pago') mapaForn[fNome].statusPagamento = 'pago';
             }
   
-            // Usa o valNum real como chave (separa positivos de negativos no mesmo produto)
             const keyItem = `${p.nome_produto}_${isBoleto}_${valNum}`;
             if (!mapaForn[fNome].itensRaw[keyItem]) {
                 mapaForn[fNome].itensRaw[keyItem] = { 
@@ -141,8 +150,6 @@ export default function PagamentosC6({ isEscuro }) {
       Object.values(mapaForn).forEach(forn => {
           Object.values(forn.itensRaw).forEach(raw => {
               const qtdCobrada = Math.max(0, raw.qtd - raw.qtdBonificada);
-              
-              // O total cobrado vai ser negativo se a unidade for crédito
               const totalCobrado = qtdCobrada * raw.valNumReal;
               
               if (!raw.isBoleto) {
@@ -152,14 +159,12 @@ export default function PagamentosC6({ isEscuro }) {
           delete forn.itensRaw; 
       });
 
-      // 💡 GARANTE QUE SÓ FORNECEDORES DE PIX COM SALDO A RECEBER APAREÇAM AQUI
       const apenasPix = Object.values(mapaForn)
         .filter(f => !f.isBoletoGeral && !f.nome.includes('(BOLETO)') && f.totalPix > 0)
         .sort((a, b) => a.nome.localeCompare(b.nome));
 
       setFornecedores(apenasPix);
       
-      // Limpa os ignorados se trocar de data
       if (!silencioso) setFornecedoresIgnorados([]);
 
     } catch (err) { 
@@ -174,7 +179,6 @@ export default function PagamentosC6({ isEscuro }) {
     carregarDados();
   }, [carregarDados, dataFiltro]);
 
-  // Alterna o status no banco de dados individualmente
   const alternarStatusPagamento = async (nomeForn, statusAtual) => {
     const novoStatus = statusAtual === 'pago' ? 'pendente' : 'pago';
     const nomeLimpo = nomeForn.replace(' (BOLETO)', ''); 
@@ -189,7 +193,6 @@ export default function PagamentosC6({ isEscuro }) {
     }
   };
 
-  // Retirar/Colocar no Lote
   const alternarLote = (nomeForn) => {
     setFornecedoresIgnorados(prev => 
       prev.includes(nomeForn) ? prev.filter(n => n !== nomeForn) : [...prev, nomeForn]
@@ -199,15 +202,12 @@ export default function PagamentosC6({ isEscuro }) {
   const fornecedoresPendentes = fornecedores.filter(f => f.statusPagamento !== 'pago');
   const fornecedoresFeitos = fornecedores.filter(f => f.statusPagamento === 'pago');
   
-  // 💡 FILTRAGEM DO LOTE (Somente quem está pendente E NÃO FOI IGNORADO)
   const fornecedoresNoLote = fornecedoresPendentes.filter(f => !fornecedoresIgnorados.includes(f.nome));
 
-  // Filtra os que tem erro DENTRO DO LOTE para mostrar o alerta no topo
   const errosNoLote = fornecedoresNoLote.filter(f => 
     !f.chavePix || f.chavePix === 'Não cadastrada' || isChavePixSuspeita(f.chavePix)
   );
 
-  // MARCAR LISTA (LOTE) COMO PAGA
   const marcarListaComoPaga = async () => {
     if (fornecedoresNoLote.length === 0) return alert('Não há fornecedores válidos no lote para marcar.');
     
@@ -222,7 +222,6 @@ export default function PagamentosC6({ isEscuro }) {
       
       await Promise.all(promessas);
       
-      // Atualiza o state local marcando só quem estava no lote
       setFornecedores(prev => prev.map(f => 
         fornecedoresNoLote.some(loteForn => loteForn.nome === f.nome) ? { ...f, statusPagamento: 'pago' } : f
       ));
@@ -235,25 +234,38 @@ export default function PagamentosC6({ isEscuro }) {
     }
   };
 
-  // COPIAR DADOS COM TRAVA DE SEGURANÇA
-  const copiarDadosPlanilha = () => {
+  // 💡 LÓGICA DE FATIAMENTO DE LOTES DE 100 ITENS MÁXIMO
+  const agruparLotes = (lista, tamanho) => {
+    const lotes = [];
+    for (let i = 0; i < lista.length; i += tamanho) {
+        lotes.push(lista.slice(i, i + tamanho));
+    }
+    return lotes;
+  };
+
+  const lotesDeCopia = agruparLotes(fornecedoresNoLote, 100);
+
+  // 💡 COPIAR DADOS COM TRAVA E FORMATAÇÃO ESPECÍFICA (SEM COLUNA DESCRIÇÃO)
+  const copiarDadosPlanilha = (loteEspecifico) => {
     if (errosNoLote.length > 0) {
         return alert(`⚠️ AVISO: Há fornecedores no lote com chave PIX ausente ou inválida.\n\nRetire-os do lote usando o botão "❌ RETIRAR DO LOTE" antes de copiar a planilha para o banco.\n\nCom erro: ${errosNoLote.map(f => f.nome).join(', ')}`);
     }
 
-    if (fornecedoresNoLote.length === 0) {
-        return alert("Não há nenhum fornecedor válido no lote para copiar.");
+    if (loteEspecifico.length === 0) {
+        return alert("Não há nenhum fornecedor válido neste lote para copiar.");
     }
 
-    const dadosTSV = fornecedoresNoLote.map(f => {
+    // 💡 REMOVIDA A DESCRIÇÃO NO FINAL E APLICADO O TELEFONE COM +55 (via formatarChavePix)
+    const dadosTSV = loteEspecifico.map(f => {
         const valorAjustado = Number(f.totalPix).toFixed(2).replace('.', ','); 
         const chavePixLimpa = formatarChavePix(f.chavePix);
         
-        return `${f.nomeRecebedor}\t${chavePixLimpa}\t${valorAjustado}\t${dataFechamentoBr}\tFechamento Frazão ${dataFechamentoBr}`;
+        // 4 Colunas requeridas pelo C6 (Nome, Chave, Valor, Data) - Não enviamos a descrição.
+        return `${f.nomeRecebedor}\t${chavePixLimpa}\t${valorAjustado}\t${dataFechamentoBr}`;
     }).join('\n');
 
     navigator.clipboard.writeText(dadosTSV).then(() => {
-        mostrarNotificacao('📋 Dados copiados! Vá na planilha original do C6, clique na célula A3 e cole (Ctrl + V).', 'sucesso');
+        mostrarNotificacao(`📋 Lote de ${loteEspecifico.length} fornecedores copiado! Vá no Excel C6, célula A3 e cole (Ctrl + V).`, 'sucesso');
     }).catch(err => {
         alert('Erro ao copiar: ' + err);
     });
@@ -294,15 +306,29 @@ export default function PagamentosC6({ isEscuro }) {
               style={{ background: isEscuro ? '#1e293b' : '#fff', color: themeText, border: 'none', borderRadius: '8px', padding: '10px 15px', fontSize: '14px', outline: 'none', cursor: 'pointer', fontWeight: 'bold' }}
             />
             
-            <button onClick={copiarDadosPlanilha} style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', boxShadow: '0 4px 15px rgba(245,158,11,0.4)', flex: '1 1 auto', fontSize: '14px' }}>
-                📋 COPIAR DADOS DO LOTE (EXCEL C6)
-            </button>
+            {/* 💡 BOTÕES DE CÓPIA SEPARADOS POR LOTES DE 100 ITENS MAX */}
+            {abaAtiva === 'pendentes' && lotesDeCopia.length > 0 ? (
+                lotesDeCopia.map((lote, index) => {
+                    const idxInicio = (index * 100) + 1;
+                    const idxFim = idxInicio + lote.length - 1;
+                    return (
+                        <button 
+                            key={index} 
+                            onClick={() => copiarDadosPlanilha(lote)} 
+                            style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', boxShadow: '0 4px 15px rgba(245,158,11,0.4)', flex: '1 1 auto', fontSize: '14px' }}
+                        >
+                            📋 COPIAR LOTE {index + 1} ({idxInicio} a {idxFim})
+                        </button>
+                    )
+                })
+            ) : (
+                <div style={{ color: '#64748b', fontSize: '13px', fontStyle: 'italic', padding: '10px' }}>Nenhum fornecedor pendente no lote.</div>
+            )}
         </div>
       </div>
 
       <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
         
-        {/* 💡 ALERTA GLOBAL NO TOPO SE HOUVER ERROS NO LOTE */}
         {abaAtiva === 'pendentes' && errosNoLote.length > 0 && (
           <div style={{ backgroundColor: '#fef2f2', border: '2px solid #ef4444', borderRadius: '16px', padding: '20px', marginBottom: '20px', color: '#991b1b' }}>
              <h3 style={{ margin: '0 0 10px 0', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '16px', fontWeight: '900' }}>🚨 ATENÇÃO: Chaves PIX Incorretas no Lote</h3>
@@ -338,7 +364,6 @@ export default function PagamentosC6({ isEscuro }) {
           </button>
         </div>
 
-        {/* 💡 BOTÃO GLOBAL DE PAGAMENTO DO LOTE */}
         {abaAtiva === 'pendentes' && fornecedoresNoLote.length > 0 && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '15px' }}>
             <button onClick={marcarListaComoPaga} style={{ background: '#10b981', color: '#fff', padding: '10px 20px', borderRadius: '10px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px', boxShadow: '0 4px 15px rgba(16,185,129,0.3)' }}>
