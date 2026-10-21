@@ -17,6 +17,7 @@ import ConferenciaMadrugada from './ConferenciaMadrugada';
 import ImagensProdutos from './ImagensProdutos';
 import ConfigCaixas from './ConfigCaixas'; // 💡 NOVA TELA ADICIONADA AQUI
 import PagamentosC6 from './PagamentosC6';
+import DevolucoesCreditos from './DevolucoesCreditos';
 
 function App() {
   const [tema, setTema] = useState(() => localStorage.getItem('temaVIRTUS') || 'claro');
@@ -255,9 +256,11 @@ function App() {
                   <button onClick={() => navegarPara('ImagensProdutos')} style={s.btnNav}>📸 GALERIA DE IMAGENS</button>
                   <button onClick={() => navegarPara('listas')} style={s.btnNav}>📋 PAINEL DE CONFERÊNCIA</button>
                   <button onClick={() => navegarPara('compras')} style={s.btnNav}>🛒 MESA DE COMPRAS</button>
+                  <button onClick={() => navegarPara('creditos')} style={s.btnNav}>🔄 DEVOLUÇÕES E CRÉDITOS</button>
                   <button onClick={() => navegarPara('madrugada')} style={{...s.btnNav, color: '#22c55e'}}>🔦 MADRUGADA (GALPÃO)</button>
                   <button onClick={() => navegarPara('fechamento')} style={s.btnNav}>🧮 GESTÃO DE FECHAMENTOS</button>
-                  <button onClick={() => navegarPara('notas_fiscais')} style={s.btnNav}>🧾 PAINEL NOTAS FISCAIS</button> 
+                  <button onClick={() => navegarPara('notas_fiscais')} style={s.btnNav}>🧾 PAINEL NOTAS FISCAIS</button>
+
                   
                   {/* 💡 MENU PARA O ADMIN TAMBÉM VER A NOTA FISCAL DAS LOJAS */}
                   <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>🏪 NOTA FISCAL DA LOJA</button>
@@ -320,6 +323,7 @@ function App() {
         {telaAtiva === 'listas' && <Listas usuario={usuarioLogado} />}
         {telaAtiva === 'cliente' && usuarioLogado && <MenuCliente usuario={usuarioLogado} tema={tema} />}
         {telaAtiva === 'compras' && <PlanilhaCompras navegarPara={navegarPara} setTelaAtiva={setTelaAtiva} />}
+        {telaAtiva === 'creditos' && <DevolucoesCreditos />}
         {telaAtiva === 'madrugada' && <ConferenciaMadrugada />} 
         {telaAtiva === 'fechamento' && <FechamentoLojas isEscuro={isEscuro} />}
         {telaAtiva === 'notas_fiscais' && <PainelNotasFiscais isEscuro={isEscuro} />}
