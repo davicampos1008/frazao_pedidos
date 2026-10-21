@@ -636,7 +636,7 @@ export default function DevolucoesCreditos() {
       <div style={{ backgroundColor: '#111', padding: '20px', borderRadius: '20px', color: 'white', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            🔄 PAINEL DE DEVOLUÇÕES E CRÉDITOS
+            🔄 PAINEL DE COBRANÇAS E CRÉDITOS
           </h2>
           <span style={{ color: '#94a3b8', fontSize: '12px' }}>Gestão integrada com a planilha de produtos</span>
         </div>
@@ -670,14 +670,14 @@ export default function DevolucoesCreditos() {
                 onClick={() => setNovoCredito({ ...novoCredito, tipo_registro: 'CREDITO' })}
                 style={{ flex: 1, padding: '12px', borderRadius: '10px', border: novoCredito.tipo_registro === 'CREDITO' ? '2px solid #16a34a' : '1px solid #cbd5e1', background: novoCredito.tipo_registro === 'CREDITO' ? '#f0fdf4' : '#f8fafc', color: novoCredito.tipo_registro === 'CREDITO' ? '#166534' : '#64748b', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}
               >
-                🔄 Crédito / Devolução
+                🔄 Crédito
               </button>
               <button
                 type="button"
                 onClick={() => setNovoCredito({ ...novoCredito, tipo_registro: 'COBRANCA' })}
                 style={{ flex: 1, padding: '12px', borderRadius: '10px', border: novoCredito.tipo_registro === 'COBRANCA' ? '2px solid #dc2626' : '1px solid #cbd5e1', background: novoCredito.tipo_registro === 'COBRANCA' ? '#fef2f2' : '#f8fafc', color: novoCredito.tipo_registro === 'COBRANCA' ? '#991b1b' : '#64748b', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}
               >
-                ⚠️ Cobrança de Loja
+                ⚠️ Cobrança
               </button>
             </div>
           </div>
@@ -982,7 +982,7 @@ export default function DevolucoesCreditos() {
                       <div style={{ flex: 1, minWidth: '260px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
                           <span style={{ fontSize: '10px', fontWeight: '900', padding: '2px 8px', borderRadius: '6px', background: isCobranca ? '#fee2e2' : '#dcfce7', color: isCobranca ? '#991b1b' : '#166534' }}>
-                            {isCobranca ? '⚠️ COBRANÇA DE LOJA' : '🔄 CRÉDITO / DEVOLUÇÃO'}
+                            {isCobranca ? '⚠️ COBRANÇA' : '🔄 CRÉDITO'}
                           </span>
                         </div>
 
