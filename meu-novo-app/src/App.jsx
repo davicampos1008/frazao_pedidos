@@ -45,6 +45,9 @@ function App() {
   const [telaAtiva, setTelaAtiva] = useState('inicio');
   const [menuAberto, setMenuAberto] = useState(false);
 
+  // 💡 Estado para controlar o submenu expansível de Gestão
+  const [menuGestaoAberto, setMenuGestaoAberto] = useState(false);
+
   const [permissaoPush, setPermissaoPush] = useState('default');
   const [eventoInstalacao, setEventoInstalacao] = useState(null);
   const [isStandalone, setIsStandalone] = useState(false);
@@ -210,7 +213,8 @@ function App() {
   };
 
   const s = {
-    btnNav: { background: 'none', border: 'none', color: config.menu.corTexto, textAlign: 'left', fontSize: '16px', cursor: 'pointer', fontWeight: 'bold', padding: '12px 0', fontFamily: config.identidade.fontePrincipal }
+    btnNav: { background: 'none', border: 'none', color: config.menu.corTexto, textAlign: 'left', fontSize: '16px', cursor: 'pointer', fontWeight: 'bold', padding: '12px 0', fontFamily: config.identidade.fontePrincipal },
+    btnSubNav: { background: 'none', border: 'none', color: '#cbd5e1', textAlign: 'left', fontSize: '14px', cursor: 'pointer', fontWeight: 'bold', padding: '8px 0 8px 15px', fontFamily: config.identidade.fontePrincipal }
   };
 
   return (
@@ -225,8 +229,8 @@ function App() {
           <div onClick={() => setMenuAberto(false)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9998, backdropFilter: 'blur(2px)' }}></div>
           
           <div style={{ position: 'fixed', top: 0, left: 0, width: '280px', height: '100%', backgroundColor: config.identidade.corMenuLateral, color: 'white', padding: '80px 20px 30px 20px', zIndex: 9999, display: 'flex', flexDirection: 'column', boxSizing: 'border-box', boxShadow: '10px 0 40px rgba(0,0,0,0.6)', transition: 'background-color 0.3s' }}>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', overflowY: 'auto', paddingRight: '10px', paddingBottom: '80px' }}>
-              <p style={{ fontSize: '10px', color: '#666', fontWeight: '900', letterSpacing: '1px' }}>NAVEGAÇÃO</p>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '5px', overflowY: 'auto', paddingRight: '10px', paddingBottom: '80px' }}>
+              <p style={{ fontSize: '10px', color: '#666', fontWeight: '900', letterSpacing: '1px', marginBottom: '5px' }}>NAVEGAÇÃO</p>
               
               {usuarioLogado.perfil !== 'faturista' && (
                 <>
@@ -236,7 +240,6 @@ function App() {
                 </>
               )}
 
-
               {usuarioLogado.perfil === 'faturista' && (
                  <button onClick={() => navegarPara('notas_fiscais')} style={s.btnNav}>🧾 PAINEL NOTAS FISCAIS</button>
               )}
@@ -244,26 +247,41 @@ function App() {
               {usuarioLogado.perfil === 'admin' && (
                 <>
                   <hr style={{ border: '0.5px solid #333', margin: '10px 0' }} />
-                  <p style={{ fontSize: '10px', color: config.identidade.corDestaque, fontWeight: '900', letterSpacing: '1px' }}>ADMINISTRAÇÃO</p>
+                  <p style={{ fontSize: '10px', color: config.identidade.corDestaque, fontWeight: '900', letterSpacing: '1px', marginBottom: '5px' }}>ADMINISTRAÇÃO</p>
+                  
                   <button onClick={() => navegarPara('pagamentos_c6')} style={s.btnNav}>💳 ARQUIVO C6 BANK</button>
-                  <button onClick={() => navegarPara('lojas')} style={s.btnNav}>🏪 GESTÃO DE LOJAS</button>
-                  <button onClick={() => navegarPara('usuarios')} style={s.btnNav}>👥 GESTÃO DE USUÁRIOS</button>
-                  <button onClick={() => navegarPara('fornecedores')} style={s.btnNav}>📦 FORNECEDORES</button>
-                  <button onClick={() => navegarPara('produtos')} style={s.btnNav}>🍎 GESTÃO DE PRODUTOS</button>
-                  <button onClick={() => navegarPara('config_caixas')} style={s.btnNav}>📦 SETUP CAIXARIA</button> {/* 💡 NOVO BOTÃO AQUI */}
+
+                  {/* 💡 MENU GESTÃO COM SUBMENU EXPANSÍVEL */}
+                  <div>
+                    <button 
+                      onClick={() => setMenuGestaoAberto(!menuGestaoAberto)} 
+                      style={{ ...s.btnNav, width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    >
+                      <span>⚙️ GESTÃO</span>
+                      <span style={{ fontSize: '12px' }}>{menuGestaoAberto ? '▲' : '▼'}</span>
+                    </button>
+
+                    {menuGestaoAberto && (
+                      <div style={{ display: 'flex', flexDirection: 'column', paddingLeft: '10px', borderLeft: `2px solid ${config.identidade.corDestaque}`, margin: '5px 0 5px 10px' }}>
+                        <button onClick={() => navegarPara('lojas')} style={s.btnSubNav}>🏪 Gestão de Lojas</button>
+                        <button onClick={() => navegarPara('usuarios')} style={s.btnSubNav}>👥 Gestão de Usuários</button>
+                        <button onClick={() => navegarPara('fornecedores')} style={s.btnSubNav}>📦 Fornecedores</button>
+                        <button onClick={() => navegarPara('produtos')} style={s.btnSubNav}>🍎 Gestão de Produtos</button>
+                        <button onClick={() => navegarPara('config_caixas')} style={s.btnSubNav}>📦 Setup Caixaria</button>
+                        <button onClick={() => navegarPara('marketing')} style={s.btnSubNav}>🖼️ Banners e Mídias</button>
+                        <button onClick={() => navegarPara('ImagensProdutos')} style={s.btnSubNav}>📸 Galeria de Imagens</button>
+                      </div>
+                    )}
+                  </div>
+
                   <button onClick={() => navegarPara('precificacao')} style={s.btnNav}>💲 PRECIFICAÇÃO</button>
-                  <button onClick={() => navegarPara('marketing')} style={s.btnNav}>🖼️ BANNERS E MÍDIA</button>
-                  <button onClick={() => navegarPara('ImagensProdutos')} style={s.btnNav}>📸 GALERIA DE IMAGENS</button>
-                  <button onClick={() => navegarPara('listas')} style={s.btnNav}>📋 PAINEL DE CONFERÊNCIA</button>
+                  <button onClick={() => navegarPara('listas')} style={s.btnNav}>🔍 PAINEL DE CONFERÊNCIA</button>
                   <button onClick={() => navegarPara('compras')} style={s.btnNav}>🛒 MESA DE COMPRAS</button>
-                  <button onClick={() => navegarPara('creditos')} style={s.btnNav}>🔄 DEVOLUÇÕES E CRÉDITOS</button>
-                  <button onClick={() => navegarPara('madrugada')} style={{...s.btnNav, color: '#22c55e'}}>🔦 MADRUGADA (GALPÃO)</button>
+                  <button onClick={() => navegarPara('creditos')} style={s.btnNav}>🔄 DEVOLUÇÃO E CRÉDITOS</button>
+                  <button onClick={() => navegarPara('madrugada')} style={{...s.btnNav, color: '#22c55e'}}>🌙 MADRUGADA</button>
                   <button onClick={() => navegarPara('fechamento')} style={s.btnNav}>🧮 GESTÃO DE FECHAMENTOS</button>
                   <button onClick={() => navegarPara('notas_fiscais')} style={s.btnNav}>🧾 PAINEL NOTAS FISCAIS</button>
-
-                  
-                  {/* 💡 MENU PARA O ADMIN TAMBÉM VER A NOTA FISCAL DAS LOJAS */}
-                  <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>🏪 NOTA FISCAL DA LOJA</button>
+                  <button onClick={() => navegarPara('fechamento_cliente')} style={s.btnNav}>📑 NOTA FISCAL DA LOJA</button>
                 </>
               )}
             </div>
@@ -303,7 +321,6 @@ function App() {
             
             <button onClick={() => navegarPara('cliente')} style={{ backgroundColor: isEscuro ? '#f97316' : '#111', color: 'white', border: 'none', padding: '15px 30px', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '13px', width: '100%', maxWidth: '300px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)', marginBottom: '10px' }}>📱 ABRIR APP DE PEDIDOS</button>
 
-            {/* 💡 BOTÃO NA TELA INICIAL LIBERADO PARA O CLIENTE E USUÁRIO */}
             {(usuarioLogado.perfil === 'cliente' || usuarioLogado.perfil === 'usuario') && (
                <button onClick={() => navegarPara('fechamento_cliente')} style={{ backgroundColor: isEscuro ? '#334155' : '#e2e8f0', color: config.identidade.corTexto, border: 'none', padding: '15px 30px', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '13px', width: '100%', maxWidth: '300px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}>📄 VER MEU FECHAMENTO</button>
             )}
@@ -329,11 +346,9 @@ function App() {
         {telaAtiva === 'notas_fiscais' && <PainelNotasFiscais isEscuro={isEscuro} />}
         {telaAtiva === 'ImagensProdutos' && <ImagensProdutos isEscuro={isEscuro} />}
         
-        {/* 💡 RENDERIZAÇÃO DA TELA DE CAIXAS ADICIONADA AQUI */}
         {telaAtiva === 'config_caixas' && <ConfigCaixas isEscuro={isEscuro} />}
         {telaAtiva === 'pagamentos_c6' && <PagamentosC6 isEscuro={isEscuro} />}
 
-        {/* 💡 RENDERIZAÇÃO DA TELA DE FECHAMENTO */}
         {telaAtiva === 'fechamento_cliente' && <FechamentoCliente isEscuro={isEscuro} usuario={usuarioLogado} />}
       </div>
 
