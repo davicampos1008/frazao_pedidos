@@ -275,7 +275,7 @@ function App() {
                   </div>
 
                   <button onClick={() => navegarPara('precificacao')} style={s.btnNav}>💲 PRECIFICAÇÃO</button>
-                  <button onClick={() => navegarPara('listas')} style={s.btnNav}>🔍 PAINEL DE CONFERÊNCIA</button>
+                  <button onClick={() => navegarPara('listas')} style={s.btnNav}>📋 PAINEL DE CONFERÊNCIA</button>
                   <button onClick={() => navegarPara('compras')} style={s.btnNav}>🛒 MESA DE COMPRAS</button>
                   <button onClick={() => navegarPara('creditos')} style={s.btnNav}>🔄 DEVOLUÇÃO E CRÉDITOS</button>
                   <button onClick={() => navegarPara('madrugada')} style={{...s.btnNav, color: '#22c55e'}}>🌙 MADRUGADA</button>
