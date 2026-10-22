@@ -95,7 +95,6 @@ export default function DevolucoesCreditos() {
     valor_unit: '',
     peso_cx_padrao: '',
     preco_caixa: '',
-    salvar_peso_padrao: false,
     nao_fazer_nota: false
   });
 
@@ -198,8 +197,7 @@ export default function DevolucoesCreditos() {
         preco_duzia: '',
         peso_cx_padrao: pesoExtraido,
         preco_caixa: '',
-        valor_unit: precoFormatado ? formatarMoedaMascara(precoFormatado) : '',
-        salvar_peso_padrao: false
+        valor_unit: precoFormatado ? formatarMoedaMascara(precoFormatado) : ''
       }));
     } else {
       setNovoCredito(prev => ({
@@ -212,8 +210,7 @@ export default function DevolucoesCreditos() {
         preco_duzia: '',
         peso_cx_padrao: '',
         preco_caixa: '',
-        valor_unit: '',
-        salvar_peso_padrao: false
+        valor_unit: ''
       }));
     }
   };
@@ -253,7 +250,6 @@ export default function DevolucoesCreditos() {
 
     const fornFinal = novoCredito.nao_fazer_nota ? 'Não Fazer Nota' : (novoCredito.fornecedor.trim().toUpperCase() || 'SEM FORNECEDOR');
     
-    // Formatação exata solicitada: exibe "Fracionado" com a quantidade e unidade correta para clareza absoluta na conferência
     let qtdFinalSalvar = parseFloat(novoCredito.quantidade) || 0;
     let unidadeFinalDescricao = novoCredito.unidade_medida || '';
 
@@ -271,11 +267,6 @@ export default function DevolucoesCreditos() {
 
     setCarregando(true);
     try {
-      if (novoCredito.salvar_peso_padrao && produtoSelecionadoObj && pesoCxNum > 0) {
-        const pesoCaixaFinal = `${pesoCxNum}Kg`;
-        await supabase.from('produtos').update({ peso_caixa: pesoCaixaFinal }).eq('id', produtoSelecionadoObj.id);
-      }
-
       const dataAtualSistema = obterDataLocal();
 
       const payload = {
@@ -307,7 +298,6 @@ export default function DevolucoesCreditos() {
         valor_unit: '',
         peso_cx_padrao: '',
         preco_caixa: '',
-        salvar_peso_padrao: false,
         nao_fazer_nota: false
       });
       setErros({ loja: false, produto: false, quantidade: false, unidades_dz: false, preco_duzia: false, peso_cx: false, preco_caixa: false, valor_unit: false, fornecedor: false });
@@ -636,7 +626,7 @@ export default function DevolucoesCreditos() {
       <div style={{ backgroundColor: '#111', padding: '20px', borderRadius: '20px', color: 'white', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            🔄 PAINEL DE COBRANÇAS E CRÉDITOS
+            🔄 PAINEL DE DEVOLUÇÕES E CRÉDITOS
           </h2>
           <span style={{ color: '#94a3b8', fontSize: '12px' }}>Gestão integrada com a planilha de produtos</span>
         </div>
@@ -670,14 +660,14 @@ export default function DevolucoesCreditos() {
                 onClick={() => setNovoCredito({ ...novoCredito, tipo_registro: 'CREDITO' })}
                 style={{ flex: 1, padding: '12px', borderRadius: '10px', border: novoCredito.tipo_registro === 'CREDITO' ? '2px solid #16a34a' : '1px solid #cbd5e1', background: novoCredito.tipo_registro === 'CREDITO' ? '#f0fdf4' : '#f8fafc', color: novoCredito.tipo_registro === 'CREDITO' ? '#166534' : '#64748b', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}
               >
-                🔄 Crédito
+                🔄 Crédito / Devolução
               </button>
               <button
                 type="button"
                 onClick={() => setNovoCredito({ ...novoCredito, tipo_registro: 'COBRANCA' })}
                 style={{ flex: 1, padding: '12px', borderRadius: '10px', border: novoCredito.tipo_registro === 'COBRANCA' ? '2px solid #dc2626' : '1px solid #cbd5e1', background: novoCredito.tipo_registro === 'COBRANCA' ? '#fef2f2' : '#f8fafc', color: novoCredito.tipo_registro === 'COBRANCA' ? '#991b1b' : '#64748b', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}
               >
-                ⚠️ Cobrança
+                ⚠️ Cobrança de Loja
               </button>
             </div>
           </div>
@@ -836,21 +826,6 @@ export default function DevolucoesCreditos() {
                   />
                   {erros.preco_caixa && <span style={{ fontSize: '10px', color: '#ef4444', display: 'block', marginTop: '2px', fontWeight: 'bold' }}>Preço da caixa obrigatório</span>}
                 </div>
-
-                {produtoSelecionadoObj && novoCredito.peso_cx_padrao && (
-                  <div style={{ gridColumn: '1 / -1', padding: '10px 15px', backgroundColor: '#eff6ff', borderRadius: '10px', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <input 
-                      type="checkbox" 
-                      id="chkSalvarPesoPadrao" 
-                      checked={novoCredito.salvar_peso_padrao} 
-                      onChange={(e) => setNovoCredito({ ...novoCredito, salvar_peso_padrao: e.target.checked })} 
-                      style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                    />
-                    <label htmlFor="chkSalvarPesoPadrao" style={{ fontSize: '12px', fontWeight: 'bold', color: '#1e40af', cursor: 'pointer' }}>
-                      💾 Definir este peso ({novoCredito.peso_cx_padrao} KG) como padrão para este produto na planilha de produtos
-                    </label>
-                  </div>
-                )}
               </>
             )}
 
@@ -982,7 +957,7 @@ export default function DevolucoesCreditos() {
                       <div style={{ flex: 1, minWidth: '260px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
                           <span style={{ fontSize: '10px', fontWeight: '900', padding: '2px 8px', borderRadius: '6px', background: isCobranca ? '#fee2e2' : '#dcfce7', color: isCobranca ? '#991b1b' : '#166534' }}>
-                            {isCobranca ? '⚠️ COBRANÇA' : '🔄 CRÉDITO'}
+                            {isCobranca ? '⚠️ COBRANÇA DE LOJA' : '🔄 CRÉDITO / DEVOLUÇÃO'}
                           </span>
                         </div>
 
