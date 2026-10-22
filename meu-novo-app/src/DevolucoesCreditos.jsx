@@ -135,7 +135,8 @@ export default function DevolucoesCreditos() {
     totalCalculado = undDzNum * valNum;
   } else if (novoCredito.e_bdj && precoBdjNum > 0 && undBdjNum > 0) {
     let qtdBdjNaCaixa = 1;
-    const matchBdj = unidadeAtualUpper.match(/(\d+)\s*BDJ/);
+    // Captura números associados a BDJ ou BANDEJA (Ex: "CX COM 4 BANDEJAS" -> 4)
+    const matchBdj = unidadeAtualUpper.match(/(\d+)\s*(BDJ|BANDEJA|BANDEJAS)/);
     if (matchBdj && matchBdj[1]) {
       qtdBdjNaCaixa = parseInt(matchBdj[1], 10);
     }
@@ -220,7 +221,7 @@ export default function DevolucoesCreditos() {
         e_dz: ehDz,
         unidades_dz: '',
         preco_duzia: '',
-        e_bdj: ehBdj,
+        e_bdj: false,
         unidades_bdj: '',
         preco_bdj: '',
         peso_cx_padrao: pesoExtraido,
@@ -709,14 +710,14 @@ export default function DevolucoesCreditos() {
                 onClick={() => setNovoCredito({ ...novoCredito, tipo_registro: 'CREDITO' })}
                 style={{ flex: 1, padding: '12px', borderRadius: '10px', border: novoCredito.tipo_registro === 'CREDITO' ? '2px solid #16a34a' : '1px solid #cbd5e1', background: novoCredito.tipo_registro === 'CREDITO' ? '#f0fdf4' : '#f8fafc', color: novoCredito.tipo_registro === 'CREDITO' ? '#166534' : '#64748b', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}
               >
-                🔄 Crédito / Devolução
+                🔄 Crédito
               </button>
               <button
                 type="button"
                 onClick={() => setNovoCredito({ ...novoCredito, tipo_registro: 'COBRANCA' })}
                 style={{ flex: 1, padding: '12px', borderRadius: '10px', border: novoCredito.tipo_registro === 'COBRANCA' ? '2px solid #dc2626' : '1px solid #cbd5e1', background: novoCredito.tipo_registro === 'COBRANCA' ? '#fef2f2' : '#f8fafc', color: novoCredito.tipo_registro === 'COBRANCA' ? '#991b1b' : '#64748b', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}
               >
-                ⚠️ Cobrança de Loja
+                ⚠️ Cobrança
               </button>
             </div>
           </div>
@@ -757,23 +758,18 @@ export default function DevolucoesCreditos() {
             <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
               <div style={{ flex: 1 }}>
                 <label style={{ fontSize: '12px', fontWeight: 'bold', color: erros.quantidade ? '#ef4444' : '#475569', display: 'block', marginBottom: '5px' }}>
-                  {ehDzUnidade ? 'Qtd. de Dúzias: *' : (ehBdjUnidade ? 'Qtd. de Bandejas: *' : 'Quantidade: *')}
+                  {ehDzUnidade && novoCredito.e_dz ? 'Qtd. de Dúzias: *' : (ehBdjUnidade && novoCredito.e_bdj ? 'Qtd. de Bandejas: *' : 'Quantidade: *')}
                 </label>
                 <input 
                   type="number" 
                   placeholder="0" 
                   value={novoCredito.e_dz ? novoCredito.unidades_dz : (novoCredito.e_bdj ? novoCredito.unidades_bdj : novoCredito.quantidade)} 
+                  disabled={novoCredito.e_dz || novoCredito.e_bdj}
                   onChange={(e) => {
-                    if (novoCredito.e_dz) {
-                      setNovoCredito({ ...novoCredito, unidades_dz: e.target.value });
-                    } else if (novoCredito.e_bdj) {
-                      setNovoCredito({ ...novoCredito, unidades_bdj: e.target.value });
-                    } else {
-                      setNovoCredito({ ...novoCredito, quantidade: e.target.value });
-                    }
+                    setNovoCredito({ ...novoCredito, quantidade: e.target.value });
                     setErros({ ...erros, quantidade: false });
                   }} 
-                  style={{ width: '100%', padding: '10px', borderRadius: '10px', border: erros.quantidade ? '2px solid #ef4444' : '1px solid #cbd5e1', fontSize: '14px', background: '#f8fafc', textAlign: 'center', fontWeight: 'bold', outline: 'none' }}
+                  style={{ width: '100%', padding: '10px', borderRadius: '10px', border: erros.quantidade ? '2px solid #ef4444' : '1px solid #cbd5e1', fontSize: '14px', background: (novoCredito.e_dz || novoCredito.e_bdj) ? '#e2e8f0' : '#f8fafc', textAlign: 'center', fontWeight: 'bold', outline: 'none' }}
                 />
                 {erros.quantidade && <span style={{ fontSize: '10px', color: '#ef4444', display: 'block', marginTop: '2px', fontWeight: 'bold' }}>Obrigatório</span>}
               </div>
@@ -797,7 +793,7 @@ export default function DevolucoesCreditos() {
                     type="checkbox" 
                     id="chkDzFracionada" 
                     checked={novoCredito.e_dz} 
-                    onChange={(e) => setNovoCredito({ ...novoCredito, e_dz: e.target.checked, unidades_dz: '', preco_duzia: '' })} 
+                    onChange={(e) => setNovoCredito({ ...novoCredito, e_dz: e.target.checked, e_bdj: false, unidades_dz: '', preco_duzia: '' })} 
                     style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                   />
                   <label htmlFor="chkDzFracionada" style={{ fontSize: '13px', fontWeight: 'bold', color: '#854d0e', cursor: 'pointer' }}>
@@ -844,7 +840,7 @@ export default function DevolucoesCreditos() {
                     type="checkbox" 
                     id="chkBdjFracionada" 
                     checked={novoCredito.e_bdj} 
-                    onChange={(e) => setNovoCredito({ ...novoCredito, e_bdj: e.target.checked, unidades_bdj: '', preco_bdj: '' })} 
+                    onChange={(e) => setNovoCredito({ ...novoCredito, e_bdj: e.target.checked, e_dz: false, unidades_bdj: '', preco_bdj: '' })} 
                     style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                   />
                   <label htmlFor="chkBdjFracionada" style={{ fontSize: '13px', fontWeight: 'bold', color: '#166534', cursor: 'pointer' }}>
@@ -1066,7 +1062,7 @@ export default function DevolucoesCreditos() {
                       <div style={{ flex: 1, minWidth: '260px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
                           <span style={{ fontSize: '10px', fontWeight: '900', padding: '2px 8px', borderRadius: '6px', background: isCobranca ? '#fee2e2' : '#dcfce7', color: isCobranca ? '#991b1b' : '#166534' }}>
-                            {isCobranca ? '⚠️ COBRANÇA DE LOJA' : '🔄 CRÉDITO / DEVOLUÇÃO'}
+                            {isCobranca ? '⚠️ COBRANÇA' : '🔄 CRÉDITO'}
                           </span>
                         </div>
 
