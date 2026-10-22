@@ -6,14 +6,22 @@ const ORDEM_LOJAS = [
   "QUALIDADE", "XEPA", "MANSÕES", "Q6", "VARJÃO", "215", "313", "307"
 ];
 
+// Helper para remover acentos e facilitar a busca
+const removerAcentos = (texto) => {
+  if (!texto) return '';
+  return String(texto)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+};
+
 const ordenarLojas = (lojasArray) => {
   if (!Array.isArray(lojasArray)) return lojasArray;
   return [...lojasArray].sort((a, b) => {
-    const nA = String(a.nome_fantasia || a.loja || a.nome || a.nome_loja || "").toUpperCase();
-    const nB = String(b.nome_fantasia || b.loja || b.nome || a.nome_loja || "").toUpperCase();
+    const nA = removerAcentos(String(a.nome_fantasia || a.loja || a.nome || a.nome_loja || "")).toUpperCase();
+    const nB = removerAcentos(String(b.nome_fantasia || b.loja || b.nome || a.nome_loja || "")).toUpperCase();
     
-    if (nA.includes('FRAZÃO')) return -1;
-    if (nB.includes('FRAZÃO')) return 1;
+    if (nA.includes('FRAZAO')) return -1;
+    if (nB.includes('FRAZAO')) return 1;
 
     let iA = ORDEM_LOJAS.findIndex(nome => nA.includes(nome));
     let iB = ORDEM_LOJAS.findIndex(nome => nB.includes(nome));
@@ -63,6 +71,8 @@ export default function DevolucoesCreditos() {
     preco_caixa: false,
     preco_duzia: false,
     unidades_dz: false,
+    preco_bdj: false,
+    unidades_bdj: false,
     valor_unit: false,
     fornecedor: false
   });
@@ -91,6 +101,9 @@ export default function DevolucoesCreditos() {
     e_dz: false,
     unidades_dz: '',
     preco_duzia: '',
+    e_bdj: false,
+    unidades_bdj: '',
+    preco_bdj: '',
     fornecedor: '',
     valor_unit: '',
     peso_cx_padrao: '',
@@ -98,15 +111,18 @@ export default function DevolucoesCreditos() {
     nao_fazer_nota: false
   });
 
-  const unidadeAtualUpper = String(novoCredito.unidade_medida || '').toUpperCase();
+  const unidadeAtualUpper = removerAcentos(String(novoCredito.unidade_medida || '')).toUpperCase();
   const ehKgUnidade = unidadeAtualUpper.includes('KG');
-  const ehDzUnidade = unidadeAtualUpper.includes('DZ') || unidadeAtualUpper.includes('DÚZIA');
+  const ehDzUnidade = unidadeAtualUpper.includes('DZ') || unidadeAtualUpper.includes('DUZIA');
+  const ehBdjUnidade = unidadeAtualUpper.includes('BDJ') || unidadeAtualUpper.includes('BANDEJA');
 
   const qtdNum = parseFloat(novoCredito.quantidade) || 0;
   const pesoCxNum = parseFloat(novoCredito.peso_cx_padrao) || 0;
   const precoCxNum = extrairValorNumerico(novoCredito.preco_caixa);
   const precoDuziaNum = extrairValorNumerico(novoCredito.preco_duzia);
   const undDzNum = parseFloat(novoCredito.unidades_dz) || 0;
+  const precoBdjNum = extrairValorNumerico(novoCredito.preco_bdj);
+  const undBdjNum = parseFloat(novoCredito.unidades_bdj) || 0;
 
   let valNum = extrairValorNumerico(novoCredito.valor_unit);
   let totalCalculado = 0;
@@ -117,6 +133,14 @@ export default function DevolucoesCreditos() {
   } else if (novoCredito.e_dz && precoDuziaNum > 0 && undDzNum > 0) {
     valNum = precoDuziaNum / 12;
     totalCalculado = undDzNum * valNum;
+  } else if (novoCredito.e_bdj && precoBdjNum > 0 && undBdjNum > 0) {
+    let qtdBdjNaCaixa = 1;
+    const matchBdj = unidadeAtualUpper.match(/(\d+)\s*BDJ/);
+    if (matchBdj && matchBdj[1]) {
+      qtdBdjNaCaixa = parseInt(matchBdj[1], 10);
+    }
+    valNum = qtdBdjNaCaixa > 0 ? (precoBdjNum / qtdBdjNaCaixa) : precoBdjNum;
+    totalCalculado = undBdjNum * valNum;
   } else {
     totalCalculado = qtdNum * valNum;
   }
@@ -168,16 +192,17 @@ export default function DevolucoesCreditos() {
 
   const handleProdutoChange = (e) => {
     const nomeProd = e.target.value;
-    const nomeLimpo = nomeProd.toUpperCase().trim();
-    const prodEncontrado = produtosBd.find(p => String(p.nome || '').toUpperCase().trim() === nomeLimpo);
+    const nomeLimpo = removerAcentos(nomeProd).toUpperCase().trim();
+    const prodEncontrado = produtosBd.find(p => removerAcentos(String(p.nome || '')).toUpperCase().trim() === nomeLimpo);
 
     setProdutoSelecionadoObj(prodEncontrado || null);
 
     if (prodEncontrado) {
       const unidadeBanco = prodEncontrado.unidade_medida ? String(prodEncontrado.unidade_medida).trim() : '';
-      const unidadeUpper = unidadeBanco.toUpperCase();
+      const unidadeUpper = removerAcentos(unidadeBanco).toUpperCase();
       const ehKg = unidadeUpper.includes('KG');
-      const ehDz = unidadeUpper.includes('DZ') || unidadeUpper.includes('DÚZIA');
+      const ehDz = unidadeUpper.includes('DZ') || unidadeUpper.includes('DUZIA');
+      const ehBdj = unidadeUpper.includes('BDJ') || unidadeUpper.includes('BANDEJA');
 
       let pesoExtraido = '';
       if (prodEncontrado.peso_caixa) {
@@ -189,12 +214,15 @@ export default function DevolucoesCreditos() {
 
       setNovoCredito(prev => ({
         ...prev,
-        nome_produto: nomeProd,
+        nome_produto: removerAcentos(nomeProd).toUpperCase(),
         unidade_medida: unidadeBanco,
         e_kg: ehKg,
         e_dz: ehDz,
         unidades_dz: '',
         preco_duzia: '',
+        e_bdj: ehBdj,
+        unidades_bdj: '',
+        preco_bdj: '',
         peso_cx_padrao: pesoExtraido,
         preco_caixa: '',
         valor_unit: precoFormatado ? formatarMoedaMascara(precoFormatado) : ''
@@ -202,12 +230,15 @@ export default function DevolucoesCreditos() {
     } else {
       setNovoCredito(prev => ({
         ...prev,
-        nome_produto: nomeProd,
+        nome_produto: removerAcentos(nomeProd).toUpperCase(),
         unidade_medida: '',
         e_kg: false,
         e_dz: false,
         unidades_dz: '',
         preco_duzia: '',
+        e_bdj: false,
+        unidades_bdj: '',
+        preco_bdj: '',
         peso_cx_padrao: '',
         preco_caixa: '',
         valor_unit: ''
@@ -219,14 +250,20 @@ export default function DevolucoesCreditos() {
     const semLoja = !novoCredito.loja_id;
     const semProduto = !novoCredito.nome_produto.trim();
     
-    const semQtd = novoCredito.e_dz 
-      ? (!novoCredito.unidades_dz || parseFloat(novoCredito.unidades_dz) <= 0)
-      : (!novoCredito.quantidade || parseFloat(novoCredito.quantidade) <= 0);
+    let semQtd = false;
+    if (novoCredito.e_dz) {
+      semQtd = (!novoCredito.unidades_dz || parseFloat(novoCredito.unidades_dz) <= 0);
+    } else if (novoCredito.e_bdj) {
+      semQtd = (!novoCredito.unidades_bdj || parseFloat(novoCredito.unidades_bdj) <= 0);
+    } else {
+      semQtd = (!novoCredito.quantidade || parseFloat(novoCredito.quantidade) <= 0);
+    }
 
     const semPeso = novoCredito.e_kg && (!novoCredito.peso_cx_padrao || parseFloat(novoCredito.peso_cx_padrao) <= 0);
     const semPrecoCx = novoCredito.e_kg && precoCxNum <= 0;
     const semPrecoDz = novoCredito.e_dz && precoDuziaNum <= 0;
-    const semValorUnit = !novoCredito.e_kg && !novoCredito.e_dz && valNum <= 0;
+    const semPrecoBdj = novoCredito.e_bdj && precoBdjNum <= 0;
+    const semValorUnit = !novoCredito.e_kg && !novoCredito.e_dz && !novoCredito.e_bdj && valNum <= 0;
     const semFornecedor = !novoCredito.nao_fazer_nota && !novoCredito.fornecedor.trim();
 
     const novosErros = {
@@ -235,6 +272,8 @@ export default function DevolucoesCreditos() {
       quantidade: semQtd,
       unidades_dz: novoCredito.e_dz && (!novoCredito.unidades_dz || parseFloat(novoCredito.unidades_dz) <= 0),
       preco_duzia: semPrecoDz,
+      unidades_bdj: novoCredito.e_bdj && (!novoCredito.unidades_bdj || parseFloat(novoCredito.unidades_bdj) <= 0),
+      preco_bdj: semPrecoBdj,
       peso_cx: semPeso,
       preco_caixa: semPrecoCx,
       valor_unit: semValorUnit,
@@ -248,7 +287,7 @@ export default function DevolucoesCreditos() {
       return;
     }
 
-    const fornFinal = novoCredito.nao_fazer_nota ? 'Não Fazer Nota' : (novoCredito.fornecedor.trim().toUpperCase() || 'SEM FORNECEDOR');
+    const fornFinal = novoCredito.nao_fazer_nota ? 'NAO FAZER NOTA' : (removerAcentos(novoCredito.fornecedor.trim()).toUpperCase() || 'SEM FORNECEDOR');
     
     let qtdFinalSalvar = parseFloat(novoCredito.quantidade) || 0;
     let unidadeFinalDescricao = novoCredito.unidade_medida || '';
@@ -256,14 +295,17 @@ export default function DevolucoesCreditos() {
     if (novoCredito.e_dz && undDzNum > 0) {
       qtdFinalSalvar = undDzNum;
       unidadeFinalDescricao = `Fracionado: ${undDzNum}und (Ref. ${novoCredito.unidade_medida})`;
+    } else if (novoCredito.e_bdj && undBdjNum > 0) {
+      qtdFinalSalvar = undBdjNum;
+      unidadeFinalDescricao = `Fracionado: ${undBdjNum}bdj (Ref. ${novoCredito.unidade_medida})`;
     } else if (novoCredito.e_kg && qtdNum > 0) {
       qtdFinalSalvar = qtdNum;
       unidadeFinalDescricao = `Fracionado: ${qtdNum}kg (${novoCredito.unidade_medida || 'CX'})`;
     }
 
     const nomeProdFinal = novoCredito.tipo_registro === 'COBRANCA' 
-      ? `[COBRANÇA] ${novoCredito.nome_produto.toUpperCase().trim()}`
-      : novoCredito.nome_produto.toUpperCase().trim();
+      ? `[COBRANCA] ${removerAcentos(novoCredito.nome_produto).toUpperCase().trim()}`
+      : removerAcentos(novoCredito.nome_produto).toUpperCase().trim();
 
     setCarregando(true);
     try {
@@ -294,13 +336,16 @@ export default function DevolucoesCreditos() {
         e_dz: false,
         unidades_dz: '',
         preco_duzia: '',
+        e_bdj: false,
+        unidades_bdj: '',
+        preco_bdj: '',
         fornecedor: '',
         valor_unit: '',
         peso_cx_padrao: '',
         preco_caixa: '',
         nao_fazer_nota: false
       });
-      setErros({ loja: false, produto: false, quantidade: false, unidades_dz: false, preco_duzia: false, peso_cx: false, preco_caixa: false, valor_unit: false, fornecedor: false });
+      setErros({ loja: false, produto: false, quantidade: false, unidades_dz: false, preco_duzia: false, unidades_bdj: false, preco_bdj: false, peso_cx: false, preco_caixa: false, valor_unit: false, fornecedor: false });
       setProdutoSelecionadoObj(null);
       carregarDados();
     } catch (e) {
@@ -321,11 +366,11 @@ export default function DevolucoesCreditos() {
   };
 
   const abrirEdicao = (item) => {
-    const isCob = String(item.nome_produto || '').includes('[COBRANÇA]');
-    const nomeLimpo = isCob ? item.nome_produto.replace('[COBRANÇA]', '').trim() : item.nome_produto;
-    const isNaoNota = String(item.fornecedor || '').toUpperCase() === 'NÃO FAZER NOTA';
+    const isCob = String(item.nome_produto || '').includes('[COBRANCA]') || String(item.nome_produto || '').includes('[COBRANÇA]');
+    const nomeLimpo = isCob ? item.nome_produto.replace('[COBRANCA]', '').replace('[COBRANÇA]', '').trim() : item.nome_produto;
+    const isNaoNota = removerAcentos(String(item.fornecedor || '')).toUpperCase() === 'NAO FAZER NOTA';
 
-    const prodEncontrado = produtosBd.find(p => String(p.nome || '').toUpperCase().trim() === nomeLimpo.toUpperCase().trim());
+    const prodEncontrado = produtosBd.find(p => removerAcentos(String(p.nome || '')).toUpperCase().trim() === removerAcentos(nomeLimpo).toUpperCase().trim());
     let pesoCaixaEdit = '';
     let unidadeEdit = item.unidade_medida || '';
 
@@ -336,19 +381,21 @@ export default function DevolucoesCreditos() {
       }
     }
 
-    const unidadeUpper = String(unidadeEdit || '').toUpperCase();
+    const unidadeUpper = removerAcentos(String(unidadeEdit || '')).toUpperCase();
     const ehKg = unidadeUpper.includes('KG');
-    const ehDz = unidadeUpper.includes('DZ') || unidadeUpper.includes('DÚZIA');
+    const ehDz = unidadeUpper.includes('DZ') || unidadeUpper.includes('DUZIA');
+    const ehBdj = unidadeUpper.includes('BDJ') || unidadeUpper.includes('BANDEJA');
 
     setItemEditando({
       ...item,
       tipo_registro: isCob ? 'COBRANCA' : 'CREDITO',
-      nome_produto: nomeLimpo,
+      nome_produto: removerAcentos(nomeLimpo).toUpperCase(),
       unidade_medida: unidadeEdit,
-      fornecedor: isNaoNota ? '' : item.fornecedor,
+      fornecedor: isNaoNota ? '' : removerAcentos(item.fornecedor).toUpperCase(),
       nao_fazer_nota: isNaoNota,
       e_kg: ehKg,
       e_dz: ehDz,
+      e_bdj: ehBdj,
       peso_cx_padrao: pesoCaixaEdit,
       preco_caixa: ''
     });
@@ -383,10 +430,10 @@ export default function DevolucoesCreditos() {
       return;
     }
 
-    const fornFinalEdit = itemEditando.nao_fazer_nota ? 'Não Fazer Nota' : (String(itemEditando.fornecedor || '').trim().toUpperCase() || 'SEM FORNECEDOR');
+    const fornFinalEdit = itemEditando.nao_fazer_nota ? 'NAO FAZER NOTA' : (removerAcentos(String(itemEditando.fornecedor || '')).trim().toUpperCase() || 'SEM FORNECEDOR');
     const nomeProdFinalEdit = itemEditando.tipo_registro === 'COBRANCA' 
-      ? `[COBRANÇA] ${itemEditando.nome_produto.toUpperCase().trim()}`
-      : itemEditando.nome_produto.toUpperCase().trim();
+      ? `[COBRANCA] ${removerAcentos(itemEditando.nome_produto).toUpperCase().trim()}`
+      : removerAcentos(itemEditando.nome_produto).toUpperCase().trim();
     const unidadeFinalEdit = itemEditando.unidade_medida || '';
 
     setCarregando(true);
@@ -444,15 +491,15 @@ export default function DevolucoesCreditos() {
       
       <datalist id="lista-produtos-credito">
         {produtosBd.map((p, i) => (
-          <option key={i} value={p.nome} />
+          <option key={i} value={removerAcentos(p.nome).toUpperCase()} />
         ))}
       </datalist>
 
       <datalist id="lista-fornecedores-credito">
-        <option value="NÃO FAZER NOTA" />
+        <option value="NAO FAZER NOTA" />
         <option value="SEM FORNECEDOR" />
         {fornecedoresBd.map((f, i) => (
-          <option key={i} value={(f.nome_fantasia || f.nome_completo || '').toUpperCase().trim()} />
+          <option key={i} value={removerAcentos(f.nome_fantasia || f.nome_completo || '').toUpperCase().trim()} />
         ))}
       </datalist>
 
@@ -505,22 +552,24 @@ export default function DevolucoesCreditos() {
                   list="lista-produtos-credito"
                   value={itemEditando.nome_produto} 
                   onChange={(e) => {
-                    const nomeProd = e.target.value;
-                    const prodEncr = produtosBd.find(p => String(p.nome || '').toUpperCase().trim() === nomeProd.toUpperCase().trim());
+                    const nomeProd = removerAcentos(e.target.value).toUpperCase();
+                    const prodEncr = produtosBd.find(p => removerAcentos(String(p.nome || '')).toUpperCase().trim() === nomeProd.trim());
                     let und = itemEditando.unidade_medida;
                     let pCx = itemEditando.peso_cx_padrao;
                     let ehKg = itemEditando.e_kg;
                     let ehDz = itemEditando.e_dz;
+                    let ehBdj = itemEditando.e_bdj;
 
                     if (prodEncr) {
                       und = prodEncr.unidade_medida || und;
-                      const undUp = String(und).toUpperCase();
+                      const undUp = removerAcentos(String(und)).toUpperCase();
                       ehKg = undUp.includes('KG');
-                      ehDz = undUp.includes('DZ') || undUp.includes('DÚZIA');
+                      ehDz = undUp.includes('DZ') || undUp.includes('DUZIA');
+                      ehBdj = undUp.includes('BDJ') || undUp.includes('BANDEJA');
                       if (prodEncr.peso_caixa) pCx = String(prodEncr.peso_caixa).replace(/[^\d.,]/g, '').trim();
                     }
 
-                    setItemEditando({ ...itemEditando, nome_produto: nomeProd, unidade_medida: und, e_kg: ehKg, e_dz: ehDz, peso_cx_padrao: pCx });
+                    setItemEditando({ ...itemEditando, nome_produto: nomeProd, unidade_medida: und, e_kg: ehKg, e_dz: ehDz, e_bdj: ehBdj, peso_cx_padrao: pCx });
                     setErrosEdit({ ...errosEdit, produto: false });
                   }} 
                   style={{ width: '100%', padding: '10px', borderRadius: '10px', border: errosEdit.produto ? '2px solid #ef4444' : '1px solid #cbd5e1', fontSize: '14px', background: '#f8fafc', outline: 'none', textTransform: 'uppercase' }}
@@ -558,8 +607,8 @@ export default function DevolucoesCreditos() {
                   list="lista-fornecedores-credito"
                   disabled={itemEditando.nao_fazer_nota}
                   value={itemEditando.nao_fazer_nota ? '' : itemEditando.fornecedor} 
-                  placeholder={itemEditando.nao_fazer_nota ? "Atribuído para Não Fazer Nota" : "Digite para buscar o fornecedor..."}
-                  onChange={(e) => { setItemEditando({ ...itemEditando, fornecedor: e.target.value }); setErrosEdit({ ...errosEdit, fornecedor: false }); }} 
+                  placeholder={itemEditando.nao_fazer_nota ? "Atribuido para NAO FAZER NOTA" : "Digite para buscar o fornecedor..."}
+                  onChange={(e) => { setItemEditando({ ...itemEditando, fornecedor: removerAcentos(e.target.value).toUpperCase() }); setErrosEdit({ ...errosEdit, fornecedor: false }); }} 
                   style={{ width: '100%', padding: '10px', borderRadius: '10px', border: errosEdit.fornecedor ? '2px solid #ef4444' : '1px solid #cbd5e1', fontSize: '14px', background: itemEditando.nao_fazer_nota ? '#e2e8f0' : '#f8fafc', outline: 'none' }}
                 />
                 {errosEdit.fornecedor && <span style={{ fontSize: '10px', color: '#ef4444', display: 'block', marginTop: '2px', fontWeight: 'bold' }}>Fornecedor obrigatório</span>}
@@ -589,11 +638,11 @@ export default function DevolucoesCreditos() {
                   type="checkbox" 
                   id="chkNotaEdit" 
                   checked={itemEditando.nao_fazer_nota} 
-                  onChange={(e) => setItemEditando({ ...itemEditando, nao_fazer_nota: e.target.checked, fornecedor: e.target.checked ? 'Não Fazer Nota' : '' })} 
+                  onChange={(e) => setItemEditando({ ...itemEditando, nao_fazer_nota: e.target.checked, fornecedor: e.target.checked ? 'NAO FAZER NOTA' : '' })} 
                   style={{ width: '16px', height: '16px', cursor: 'pointer' }}
                 />
                 <label htmlFor="chkNotaEdit" style={{ fontSize: '12px', fontWeight: 'bold', color: '#92400e', cursor: 'pointer' }}>
-                  Atribuir ao Fornecedor Fantasma: "Não Fazer Nota"
+                  Atribuir ao Fornecedor Fantasma: "NAO FAZER NOTA"
                 </label>
               </div>
 
@@ -708,13 +757,22 @@ export default function DevolucoesCreditos() {
             <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
               <div style={{ flex: 1 }}>
                 <label style={{ fontSize: '12px', fontWeight: 'bold', color: erros.quantidade ? '#ef4444' : '#475569', display: 'block', marginBottom: '5px' }}>
-                  {ehDzUnidade ? 'Qtd. de Dúzias: *' : 'Quantidade: *'}
+                  {ehDzUnidade ? 'Qtd. de Dúzias: *' : (ehBdjUnidade ? 'Qtd. de Bandejas: *' : 'Quantidade: *')}
                 </label>
                 <input 
                   type="number" 
                   placeholder="0" 
-                  value={novoCredito.quantidade} 
-                  onChange={(e) => { setNovoCredito({ ...novoCredito, quantidade: e.target.value }); setErros({ ...erros, quantidade: false }); }} 
+                  value={novoCredito.e_dz ? novoCredito.unidades_dz : (novoCredito.e_bdj ? novoCredito.unidades_bdj : novoCredito.quantidade)} 
+                  onChange={(e) => {
+                    if (novoCredito.e_dz) {
+                      setNovoCredito({ ...novoCredito, unidades_dz: e.target.value });
+                    } else if (novoCredito.e_bdj) {
+                      setNovoCredito({ ...novoCredito, unidades_bdj: e.target.value });
+                    } else {
+                      setNovoCredito({ ...novoCredito, quantidade: e.target.value });
+                    }
+                    setErros({ ...erros, quantidade: false });
+                  }} 
                   style={{ width: '100%', padding: '10px', borderRadius: '10px', border: erros.quantidade ? '2px solid #ef4444' : '1px solid #cbd5e1', fontSize: '14px', background: '#f8fafc', textAlign: 'center', fontWeight: 'bold', outline: 'none' }}
                 />
                 {erros.quantidade && <span style={{ fontSize: '10px', color: '#ef4444', display: 'block', marginTop: '2px', fontWeight: 'bold' }}>Obrigatório</span>}
@@ -771,6 +829,53 @@ export default function DevolucoesCreditos() {
                           setErros({ ...erros, preco_duzia: false });
                         }} 
                         style={{ width: '100%', padding: '8px', borderRadius: '8px', border: erros.preco_duzia ? '2px solid #ef4444' : '1px solid #ca8a04', fontSize: '13px', background: '#fff', outline: 'none', fontWeight: 'bold' }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SE FOR BANDEJA (BDJ), MOSTRA OPÇÃO DE FRACIONAR BANDEJAS AVULSAS */}
+            {ehBdjUnidade && (
+              <div style={{ gridColumn: '1 / -1', padding: '12px 15px', backgroundColor: '#f0fdf4', borderRadius: '10px', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input 
+                    type="checkbox" 
+                    id="chkBdjFracionada" 
+                    checked={novoCredito.e_bdj} 
+                    onChange={(e) => setNovoCredito({ ...novoCredito, e_bdj: e.target.checked, unidades_bdj: '', preco_bdj: '' })} 
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                  <label htmlFor="chkBdjFracionada" style={{ fontSize: '13px', fontWeight: 'bold', color: '#166534', cursor: 'pointer' }}>
+                    Cobrar ou creditar bandejas avulsas de dentro da caixa? (Ativa cálculo proporcional por bandeja)
+                  </label>
+                </div>
+
+                {novoCredito.e_bdj && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginTop: '5px' }}>
+                    <div>
+                      <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#166534', display: 'block', marginBottom: '3px' }}>Qtd. de Bandejas Avulsas (Ex: 2 bdj): *</label>
+                      <input 
+                        type="number" 
+                        placeholder="Ex: 2" 
+                        value={novoCredito.unidades_bdj} 
+                        onChange={(e) => { setNovoCredito({ ...novoCredito, unidades_bdj: e.target.value }); setErros({ ...erros, unidades_bdj: false }); }} 
+                        style={{ width: '100%', padding: '8px', borderRadius: '8px', border: erros.unidades_bdj ? '2px solid #ef4444' : '1px solid #16a34a', fontSize: '13px', background: '#fff', outline: 'none', fontWeight: 'bold' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#166534', display: 'block', marginBottom: '3px' }}>💵 Valor da Caixa Inteira com as Bandejas (R$): *</label>
+                      <input 
+                        type="text" 
+                        placeholder="R$ 0,00" 
+                        value={novoCredito.preco_bdj} 
+                        onChange={(e) => {
+                          const fmt = formatarMoedaMascara(e.target.value);
+                          setNovoCredito({ ...novoCredito, preco_bdj: fmt });
+                          setErros({ ...erros, preco_bdj: false });
+                        }} 
+                        style={{ width: '100%', padding: '8px', borderRadius: '8px', border: erros.preco_bdj ? '2px solid #ef4444' : '1px solid #16a34a', fontSize: '13px', background: '#fff', outline: 'none', fontWeight: 'bold' }}
                       />
                     </div>
                   </div>
@@ -835,9 +940,9 @@ export default function DevolucoesCreditos() {
                 type="text" 
                 list="lista-fornecedores-credito"
                 disabled={novoCredito.nao_fazer_nota}
-                placeholder={novoCredito.nao_fazer_nota ? "Atribuído para Não Fazer Nota" : "Digite para buscar o fornecedor..."} 
+                placeholder={novoCredito.nao_fazer_nota ? "Atribuido para NAO FAZER NOTA" : "Digite para buscar o fornecedor..."} 
                 value={novoCredito.fornecedor} 
-                onChange={(e) => { setNovoCredito({ ...novoCredito, fornecedor: e.target.value }); setErros({ ...erros, fornecedor: false }); }} 
+                onChange={(e) => { setNovoCredito({ ...novoCredito, fornecedor: removerAcentos(e.target.value).toUpperCase() }); setErros({ ...erros, fornecedor: false }); }} 
                 style={{ width: '100%', padding: '10px', borderRadius: '10px', border: erros.fornecedor ? '2px solid #ef4444' : '1px solid #cbd5e1', fontSize: '14px', background: novoCredito.nao_fazer_nota ? '#e2e8f0' : '#f8fafc', outline: 'none' }}
               />
               {erros.fornecedor && <span style={{ fontSize: '10px', color: '#ef4444', display: 'block', marginTop: '2px', fontWeight: 'bold' }}>Fornecedor obrigatório</span>}
@@ -845,7 +950,7 @@ export default function DevolucoesCreditos() {
 
             <div>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: erros.valor_unit ? '#ef4444' : '#475569', display: 'block', marginBottom: '5px' }}>
-                {novoCredito.e_kg && pesoCxNum > 0 && precoCxNum > 0 ? 'Valor Unitário (Calculado por KG):' : (novoCredito.e_dz && precoDuziaNum > 0 ? 'Valor Unitário (Calculado por Unidade): *' : 'Valor Unitário (R$): *')}
+                {novoCredito.e_kg && pesoCxNum > 0 && precoCxNum > 0 ? 'Valor Unitário (Calculado por KG):' : (novoCredito.e_dz && precoDuziaNum > 0 ? 'Valor Unitário (Calculado por Unidade): *' : (novoCredito.e_bdj && precoBdjNum > 0 ? 'Valor Unitário (Calculado por Bandeja): *' : 'Valor Unitário (R$): *'))}
               </label>
               <input 
                 type="text" 
@@ -853,15 +958,19 @@ export default function DevolucoesCreditos() {
                 value={
                   novoCredito.e_kg && pesoCxNum > 0 && precoCxNum > 0 
                     ? `R$ ${valNum.toFixed(2).replace('.', ',')}` 
-                    : (novoCredito.e_dz && precoDuziaNum > 0 ? `R$ ${valNum.toFixed(2).replace('.', ',')}` : novoCredito.valor_unit)
+                    : (novoCredito.e_dz && precoDuziaNum > 0 
+                        ? `R$ ${valNum.toFixed(2).replace('.', ',')}` 
+                        : (novoCredito.e_bdj && precoBdjNum > 0 
+                            ? `R$ ${valNum.toFixed(2).replace('.', ',')}` 
+                            : novoCredito.valor_unit))
                 } 
-                disabled={(novoCredito.e_kg && pesoCxNum > 0 && precoCxNum > 0) || (novoCredito.e_dz && precoDuziaNum > 0)}
+                disabled={(novoCredito.e_kg && pesoCxNum > 0 && precoCxNum > 0) || (novoCredito.e_dz && precoDuziaNum > 0) || (novoCredito.e_bdj && precoBdjNum > 0)}
                 onChange={(e) => {
                   const fmt = formatarMoedaMascara(e.target.value);
                   setNovoCredito({ ...novoCredito, valor_unit: fmt });
                   setErros({ ...erros, valor_unit: false });
                 }} 
-                style={{ width: '100%', padding: '10px', borderRadius: '10px', border: erros.valor_unit ? '2px solid #ef4444' : '1px solid #cbd5e1', fontSize: '14px', background: (novoCredito.e_kg && pesoCxNum > 0 && precoCxNum > 0) || (novoCredito.e_dz && precoDuziaNum > 0) ? '#e2e8f0' : '#f8fafc', outline: 'none' }}
+                style={{ width: '100%', padding: '10px', borderRadius: '10px', border: erros.valor_unit ? '2px solid #ef4444' : '1px solid #cbd5e1', fontSize: '14px', background: (novoCredito.e_kg && pesoCxNum > 0 && precoCxNum > 0) || (novoCredito.e_dz && precoDuziaNum > 0) || (novoCredito.e_bdj && precoBdjNum > 0) ? '#e2e8f0' : '#f8fafc', outline: 'none' }}
               />
               {erros.valor_unit && <span style={{ fontSize: '10px', color: '#ef4444', display: 'block', marginTop: '2px', fontWeight: 'bold' }}>Valor unitário obrigatório em números</span>}
             </div>
@@ -885,7 +994,7 @@ export default function DevolucoesCreditos() {
               style={{ width: '16px', height: '16px', cursor: 'pointer' }}
             />
             <label htmlFor="chkNotaCredito" style={{ fontSize: '12px', fontWeight: 'bold', color: '#92400e', cursor: 'pointer' }}>
-              Atribuir ao Fornecedor Fantasma: "Não Fazer Nota" (Desconto direto sem nota fiscal)
+              Atribuir ao Fornecedor Fantasma: "NAO FAZER NOTA" (Desconto direto sem nota fiscal)
             </label>
           </div>
 
@@ -946,8 +1055,8 @@ export default function DevolucoesCreditos() {
                   const lojaObj = lojas.find(l => String(l.codigo_loja) === String(c.loja_id));
                   const nomeLoja = lojaObj ? lojaObj.nome_fantasia : `Loja ${c.loja_id}`;
                   const resolvido = c.status === 'resolvido';
-                  const isCobranca = String(c.nome_produto || '').includes('[COBRANÇA]');
-                  const nomeProdutoLimpo = isCobranca ? c.nome_produto.replace('[COBRANÇA]', '').trim() : c.nome_produto;
+                  const isCobranca = String(c.nome_produto || '').includes('[COBRANCA]') || String(c.nome_produto || '').includes('[COBRANÇA]');
+                  const nomeProdutoLimpo = isCobranca ? c.nome_produto.replace('[COBRANCA]', '').replace('[COBRANÇA]', '').trim() : c.nome_produto;
 
                   const pUnitItem = parseFloat(String(c.valor_unit || '0').replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0;
                   const totalItemCalc = Number(c.quantidade || 0) * pUnitItem;
