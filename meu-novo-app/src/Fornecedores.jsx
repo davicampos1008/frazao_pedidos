@@ -18,7 +18,7 @@ export default function Fornecedores() {
   // 💡 Controle de sugestões para evitar duplicidades
   const [mostrarSugestoesNome, setMostrarSugestoesNome] = useState(false);
 
-  const estadoInicial = { nome_fantasia: '', nome_completo: '', telefone: '', tipo_documento: 'CNPJ', documento: '', tipo_pix: 'CNPJ/CPF', chave_pix: '' };
+  const estadoInicial = { nome_fantasia: '', nome_completo: '', telefone: '', tipo_documento: 'CNPJ', documento: '', tipo_pix: 'CNPJ/CPF', chave_pix: '', enviar_para_2: false, segundo_envio: '' };
   const [dados, setDados] = useState(estadoInicial);
 
   async function carregarFornecedores() {
@@ -79,12 +79,16 @@ export default function Fornecedores() {
       return alert("⚠️ V.I.R.T.U.S INFORMA: Para pessoa física (CPF), o NOME COMPLETO é obrigatório!");
     }
 
+    if ((dados.enviar_para_2 === true || String(dados.enviar_para_2).toLowerCase() === 'true') && !String(dados.segundo_envio || '').trim()) {
+      return alert("⚠️ Informe o nome do segundo envio ou desmarque a opção ENVIAR PARA 2.");
+    }
+
     // 🛡️ TRAVA DE DUPLICIDADE: Impede criar novo se já existe nome igual e é um cadastro novo
     if (!dados.id && fornecedores.find(f => f.nome_fantasia === dados.nome_fantasia)) {
        return alert("⚠️ Já existe um fornecedor com este Nome Fantasia! Selecione-o na lista de sugestões se deseja atualizar.");
     }
 
-    const { error } = await supabase.from('fornecedores').upsert([dados]);
+    const { error } = await supabase.from('fornecedores').upsert([{ ...dados, enviar_para_2: dados.enviar_para_2 === true || String(dados.enviar_para_2).toLowerCase() === 'true', segundo_envio: (dados.enviar_para_2 === true || String(dados.enviar_para_2).toLowerCase() === 'true') ? String(dados.segundo_envio || '').trim() : '' }]);
     if (!error) { 
       alert("✅ Fornecedor registrado com sucesso!"); 
       setModalAberto(null); 
@@ -216,6 +220,33 @@ export default function Fornecedores() {
                     <input onKeyDown={handleKeyDown} disabled={!editando} value={dados.chave_pix} onChange={e => setDados({...dados, chave_pix: e.target.value})} style={cssInput(!editando)} placeholder="Digite a chave PIX..." />
                   </div>
                 </div>
+              </div>
+
+              <div style={{ ...cssGrupo, backgroundColor: '#faf5ff', borderColor: '#e9d5ff' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', fontWeight: '900', color: '#7c3aed', cursor: editando ? 'pointer' : 'default' }}>
+                  <input
+                    type="checkbox"
+                    disabled={!editando}
+                    checked={dados.enviar_para_2 === true || String(dados.enviar_para_2).toLowerCase() === 'true'}
+                    onChange={e => setDados({ ...dados, enviar_para_2: e.target.checked, segundo_envio: e.target.checked ? (dados.segundo_envio || '') : '' })}
+                    onKeyDown={handleKeyDown}
+                  />
+                  ENVIAR PARA 2?
+                </label>
+
+                {(dados.enviar_para_2 === true || String(dados.enviar_para_2).toLowerCase() === 'true') && (
+                  <div>
+                    <label style={{ ...cssLabel, color: '#7c3aed' }}>NOME DO SEGUNDO ENVIO *</label>
+                    <input
+                      onKeyDown={handleKeyDown}
+                      disabled={!editando}
+                      value={dados.segundo_envio || ''}
+                      onChange={e => setDados({ ...dados, segundo_envio: e.target.value })}
+                      style={cssInput(!editando)}
+                      placeholder="Digite o nome da segunda pessoa..."
+                    />
+                  </div>
+                )}
               </div>
             </div>
 

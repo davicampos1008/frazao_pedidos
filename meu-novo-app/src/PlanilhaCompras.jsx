@@ -67,6 +67,15 @@ export default function PlanilhaCompras({ usuario }) {
   const [buscaFornList, setBuscaFornList] = useState(''); 
   // Texto de busca ao selecionar itens para agrupar por fornecedor.
   const [buscaSelecionar, setBuscaSelecionar] = useState(''); 
+
+  // Guarda, por fornecedor, o que foi enviado por loja (foto), se o envio está completo e se foi conferido. Salvo por data.
+ // Registro compartilhado de envios por fornecedor (vem do Supabase): completo, conferido, para2Ok e foto das lojas.
+const [enviosForn, setEnviosForn] = useState({});
+// Data a que pertencem os dados carregados; evita gravar dados de uma data em outra ao trocar o filtro.
+const [dataCarregada, setDataCarregada] = useState(null);
+
+  // Filtro ativo no guia da aba Fornecedores: 'todos' ou uma categoria.
+  const [filtroForn, setFiltroForn] = useState('todos');
   
   // Define se a busca de pendentes procura por produto ou loja.
   const [tipoBuscaPendentes, setTipoBuscaPendentes] = useState('produto');
@@ -109,6 +118,12 @@ export default function PlanilhaCompras({ usuario }) {
   const [fornExpandido, setFornExpandido] = useState(null);
   // Controla qual loja está aberta dentro do pedido geral por fornecedor.
   const [lojaGeralSelecionada, setLojaGeralSelecionada] = useState({});
+
+  // Marca, por fornecedor, se o pedido geral deve sair no formato *TOTAL*.
+  const [enviarTotalPorForn, setEnviarTotalPorForn] = useState({});
+  // Dentro do formato *TOTAL*, marca se deve sair sem valores e sem total (boleto).
+  const [semTotalPorForn, setSemTotalPorForn] = useState({});
+
   // Marca CEASA ou CEILÂNDIA para montar o complemento do WhatsApp.
   const [localCompra, setLocalCompra] = useState(''); 
 
@@ -210,6 +225,29 @@ export default function PlanilhaCompras({ usuario }) {
       .toLowerCase();
   };
 
+  // Quando todas as lojas foram enviadas, marca os pedidos ativos como envio completo.
+  // Também corrige pedidos antigos que ainda não tinham os campos de rastreamento preenchidos.
+  useEffect(() => {
+    if (dataCarregada !== dataFiltro) return;
+    fornecedoresBd.forEach(f => {
+      const lojasArr = Object.values(f.lojas);
+      const todas = lojasArr.length > 0 && lojasArr.every(l => l.wpp_enviado);
+      if (!todas) return;
+
+      const ativos = pedidosAtivosForn(f.nome);
+      const faltandoCompleto = ativos.filter(p => !p.envio_completo);
+      if (faltandoCompleto.length > 0) {
+        const ps = faltandoCompleto.map(p => supabase.from('pedidos').update({
+          envio_completo: true,
+          ...(!p.forn_enviado ? { forn_enviado: f.nome, qtd_enviada: Number(p.qtd_atendida) || 0 } : {})
+        }).eq('id', p.id));
+        Promise.all(ps).then(() => carregarDados(true));
+      }
+    });
+  }, [fornecedoresBd, enviosForn, dataCarregada, dataFiltro]);
+
+
+
   // Extrai números de códigos vindos como texto; usado para comparar loja_id/codigo_loja.
 
   const extrairNum = (valor) => {
@@ -251,6 +289,223 @@ export default function PlanilhaCompras({ usuario }) {
     setNotificacoes(prev => [...prev, { id, mensagem, tipo }]);
     setTimeout(() => { setNotificacoes(prev => prev.filter(n => n.id !== id)); }, 3000);
   };
+
+
+// Tira uma "foto" da loja: { NOME_DO_ITEM: quantidade }.
+const tirarFotoLoja = (loja) => {
+  const foto = {};
+  loja.itens.forEach(i => { foto[i.nome] = (foto[i.nome] || 0) + Number(i.qtd || 0); });
+  return foto;
+};
+
+// Quando todas as lojas de um fornecedor já foram copiadas, marca o envio como completo e guarda a foto atual.
+// Edições feitas antes desse momento não geram aviso.
+useEffect(() => {
+  setEnviosForn(prev => {
+    let mudou = false;
+    const novo = { ...prev };
+    fornecedoresBd.forEach(f => {
+      const lojasArr = Object.values(f.lojas);
+      const todas = lojasArr.length > 0 && lojasArr.every(l => l.wpp_enviado);
+      if (todas && !(novo[f.nome] && novo[f.nome].completo)) {
+        const lojasSnap = {};
+        lojasArr.forEach(l => { lojasSnap[l.nome] = tirarFotoLoja(l); });
+        novo[f.nome] = { ...(novo[f.nome] || {}), completo: true, conferido: false, lojas: lojasSnap };
+        mudou = true;
+      }
+    });
+    return mudou ? novo : prev;
+  });
+}, [fornecedoresBd]);
+
+// Compara o pedido atual do fornecedor com o que foi enviado e diz quais lojas mudaram.
+const calcularModificacoes = (f) => {
+  const resultado = { lojas: {}, removidas: [] };
+  const reg = enviosForn[f.nome];
+  if (!reg || !reg.completo) return resultado;
+  const lojasSnap = reg.lojas || {};
+
+  Object.values(f.lojas).forEach(loja => {
+    const atual = tirarFotoLoja(loja);
+    const antiga = lojasSnap[loja.nome];
+    if (!antiga) {
+      resultado.lojas[loja.nome] = { tipo: 'NOVA LOJA', detalhes: Object.entries(atual).map(([n, q]) => `+${q} ${n}`) };
+      return;
+    }
+    const detalhes = [];
+    let add = false, red = false;
+    Object.keys({ ...antiga, ...atual }).sort().forEach(nome => {
+      const dif = Math.round(((atual[nome] || 0) - (antiga[nome] || 0)) * 1000) / 1000;
+      if (dif > 0) { add = true; detalhes.push(`+${dif} ${nome}`); }
+      else if (dif < 0) { red = true; detalhes.push(`${dif} ${nome}`); }
+    });
+    if (detalhes.length > 0) {
+      resultado.lojas[loja.nome] = { tipo: add && red ? 'ALTERADA' : (add ? 'ADICIONADO' : 'REDUZIDO'), detalhes };
+    }
+  });
+
+  Object.keys(lojasSnap).forEach(nomeLoja => {
+    if (!f.lojas[nomeLoja]) {
+      resultado.removidas.push({ nome: nomeLoja, detalhes: Object.entries(lojasSnap[nomeLoja]).map(([n, q]) => `-${q} ${n}`) });
+    }
+  });
+  return resultado;
+};
+
+// Registra um envio: de uma ou mais lojas, ou do pedido geral (que atualiza todas).
+// Registra um envio no banco: marca enviado, guarda a "foto" (qtd_enviada) e limpa conferência se houve mudança.
+const registrarEnvio = async (f, geral, nomesLojas = []) => {
+  const mods = calcularModificacoes(f);
+  const houveMod = Object.keys(mods.lojas).length > 0 || mods.removidas.length > 0;
+  const daLoja = (p) => geral || nomesLojas.includes(nomeLojaDoPedido(p));
+  const ativos = pedidosAtivosForn(f.nome);
+  const idsAtivos = new Set(ativos.map(p => p.id));
+  const promessas = [];
+
+  ativos.filter(daLoja).forEach(p => promessas.push(
+    supabase.from('pedidos').update({ wpp_enviado: true, qtd_enviada: Number(p.qtd_atendida) || 0, forn_enviado: f.nome }).eq('id', p.id)
+  ));
+
+  // Pedidos que saíram deste fornecedor: esquece o que foi enviado deles.
+  pedidosRaw.filter(p => String(p.forn_enviado || '').toUpperCase().trim() === f.nome && !idsAtivos.has(p.id) && daLoja(p))
+    .forEach(p => promessas.push(supabase.from('pedidos').update({ qtd_enviada: 0, forn_enviado: '' }).eq('id', p.id)));
+
+  if (houveMod && ativos.length > 0) {
+    promessas.push(supabase.from('pedidos').update({ conferido: false, para2_ok: false }).in('id', ativos.map(p => p.id)));
+  }
+
+  await Promise.all(promessas);
+  carregarDados(true);
+};
+// Liga/desliga a conferência.
+const alternarConferencia = (nomeForn) => {
+  const novo = !(enviosForn[nomeForn] && enviosForn[nomeForn].conferido);
+  salvarFlagsForn(nomeForn, { conferido: novo }, { conferido: novo });
+};
+
+
+// Preço curto de um item do fornecedor para o resumo do topo (ex.: R$10 ou R$7,50).
+const precoCurtoResumo = (f, nomeItem) => {
+  for (const loja of Object.values(f.lojas)) {
+    const it = loja.itens.find(i => i.nome === nomeItem);
+    if (it) {
+      if (it.isBoleto) return 'BOL';
+      const n = tratarPrecoNum(it.valor_unit);
+      if (!n) return '';
+      return `R$${n % 1 === 0 ? n : n.toFixed(2).replace('.', ',')}`;
+    }
+  }
+  return '';
+}; 
+
+// Diz se o fornecedor (cadastro oficial) exige envio para 2 pessoas (coluna enviar_para_2).
+const fornecedorEnviaPara2 = (f) => {
+  const oficial = fornecedoresOficiais.find(o =>
+    String(o.nome_fantasia || '').toUpperCase().trim() === f.nome ||
+    String(o.nome_completo || '').toUpperCase().trim() === f.nome
+  );
+  return !!oficial && (oficial.enviar_para_2 === true || String(oficial.enviar_para_2).toLowerCase() === 'true');
+};
+
+// Nome da pessoa do segundo envio (coluna segundo_envio do cadastro do fornecedor).
+const nomeSegundoEnvio = (f) => {
+  const oficial = fornecedoresOficiais.find(o =>
+    String(o.nome_fantasia || '').toUpperCase().trim() === f.nome ||
+    String(o.nome_completo || '').toUpperCase().trim() === f.nome
+  );
+  return oficial && oficial.segundo_envio ? String(oficial.segundo_envio).trim() : '';
+};
+
+// Marca/desmarca "enviado para a 2ª pessoa". Desmarcar também desfaz a conferência.
+const alternarPara2 = (nomeForn) => {
+  const novoOk = !(enviosForn[nomeForn] && enviosForn[nomeForn].para2Ok);
+  salvarFlagsForn(
+    nomeForn,
+    novoOk ? { para2_ok: true } : { para2_ok: false, conferido: false },
+    novoOk ? { para2Ok: true } : { para2Ok: false, conferido: false }
+  );
+};
+
+
+// Situação de envio/conferência de um fornecedor (usada no resumo final).
+const statusEnvioForn = (f) => {
+  const lojasArr = Object.values(f.lojas);
+  const todas = lojasArr.length > 0 && lojasArr.every(l => l.wpp_enviado);
+  const mods = calcularModificacoes(f);
+  const reenviar = Object.keys(mods.lojas).length > 0 || mods.removidas.length > 0;
+  const enviado = todas && !reenviar;
+  const conferido = enviado && !!(enviosForn[f.nome] && enviosForn[f.nome].conferido);
+  return { enviado, conferido };
+};
+
+// Monta o resumo da conferência concluída e copia para a área de transferência.
+const gerarResumoConferencia = () => {
+  const hora = new Date().getHours();
+  const saudacao = hora < 12 ? 'Bom dia' : (hora < 18 ? 'Boa tarde' : 'Boa noite');
+
+  const ativos = fornecedoresBd.filter(f => Object.keys(f.lojas).length > 0);
+  const todosEnviados = ativos.length > 0 && ativos.every(f => statusEnvioForn(f).enviado);
+  const todosConferidos = ativos.length > 0 && ativos.every(f => statusEnvioForn(f).conferido);
+  // Conferido implica enviado.
+  const marcaEnviados = todosEnviados || todosConferidos;
+
+  const paraDois = ativos.filter(f => fornecedorEnviaPara2(f));
+
+  let msg = `${saudacao},\n\n`;
+  msg += `*Pedidos Enviados:* ${marcaEnviados ? '✅' : '❌'}\n`;
+  msg += `*Pedidos Conferidos:* ${todosConferidos ? '✅' : '❌'}\n\n`;
+  msg += `*Lista de fornecedores enviados para 2*\n\n`;
+
+  if (paraDois.length === 0) {
+    msg += `Nenhum fornecedor hoje`;
+  } else {
+    paraDois.forEach(f => {
+      const n2 = nomeSegundoEnvio(f);
+      const envio2Ok = !!(enviosForn[f.nome] && enviosForn[f.nome].para2Ok);
+      msg += `${f.nome}${n2 ? '/' + n2 : ''}: ${envio2Ok ? '✅' : '❌'}\n`;
+    });
+  }
+
+  navigator.clipboard.writeText(msg.trim());
+  mostrarNotificacao('✅ Resumo da conferência copiado!', 'sucesso');
+};
+
+// Classifica o fornecedor na mesma ordem de prioridade das bordas: reenviar > alerta > conferido > enviado > não enviado.
+const categoriaForn = (f) => {
+  const lojasArr = Object.values(f.lojas);
+  const todasCopiadas = lojasArr.length > 0 && lojasArr.every(l => l.wpp_enviado);
+  const mods = calcularModificacoes(f);
+  const reenviar = Object.keys(mods.lojas).length > 0 || mods.removidas.length > 0;
+  const conferido = !!(enviosForn[f.nome] && enviosForn[f.nome].conferido) && todasCopiadas && !reenviar;
+  if (reenviar) return 'reenviar';
+  if (f.precisaRefazer) return 'alerta';
+  if (conferido) return 'conferido';
+  if (todasCopiadas) return 'enviado';
+  return 'nao_enviado';
+};
+
+// Fornecedor que exige envio para 2 pessoas e ainda não foi marcado.
+const pendentePara2 = (f) => fornecedorEnviaPara2(f) && !(enviosForn[f.nome] && enviosForn[f.nome].para2Ok);
+
+// Define as abas do guia, na ordem de exibição.
+const ABAS_FORN = [
+  { id: 'nao_enviado', label: '⚪ Não enviados', cor: '#64748b', fundo: '#f1f5f9' },
+  { id: 'reenviar', label: '🔁 Reenviar', cor: '#ea580c', fundo: '#ffedd5' },
+  { id: 'alerta', label: '⚠️ Alerta', cor: '#ef4444', fundo: '#fef2f2' },
+  { id: 'para2', label: '👥 Enviar p/ 2', cor: '#7c3aed', fundo: '#ede9fe' },
+  { id: 'enviado', label: '✅ Enviados', cor: '#16a34a', fundo: '#dcfce7' },
+  { id: 'conferido', label: '🔵 Conferidos', cor: '#1d4ed8', fundo: '#dbeafe' },
+];
+
+// Confere se o fornecedor pertence a uma aba.
+const pertenceAba = (f, abaId) => abaId === 'todos' || (abaId === 'para2' ? pendentePara2(f) : categoriaForn(f) === abaId);
+
+// Se a aba escolhida ficar vazia (ex.: tudo foi reenviado), volta para "Todos".
+useEffect(() => {
+  if (filtroForn !== 'todos' && !fornecedoresBd.some(f => pertenceAba(f, filtroForn))) {
+    setFiltroForn('todos');
+  }
+}, [fornecedoresBd, enviosForn, fornecedoresOficiais, filtroForn]);
 
   // Confere se o fornecedor existe; se não existir, pede confirmação antes de lançar.
 
@@ -321,7 +576,9 @@ export default function PlanilhaCompras({ usuario }) {
       custo_unit: '',
       qtd_atendida: 0,
       qtd_bonificada: 0,
-      wpp_enviado: false
+      wpp_enviado: false,
+      conferido: false,
+      para2_ok: false
     }).eq('id', idPedido);
     carregarDados();
   };
@@ -402,7 +659,7 @@ export default function PlanilhaCompras({ usuario }) {
      e.stopPropagation();
      if (!window.confirm(`Deseja cancelar as compras deste item no fornecedor ${nomeForn}?\nEles voltarão para a lista de PENDENTES.`)) return;
      setCarregando(true);
-     const promessas = pedidosParaCancelar.map(p => supabase.from('pedidos').update({ fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, qtd_bonificada: 0, status_compra: 'pendente', wpp_enviado: false }).eq('id', p.id));
+     const promessas = pedidosParaCancelar.map(p => supabase.from('pedidos').update({ fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, qtd_bonificada: 0, status_compra: 'pendente', wpp_enviado: false, conferido: false, para2_ok: false }).eq('id', p.id));
      await Promise.all(promessas);
      carregarDados(true);
      setCarregando(false);
@@ -414,7 +671,7 @@ export default function PlanilhaCompras({ usuario }) {
      e.stopPropagation();
      if (!window.confirm(`🚫 Deseja marcar TODAS as compras do item "${item.nome}" como FALTA?`)) return;
      setCarregando(true);
-     const promessas = item.itens.map(p => supabase.from('pedidos').update({ status_compra: 'falta', qtd_atendida: 0, custo_unit: 'FALTA', fornecedor_compra: '', wpp_enviado: false }).eq('id', p.id));
+     const promessas = item.itens.map(p => supabase.from('pedidos').update({ status_compra: 'falta', qtd_atendida: 0, custo_unit: 'FALTA', fornecedor_compra: '', wpp_enviado: false, conferido: false, para2_ok: false }).eq('id', p.id));
      await Promise.all(promessas);
      carregarDados(true);
      setCarregando(false);
@@ -530,7 +787,7 @@ export default function PlanilhaCompras({ usuario }) {
       
       const { data: pedData } = await supabase.from('pedidos').select('*').eq('data_pedido', dataFiltro);
       setPedidosRaw(pedData || []);
-      
+
       const mapaPendentes = {};
       const mapaFeitos = {};
       const mapaGeralItens = {}; 
@@ -714,6 +971,58 @@ export default function PlanilhaCompras({ usuario }) {
          f.precisaRefazer = f.alertas && f.alertas.length > 0;
          return f;
       }).sort((a, b) => a.nome.localeCompare(b.nome));
+
+      // Lê os estados de envio diretamente da tabela pedidos, para compartilhar os dados entre usuários.
+      // A foto enviada é reconstruída com forn_enviado e qtd_enviada, inclusive quando o pedido foi desfeito.
+      const mapaEnvios = {};
+      const getReg = (nome) => {
+        if (!mapaEnvios[nome]) {
+          mapaEnvios[nome] = { completo: false, conferido: false, para2Ok: false, lojas: {}, _n: 0, _c: 0, _p: 0 };
+        }
+        return mapaEnvios[nome];
+      };
+
+      (pedData || []).forEach(p => {
+        const idL = extrairNum(p.loja_id);
+        const lojaInfoE = idL !== null && idL >= 0
+          ? lojasDb.find(l => extrairNum(l.codigo_loja) === idL)
+          : null;
+        const nomeLojaE = lojaInfoE ? lojaInfoE.nome_fantasia : `Loja ${idL}`;
+        const prodE = String(p.nome_produto || '').toUpperCase();
+        const fAtual = String(p.fornecedor_compra || '').toUpperCase().replace('ALERTA|', '').trim();
+        const fEnv = String(p.forn_enviado || '').toUpperCase().replace('ALERTA|', '').trim();
+        const fCompleto = fEnv || fAtual;
+
+        // A conclusão do envio também pode estar em pedidos que já foram desfeitos.
+        if (p.envio_completo && fCompleto) getReg(fCompleto).completo = true;
+
+        // Preserva a quantidade que foi efetivamente enviada, mesmo que o pedido tenha mudado depois.
+        const qEnv = Number(p.qtd_enviada) || 0;
+        if (fEnv && qEnv > 0 && idL !== null && idL >= 0) {
+          const r = getReg(fEnv);
+          r.lojas[nomeLojaE] = r.lojas[nomeLojaE] || {};
+          r.lojas[nomeLojaE][prodE] = (r.lojas[nomeLojaE][prodE] || 0) + qEnv;
+        }
+
+        if (p.bloqueado === true || p.apenas_cobranca || idL === null || idL < 0) return;
+        if ((p.status_compra === 'atendido' || p.status_compra === 'boleto') && fAtual && fAtual !== 'REFAZER') {
+          const r = getReg(fAtual);
+          r._n++;
+          if (p.conferido) r._c++;
+          if (p.para2_ok) r._p++;
+        }
+      });
+
+      Object.values(mapaEnvios).forEach(r => {
+        r.conferido = r._n > 0 && r._c === r._n;
+        r.para2Ok = r._n > 0 && r._p === r._n;
+        delete r._n;
+        delete r._c;
+        delete r._p;
+      });
+
+      setEnviosForn(mapaEnvios);
+      setDataCarregada(dataFiltro);
       setFornecedoresBd(fornProcessados);
 
     } catch (err) { console.error("Erro VIRTUS:", err); } 
@@ -737,13 +1046,41 @@ export default function PlanilhaCompras({ usuario }) {
 
   // Zera compras, boletos e faltas do dia e devolve tudo para pendentes.
 
+// Nome da loja de um pedido (mesma regra usada na tela).
+// Nome da loja de um pedido (mesma regra usada na tela).
+const nomeLojaDoPedido = (p) => {
+  const idL = extrairNum(p.loja_id);
+  const l = lojasBd.find(x => extrairNum(x.codigo_loja) === idL);
+  return l ? l.nome_fantasia : `Loja ${idL}`;
+};
+
+// Pedidos ativos (comprados) de um fornecedor.
+const pedidosAtivosForn = (nomeForn) => pedidosRaw.filter(p =>
+  (p.status_compra === 'atendido' || p.status_compra === 'boleto') &&
+  !p.apenas_cobranca && p.bloqueado !== true &&
+  String(p.fornecedor_compra || '').toUpperCase().replace('ALERTA|', '').trim() === nomeForn
+);
+
+// Grava flags (conferido, para2_ok) em todos os pedidos do fornecedor, como o wpp_enviado.
+const salvarFlagsForn = async (nomeForn, campos, regLocal) => {
+  setEnviosForn(prev => ({ ...prev, [nomeForn]: { ...(prev[nomeForn] || {}), ...regLocal } }));
+  const ids = pedidosAtivosForn(nomeForn).map(p => p.id);
+  if (ids.length === 0) return;
+  const { error } = await supabase.from('pedidos').update(campos).in('id', ids);
+  if (error) {
+    console.error('Erro ao salvar:', error);
+    mostrarNotificacao('❌ Não foi possível salvar. Verifique o SQL das colunas novas.', 'alerta');
+  }
+  carregarDados(true);
+};
+
   const resetarPedidosDoDia = async () => {
     if (!window.confirm(`🚨 ATENÇÃO: Isso vai ZERAR todos os pedidos, boletos e faltas da data ${dataBr}.\n\nTudo voltará para a aba de PENDENTES.\n\nDeseja realmente recomeçar?`)) return;
     setCarregando(true);
     try {
-      await supabase.from('pedidos').update({ status_compra: 'pendente', fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, qtd_bonificada: 0, wpp_enviado: false }).eq('data_pedido', dataFiltro);
+      await supabase.from('pedidos').update({ status_compra: 'pendente', fornecedor_compra: '', custo_unit: '', qtd_atendida: 0, qtd_bonificada: 0, wpp_enviado: false, conferido: false, para2_ok: false, envio_completo: false, qtd_enviada: 0, forn_enviado: '' }).eq('data_pedido', dataFiltro);
       setAgrupamentos([]);
-      localStorage.removeItem(`agrupamentos_virtus_${dataFiltro}`);
+      setEnviosForn({});
       setAbaAtiva('pendentes');
       carregarDados();
     } catch (err) { alert("Erro ao resetar: " + err.message); setCarregando(false); }
@@ -921,7 +1258,7 @@ export default function PlanilhaCompras({ usuario }) {
           const rowOriginal = pedidosRaw.find(p => p.id === loja.id_pedido);
           if (rowOriginal) {
             const { id, created_at, ...dadosLimpos } = rowOriginal;
-            pedidosParaClonar.push({ ...dadosLimpos, quantidade: resto, qtd_atendida: 0, status_compra: 'pendente', fornecedor_compra: '', custo_unit: '', qtd_bonificada: 0 });
+            pedidosParaClonar.push({ ...dadosLimpos, quantidade: resto, qtd_atendida: 0, status_compra: 'pendente', fornecedor_compra: '', custo_unit: '', qtd_bonificada: 0, wpp_enviado: false, conferido: false, para2_ok: false, envio_completo: false, qtd_enviada: 0, forn_enviado: '' });
           }
           qtdRestanteParaDistribuir = 0;
         } 
@@ -974,7 +1311,7 @@ export default function PlanilhaCompras({ usuario }) {
           const rowOriginal = pedidosRaw.find(p => p.id === loja.id_pedido);
           if (rowOriginal) {
             const { id, created_at, ...dadosLimpos } = rowOriginal;
-            pedidosParaClonar.push({ ...dadosLimpos, quantidade: resto, qtd_atendida: 0, status_compra: loja.isFalta ? 'falta' : 'pendente', custo_unit: loja.isFalta ? 'FALTA' : '', fornecedor_compra: '', qtd_bonificada: 0 });
+            pedidosParaClonar.push({ ...dadosLimpos, quantidade: resto, qtd_atendida: 0, status_compra: loja.isFalta ? 'falta' : 'pendente', custo_unit: loja.isFalta ? 'FALTA' : '', fornecedor_compra: '', qtd_bonificada: 0, wpp_enviado: false, conferido: false, para2_ok: false, envio_completo: false, qtd_enviada: 0, forn_enviado: '' });
           }
         }
       } else if (loja.isFalta) {
@@ -1010,18 +1347,27 @@ export default function PlanilhaCompras({ usuario }) {
 
   // Monta e copia o pedido geral do fornecedor para WhatsApp, incluindo totais.
 
+
+  // "ENVIAR TOTAL?" marcado: formato *TOTAL*, com valores ou, se "SEM TOTAL" marcado, só quantidades.
   const gerarPedidoGeral = async (f) => {
     if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de copiar os pedidos!");
-    
-    const nomeLoja = lojaGeralSelecionada[f.nome];
-    if (!nomeLoja) return alert("⚠️ Selecione a loja titular da banca para o cabeçalho (O NOME DELA IRÁ NO TOPO).");
 
-    const lojaData = f.lojas[nomeLoja];
-    const placaBase = lojaData.placa.split('|')[0].trim() || 'SEM PLACA';
-    const comp = localCompra ? (localCompra === 'ceasa' ? 'FRETE' : '2 NOVO') : '';
-    
+    const enviarTotal = !!enviarTotalPorForn[f.nome];
+    const semTotal = enviarTotal && !!semTotalPorForn[f.nome];
+
+    let nomeLoja = '';
+    let placaBase = '';
+    let comp = '';
+
+    if (!enviarTotal) {
+      nomeLoja = lojaGeralSelecionada[f.nome];
+      if (!nomeLoja) return alert("⚠️ Selecione a loja titular da banca para o cabeçalho (O NOME DELA IRÁ NO TOPO).");
+      const lojaData = f.lojas[nomeLoja];
+      placaBase = lojaData.placa.split('|')[0].trim() || 'SEM PLACA';
+      comp = localCompra === 'ceasa' ? 'FRETE' : '2 NOVO';
+    }
+
     const mapaItensGerais = {};
-
     Object.values(f.lojas).forEach(loja => {
       loja.itens.forEach(item => {
         const key = `${item.nome}`;
@@ -1033,35 +1379,43 @@ export default function PlanilhaCompras({ usuario }) {
       });
     });
 
-    let msg = `*${nomeLoja.replace(/^\d+\s*-\s*/, '').trim().toUpperCase()}*\n\n`;
-    
-    Object.values(mapaItensGerais).forEach(i => {
-       const prodDB = produtosBd.find(p => p.nome.toUpperCase() === i.nome);
-       
-       let exibicaoUnidade = i.unidade;
-       if (prodDB && prodDB.unidade_medida === 'KG' && prodDB.peso_caixa) {
-          exibicaoUnidade = `${prodDB.peso_caixa}Kg`;
-       }
+    // Monta o nome exibido de cada item e ordena em ordem alfabética por esse nome.
+    const itensOrdenados = Object.values(mapaItensGerais).map(i => {
+      const prodDB = produtosBd.find(p => p.nome.toUpperCase() === i.nome);
+      let exibicaoUnidade = i.unidade;
+      if (prodDB && prodDB.unidade_medida === 'KG' && prodDB.peso_caixa) {
+        exibicaoUnidade = `${prodDB.peso_caixa}Kg`;
+      }
+      return { ...i, nomeWhats: getNomeExibicaoWhatsApp(f.nome, i.nome, exibicaoUnidade) };
+    }).sort((a, b) => a.nomeWhats.localeCompare(b.nomeWhats, 'pt-BR'));
 
-       const nomeWhats = getNomeExibicaoWhatsApp(f.nome, i.nome, exibicaoUnidade);
-       const precoNum = tratarPrecoNum(i.valor_unit);
-       
-       const totalLinhaBruto = i.qtd * precoNum;
+    let msg = enviarTotal
+      ? `*TOTAL*\n\n`
+      : `*${nomeLoja.replace(/^\d+\s*-\s*/, '').trim().toUpperCase()}*\n\n`;
 
-       msg += `${i.qtd} ${nomeWhats} - ${i.valor_unit} (Total: ${formatarMoeda(totalLinhaBruto)})`;
-       
-       if (i.qtd_bonificada > 0) msg += ` (${i.qtd_bonificada} BONIFICAÇÕES)`;
-       msg += `\n`;
+    itensOrdenados.forEach(i => {
+      if (semTotal) {
+        msg += `${i.qtd} ${i.nomeWhats}`;
+      } else {
+        const precoNum = tratarPrecoNum(i.valor_unit);
+        const totalLinhaBruto = i.qtd * precoNum;
+        msg += `${i.qtd} ${i.nomeWhats} - ${i.valor_unit} (Total: ${formatarMoeda(totalLinhaBruto)})`;
+      }
+      if (i.qtd_bonificada > 0) msg += ` (${i.qtd_bonificada} BONIFICAÇÕES)`;
+      msg += `\n`;
     });
 
-    const qtdLojas = Object.keys(f.lojas).length;
-    msg += `\nQtd Lojas: ${qtdLojas}\n${placaBase} ${comp ? '- ' + comp : ''} - TOTAL: ${formatarMoeda(f.totalGeral)}`;
+    if (enviarTotal) {
+      const qtdLojas = Object.keys(f.lojas).length;
+      msg += `\nQtd Lojas: ${qtdLojas}`;
+      if (!semTotal) msg += `\nTOTAL: ${formatarMoeda(f.totalGeral)}`;
+    } else {
+      msg += `\n${placaBase} ${comp ? '- ' + comp : ''} - TOTAL: ${formatarMoeda(f.totalGeral)}`;
+    }
 
     navigator.clipboard.writeText(msg);
-    
-    const ids = [];
-    Object.values(f.lojas).forEach(loja => loja.itens.forEach(i => ids.push(i.id_pedido)));
-    await supabase.from('pedidos').update({ wpp_enviado: true }).in('id', ids);
+
+    await registrarEnvio(f, true);
 
     carregarDados(true);
     mostrarNotificacao('✅ Pedido Geral copiado para o WhatsApp e marcado como ENVIADO!', 'sucesso');
@@ -1069,7 +1423,7 @@ export default function PlanilhaCompras({ usuario }) {
 
   // Copia a lista de uma loja específica para WhatsApp e marca como enviada.
 
-  const copiarMensagemWhatsapp = async (lojaNome, lojaData, fNome) => {
+  const copiarMensagemWhatsapp = async (lojaNome, lojaData, fNome, f) => {
     if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de copiar os pedidos!");
 
     const nomeFormatado = lojaNome.replace(/^\d+\s*-\s*/, '').trim().toUpperCase();
@@ -1094,8 +1448,7 @@ export default function PlanilhaCompras({ usuario }) {
     
     navigator.clipboard.writeText(msg);
 
-    const ids = lojaData.itens.map(i => i.id_pedido);
-    await supabase.from('pedidos').update({ wpp_enviado: true }).in('id', ids);
+    await registrarEnvio(f, false, [lojaNome]);
 
     carregarDados(true);
     mostrarNotificacao('✅ Lista da loja copiada e marcada como ENVIADA!', 'sucesso');
@@ -1817,30 +2170,75 @@ export default function PlanilhaCompras({ usuario }) {
             <span>🔍</span><input placeholder="Buscar fornecedor..." value={buscaFornecedores} onChange={e => setBuscaFornecedores(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
           </div>
 
+          <button onClick={gerarResumoConferencia} style={{ width: '100%', background: '#111', color: '#fff', border: 'none', padding: '16px', borderRadius: '12px', fontWeight: '900', fontSize: '13px', cursor: 'pointer' }}>
+            📝 CONFERÊNCIA CONCLUÍDA (COPIAR RESUMO)
+          </button>
+
+          {fornecedoresBd.length > 0 && (
+  <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '5px' }}>
+    <button onClick={() => setFiltroForn('todos')} style={{ flexShrink: 0, padding: '8px 12px', borderRadius: '10px', border: filtroForn === 'todos' ? '2px solid #111' : '1px solid #cbd5e1', background: filtroForn === 'todos' ? '#111' : '#fff', color: filtroForn === 'todos' ? '#fff' : '#334155', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
+      Todos ({fornecedoresBd.length})
+    </button>
+    {ABAS_FORN.map(aba => {
+      const qtd = fornecedoresBd.filter(f => pertenceAba(f, aba.id)).length;
+      if (qtd === 0) return null;
+      const ativa = filtroForn === aba.id;
+      return (
+        <button key={aba.id} onClick={() => setFiltroForn(ativa ? 'todos' : aba.id)} style={{ flexShrink: 0, padding: '8px 12px', borderRadius: '10px', border: `2px solid ${aba.cor}`, background: ativa ? aba.cor : aba.fundo, color: ativa ? '#fff' : aba.cor, fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
+          {aba.label} ({qtd})
+        </button>
+      );
+    })}
+  </div>
+)}
+
           {fornecedoresBd.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '20px' }}>Nenhum fornecedor acionado.</div>
           ) : (
-            fornecedoresBd.filter(f => removerAcentos(f.nome).includes(removerAcentos(buscaFornecedores))).map((f, idx) => {
+            fornecedoresBd.filter(f => removerAcentos(f.nome).includes(removerAcentos(buscaFornecedores)) && pertenceAba(f, filtroForn)).map((f, idx) => {
               const expandido = fornExpandido === f.nome;
               const temAlerta = f.precisaRefazer;
               
               const temCadastro = fornecedoresOficiais.some(oficial => (oficial.nome_fantasia || '').toUpperCase() === f.nome || (oficial.nome_completo || '').toUpperCase() === f.nome);
               
-              let estiloBorda = temCadastro ? '6px solid #111' : '6px solid #ef4444'; 
+              const todasLojasCopiadas = Object.values(f.lojas).length > 0 && Object.values(f.lojas).every(loja => loja.wpp_enviado);
+              const mods = calcularModificacoes(f);
+              const reenviar = Object.keys(mods.lojas).length > 0 || mods.removidas.length > 0;
+              const conferido = !!(enviosForn[f.nome] && enviosForn[f.nome].conferido) && todasLojasCopiadas && !reenviar;
+
+              let estiloBorda = temCadastro ? '6px solid #111' : '6px solid #ef4444';
               let iconeTopo = '';
               let corH3 = '#111';
+              let badgeFundo = '#dcfce7';
+              let badgeTexto = '#166534';
 
-              const todasLojasCopiadas = Object.values(f.lojas).length > 0 && Object.values(f.lojas).every(loja => loja.wpp_enviado);
-
-              if (temAlerta) {
+              if (reenviar) {
+                  estiloBorda = '6px solid #f97316';
+                  iconeTopo = '🔁 REENVIAR';
+                  corH3 = '#ea580c';
+                  badgeFundo = '#ffedd5';
+                  badgeTexto = '#c2410c';
+              } else if (temAlerta) {
                   estiloBorda = '6px solid #ef4444';
                   iconeTopo = '⚠️ ALERTA';
                   corH3 = '#ef4444';
+                  badgeFundo = '#fef2f2';
+                  badgeTexto = '#ef4444';
+              } else if (conferido) {
+                  estiloBorda = '6px solid #3b82f6';
+                  iconeTopo = '🔵 CONFERIDO';
+                  corH3 = '#1d4ed8';
+                  badgeFundo = '#dbeafe';
+                  badgeTexto = '#1e40af';
               } else if (todasLojasCopiadas) {
                   estiloBorda = '6px solid #22c55e';
                   iconeTopo = '✅ ENVIADO';
                   corH3 = '#16a34a';
               }
+
+              const exigePara2 = fornecedorEnviaPara2(f);
+              const para2Ok = !!(enviosForn[f.nome] && enviosForn[f.nome].para2Ok);
+              const nome2 = nomeSegundoEnvio(f);
 
               return (
                 <div key={idx} style={{ backgroundColor: '#fff', borderRadius: '20px', padding: '20px', boxShadow: '0 5px 15px rgba(0,0,0,0.05)', borderTop: estiloBorda, transition: '0.3s' }}>
@@ -1862,13 +2260,28 @@ export default function PlanilhaCompras({ usuario }) {
                                 {!temCadastro && <span style={{ background: '#ef4444', color: '#fff', fontSize: '9px', padding: '3px 6px', borderRadius: '4px', fontWeight: 'bold' }}>⚠️ SEM CADASTRO</span>}
                               </>
                             )}
-                            {iconeTopo && <span style={{fontSize: '10px', background: temAlerta ? '#fef2f2' : '#dcfce7', padding: '4px 8px', borderRadius: '6px', color: temAlerta ? '#ef4444' : '#166534'}}>{iconeTopo}</span>}
+                            {iconeTopo && <span style={{fontSize: '10px', background: badgeFundo, padding: '4px 8px', borderRadius: '6px', color: badgeTexto}}>{iconeTopo}</span>}
+
+                            {exigePara2 && (
+                              <span style={{ fontSize: '10px', background: para2Ok ? '#ede9fe' : '#7c3aed', color: para2Ok ? '#5b21b6' : '#fff', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
+                                {para2Ok ? '👥 ENVIADO P/ 2 ✓' : '👥 ENVIAR PARA 2'}
+                              </span>
+                            )}
                         </h3>
+
+                        {exigePara2 && nome2 && (
+                          <div style={{ marginTop: '8px', fontSize: '11px', fontWeight: 'bold', color: para2Ok ? '#5b21b6' : '#7c3aed', background: '#faf5ff', border: '1px solid #c4b5fd', padding: '4px 8px', borderRadius: '6px', display: 'inline-block' }}>
+                            👥 Enviar também para: <b>{nome2}</b>
+                          </div>
+                        )}
                         
                         {!expandido && f.resumo && Object.keys(f.resumo).length > 0 && (
                            <div style={{ marginTop: '10px', fontSize: '11px', color: '#64748b', display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
                               {Object.entries(f.resumo).map(([nome, info]) => (
-                                 <span key={nome} style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>{info.qtd}x {nome}</span>
+                                 <span key={nome} style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
+                                  {info.qtd}x {nome}
+                                  {precoCurtoResumo(f, nome) && <b style={{ color: '#16a34a', marginLeft: '4px' }}>{precoCurtoResumo(f, nome)}</b>}
+                                </span>
                               ))}
                            </div>
                         )}
@@ -1912,25 +2325,84 @@ export default function PlanilhaCompras({ usuario }) {
                              {ordenarLojas(Object.values(f.lojas)).map(loja => <option key={loja.nome} value={loja.nome}>{loja.nome}</option>)}
                           </select>
 
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: '900', fontSize: '12px', backgroundColor: enviarTotalPorForn[f.nome] ? '#dcfce7' : '#fff', color: enviarTotalPorForn[f.nome] ? '#166534' : '#64748b', border: enviarTotalPorForn[f.nome] ? '1px solid #86efac' : '1px solid #cbd5e1' }}>
+                            <input
+                              type="checkbox"
+                              checked={!!enviarTotalPorForn[f.nome]}
+                              onChange={e => setEnviarTotalPorForn({ ...enviarTotalPorForn, [f.nome]: e.target.checked })}
+                              style={{ width: '18px', height: '18px' }}
+                            />
+                            💰 ENVIAR TOTAL?
+                          </label>
+
+                          {enviarTotalPorForn[f.nome] && (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: '900', fontSize: '12px', backgroundColor: semTotalPorForn[f.nome] ? '#fffbeb' : '#fff', color: semTotalPorForn[f.nome] ? '#d97706' : '#64748b', border: semTotalPorForn[f.nome] ? '1px solid #fde68a' : '1px solid #cbd5e1' }}>
+                              <input
+                                type="checkbox"
+                                checked={!!semTotalPorForn[f.nome]}
+                                onChange={e => setSemTotalPorForn({ ...semTotalPorForn, [f.nome]: e.target.checked })}
+                                style={{ width: '18px', height: '18px' }}
+                              />
+                              🚫 ENVIAR SEM TOTAL?
+                            </label>
+                          )}
+
                           <button 
                              onClick={() => gerarPedidoGeral(f)} 
                              disabled={!localCompra}
-                             style={{ flex: 1, background: !localCompra ? '#ccc' : (todasLojasCopiadas ? '#22c55e' : '#111'), color: '#fff', border: 'none', padding: '15px', borderRadius: '10px', fontWeight: '900', fontSize: '12px', cursor: !localCompra ? 'not-allowed' : 'pointer', transition: '0.2s' }}
+                             style={{ flex: 1, background: !localCompra ? '#ccc' : (reenviar ? '#f97316' : (todasLojasCopiadas ? '#22c55e' : '#111')), color: '#fff', border: 'none', padding: '15px', borderRadius: '10px', fontWeight: '900', fontSize: '12px', cursor: !localCompra ? 'not-allowed' : 'pointer', transition: '0.2s' }}
                           >
-                             {!localCompra ? '⚠️ SELECIONE CEASA/CEILÂNDIA NO TOPO' : (todasLojasCopiadas ? '✅ GERAL ENVIADO!' : '📋 COPIAR PEDIDO GERAL')}
+                             {!localCompra ? '⚠️ SELECIONE CEASA/CEILÂNDIA NO TOPO' : (reenviar ? '🔁 REENVIAR PEDIDO GERAL' : (todasLojasCopiadas ? '✅ GERAL ENVIADO!' : '📋 COPIAR PEDIDO GERAL'))}
                           </button>
                         </div>
                       </div>
                       
+
+                     {todasLojasCopiadas && !reenviar && (
+  <>
+                        {exigePara2 && (
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', borderRadius: '10px', cursor: 'pointer', fontWeight: '900', fontSize: '12px', marginBottom: '10px', backgroundColor: para2Ok ? '#ede9fe' : '#faf5ff', color: '#5b21b6', border: '2px solid #7c3aed' }}>
+                            <input type="checkbox" checked={para2Ok} onChange={() => alternarPara2(f.nome)} style={{ width: '18px', height: '18px', accentColor: '#7c3aed' }} />
+                            👥 ENVIADO PARA {nome2 ? nome2.toUpperCase() : 'A 2ª PESSOA'}
+                          </label>
+                        )}
+                        <button
+                          onClick={() => alternarConferencia(f.nome)}
+                          disabled={exigePara2 && !para2Ok && !conferido}
+                          style={{ width: '100%', background: (exigePara2 && !para2Ok && !conferido) ? '#ccc' : (conferido ? '#dbeafe' : '#3b82f6'), color: conferido ? '#1e40af' : '#fff', border: conferido ? '1px solid #93c5fd' : 'none', padding: '14px', borderRadius: '10px', fontWeight: '900', fontSize: '12px', cursor: (exigePara2 && !para2Ok && !conferido) ? 'not-allowed' : 'pointer', marginBottom: '20px' }}
+                        >
+                          {conferido ? '🔵 CONFERIDO (clique para desfazer)' : ((exigePara2 && !para2Ok) ? '👥 MARQUE O ENVIO PARA A 2ª PESSOA' : '🔵 CONFIRMAR CONFERÊNCIA')}
+                        </button>
+                      </>
+                    )}
+
+                      {mods.removidas.length > 0 && (
+                        <div style={{ backgroundColor: '#fff7ed', border: '2px solid #f97316', padding: '12px', borderRadius: '12px', marginBottom: '15px' }}>
+                          <strong style={{ color: '#c2410c', fontSize: '12px', display: 'block', marginBottom: '5px' }}>🔁 LOJAS REMOVIDAS DESTE PEDIDO (reenvie o pedido geral):</strong>
+                          {mods.removidas.map(r => (
+                            <span key={r.nome} style={{ display: 'block', fontSize: '11px', color: '#9a3412' }}>• <b>{r.nome}</b>: {r.detalhes.join(' • ')}</span>
+                          ))}
+                        </div>
+                      )}
+
+
                       <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#111', paddingLeft: '5px' }}>📦 PEDIDOS SEPARADOS POR LOJA</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {ordenarLojas(Object.values(f.lojas)).map((loja, lIdx) => {
-                           const nomeFormatado = loja.nome.replace(/^\d+\s*-\s*/, '').trim().toUpperCase();
-                           
-                           return (
-                            <div key={lIdx} style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px dashed #e2e8f0' }}>
+                          const nomeFormatado = loja.nome.replace(/^\d+\s*-\s*/, '').trim().toUpperCase();
+                          const modLoja = mods.lojas[loja.nome];
+
+                          return (
+                            <div key={lIdx} style={{ backgroundColor: modLoja ? '#fff7ed' : '#f8fafc', padding: '15px', borderRadius: '12px', border: modLoja ? '2px solid #f97316' : '1px dashed #e2e8f0' }}>
                               <strong style={{ fontSize: '14px', color: '#111', display: 'block', marginBottom: '10px' }}>{nomeFormatado}</strong>
-                              
+
+                              {modLoja && (
+                                <div style={{ background: '#ffedd5', padding: '8px 10px', borderRadius: '8px', marginBottom: '10px' }}>
+                                  <strong style={{ color: '#c2410c', fontSize: '11px', display: 'block' }}>🔁 LOJA MODIFICADA ({modLoja.tipo})</strong>
+                                  <span style={{ fontSize: '10px', color: '#9a3412' }}>{modLoja.detalhes.join(' • ')}</span>
+                                </div>
+                              )}
+
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '10px' }}>
                                 {loja.itens.map((item, idxx) => (
                                   <div key={idxx} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1942,21 +2414,20 @@ export default function PlanilhaCompras({ usuario }) {
                                         <span style={{ fontSize: '9px', background: '#dcfce7', color: '#166534', padding: '2px 5px', borderRadius: '4px', fontWeight: 'bold' }}>🎁 +{item.qtd_bonificada}</span>
                                       )}
                                       <button onClick={() => cancelarItemUnicoDoFornecedor(item.id_pedido, item.nome)} style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold', fontSize: '10px', cursor: 'pointer' }} title="Cancelar e devolver para pendentes">✖</button>
-                                      
                                     </div>
                                   </div>
                                 ))}
                               </div>
 
-                              <button 
-                                onClick={() => copiarMensagemWhatsapp(loja.nome, loja, f.nome)} 
+                              <button
+                                onClick={() => copiarMensagemWhatsapp(loja.nome, loja, f.nome, f)}
                                 disabled={!localCompra}
-                                style={{ width: '100%', background: !localCompra ? '#ccc' : (loja.wpp_enviado ? '#dcfce7' : '#25d366'), color: !localCompra ? '#fff' : (loja.wpp_enviado ? '#166534' : '#fff'), border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: !localCompra ? 'not-allowed' : 'pointer', transition: '0.2s' }}
+                                style={{ width: '100%', background: !localCompra ? '#ccc' : (modLoja ? '#f97316' : (loja.wpp_enviado ? '#dcfce7' : '#25d366')), color: !localCompra ? '#fff' : (modLoja ? '#fff' : (loja.wpp_enviado ? '#166534' : '#fff')), border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11px', cursor: !localCompra ? 'not-allowed' : 'pointer', transition: '0.2s' }}
                               >
-                                {!localCompra ? '⚠️ SELECIONE CEASA/CEILÂNDIA' : (loja.wpp_enviado ? '✅ COPIADO PARA O WHATSAPP' : '🟢 COPIAR LISTA DA LOJA')}
+                                {!localCompra ? '⚠️ SELECIONE CEASA/CEILÂNDIA' : (modLoja ? '🔁 REENVIAR LISTA DA LOJA' : (loja.wpp_enviado ? '✅ COPIADO PARA O WHATSAPP' : '🟢 COPIAR LISTA DA LOJA'))}
                               </button>
                             </div>
-                           );
+                          );
                         })}
                       </div>
 

@@ -18,6 +18,7 @@ import ImagensProdutos from './ImagensProdutos';
 import ConfigCaixas from './ConfigCaixas'; // 💡 NOVA TELA ADICIONADA AQUI
 import PagamentosC6 from './PagamentosC6';
 import DevolucoesCreditos from './DevolucoesCreditos';
+import GestaoEnvios from './GestaoEnvios'; // 💡 NOVA SUB-ABA DE GESTÃO DE ENVIOS ADICIONADA AQUI
 
 function App() {
   const [tema, setTema] = useState(() => localStorage.getItem('temaVIRTUS') || 'claro');
@@ -251,7 +252,7 @@ function App() {
                   
                   <button onClick={() => navegarPara('pagamentos_c6')} style={s.btnNav}>💳 ARQUIVO C6 BANK</button>
 
-                  {/* 💡 MENU GESTÃO COM SUBMENU EXPANSÍVEL */}
+                  {/* 💡 MENU GESTÃO COM SUBMENU EXPANSÍVEL (Gestão de Envios Adicionada Abaixo) */}
                   <div>
                     <button 
                       onClick={() => setMenuGestaoAberto(!menuGestaoAberto)} 
@@ -270,6 +271,7 @@ function App() {
                         <button onClick={() => navegarPara('config_caixas')} style={s.btnSubNav}>📦 Setup Caixaria</button>
                         <button onClick={() => navegarPara('marketing')} style={s.btnSubNav}>🖼️ Banners e Mídias</button>
                         <button onClick={() => navegarPara('ImagensProdutos')} style={s.btnSubNav}>📸 Galeria de Imagens</button>
+                        <button onClick={() => navegarPara('gestao_envios')} style={s.btnSubNav}>📱 Gestão de Envios</button>
                       </div>
                     )}
                   </div>
@@ -345,6 +347,7 @@ function App() {
         {telaAtiva === 'fechamento' && <FechamentoLojas isEscuro={isEscuro} />}
         {telaAtiva === 'notas_fiscais' && <PainelNotasFiscais isEscuro={isEscuro} />}
         {telaAtiva === 'ImagensProdutos' && <ImagensProdutos isEscuro={isEscuro} />}
+        {telaAtiva === 'gestao_envios' && <GestaoEnvios />}
         
         {telaAtiva === 'config_caixas' && <ConfigCaixas isEscuro={isEscuro} />}
         {telaAtiva === 'pagamentos_c6' && <PagamentosC6 isEscuro={isEscuro} />}
