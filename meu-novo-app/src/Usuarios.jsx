@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
-// 🔑 CORREÇÃO: nome REAL da coluna chave da tabela "usuarios".
-// Se o Console (F12) mostrar outro nome (ex: 'ID', 'id_usuario', 'uuid'), troque só aqui.
-const CHAVE = 'id';
+// 🔑 CORREÇÃO: coluna usada para identificar cada usuário.
+// A coluna "id" existe mas está VAZIA no banco, então usamos "codigo" (código de login).
+const CHAVE = 'codigo';
 
 export default function Usuarios() {
   const design = {
@@ -99,8 +99,8 @@ export default function Usuarios() {
 
     const nomeDaLoja = lojaSelecionada['Nome Fantasia'] || lojaSelecionada.nome_fantasia || lojaSelecionada.Nome_Fantasia || 'LOJA DESCONHECIDA';
 
-    // 🔧 CORREÇÃO: usa a CHAVE para saber se é cadastro novo
-    if (dados[CHAVE] === null || dados[CHAVE] === undefined) {
+    // 🔧 CORREÇÃO: cadastro novo é identificado pelo modal aberto como "novo"
+    if (usuarioAberto?.novo) {
         const prefixo = String(idDaLoja).padStart(2, '0');
         const usuariosDaLoja = usuarios.filter(u => String(u.codigo_loja) === String(idDaLoja));
         const proximoNumero = (usuariosDaLoja.length + 1).toString().padStart(2, '0');
@@ -130,23 +130,27 @@ export default function Usuarios() {
         codigo_loja: dados.codigo_loja
     };
 
-    const temChave = dados[CHAVE] !== null && dados[CHAVE] !== undefined;
     let erro = null;
 
-    if (temChave) {
+    if (usuarioAberto?.novo) {
+        // CRIAR novo usuário (confere se o código já existe, pois ele identifica o usuário)
+        if (usuarios.some(u => String(u[CHAVE]) === String(dados[CHAVE]))) {
+          return alert("⚠️ Já existe um usuário com o código " + dados[CHAVE] + ". Escolha a loja de novo ou ajuste o código.");
+        }
+        const { error } = await supabase.from('usuarios').insert([payload]);
+        erro = error;
+    } else {
         // EDITAR usuário existente
+        const valorChave = dados[CHAVE];
+        if (valorChave === null || valorChave === undefined || valorChave === '') {
+          return alert("Erro: este usuário veio sem a coluna chave '" + CHAVE + "'. Veja o Console (F12).");
+        }
         const { data, error } = await supabase
-          .from('usuarios').update(payload).eq(CHAVE, dados[CHAVE]).select();
+          .from('usuarios').update(payload).eq(CHAVE, valorChave).select();
         erro = error;
         if (!error && (!data || data.length === 0)) {
           erro = { message: "Nenhuma linha foi alterada. Confira a chave e as permissões (RLS) no Supabase." };
         }
-    } else if (usuarioAberto?.novo) {
-        // CRIAR novo usuário
-        const { error } = await supabase.from('usuarios').insert([payload]);
-        erro = error;
-    } else {
-        return alert("Erro: este usuário veio sem a coluna chave '" + CHAVE + "'. Veja o Console (F12).");
     }
 
     if (!erro) { 
@@ -161,8 +165,8 @@ export default function Usuarios() {
   // 🔧 CORREÇÃO: usa a CHAVE, trata status nulo e avisa quando nada foi alterado
   async function alternarStatus() {
     const valorChave = dados[CHAVE];
-    if (valorChave === null || valorChave === undefined) {
-      return alert("Erro: não achei a coluna '" + CHAVE + "'. Colunas disponíveis: " + Object.keys(dados).join(", "));
+    if (valorChave === null || valorChave === undefined || valorChave === '') {
+      return alert("Erro: a coluna '" + CHAVE + "' está vazia para este usuário. Colunas disponíveis: " + Object.keys(dados).join(", "));
     }
 
     const ativoAgora = dados.status !== false;   // mesma regra que a tela usa
