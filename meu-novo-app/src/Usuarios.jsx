@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 
+// 🔑 CORREÇÃO: nome REAL da coluna chave da tabela "usuarios".
+// Se o Console (F12) mostrar outro nome (ex: 'ID', 'id_usuario', 'uuid'), troque só aqui.
+const CHAVE = 'id';
+
 export default function Usuarios() {
   const design = {
     geral: { 
@@ -56,8 +60,15 @@ export default function Usuarios() {
     codigo_loja: '' 
   });
 
+  // 🔧 CORREÇÃO: agora mostra no Console (F12) o nome real das colunas e avisa se der erro
   async function carregarDados() {
-    const { data: dataUsuarios } = await supabase.from('usuarios').select('*').order('nome', { ascending: true });
+    const { data: dataUsuarios, error } = await supabase
+      .from('usuarios').select('*').order('nome', { ascending: true });
+    if (error) { alert("Erro ao carregar usuários: " + error.message); return; }
+
+    if (dataUsuarios && dataUsuarios.length > 0) {
+      console.log("Colunas da tabela usuarios:", Object.keys(dataUsuarios[0]));
+    }
     setUsuarios(dataUsuarios || []);
 
     const { data: dataLojas } = await supabase.from('lojas').select('*');
@@ -88,7 +99,8 @@ export default function Usuarios() {
 
     const nomeDaLoja = lojaSelecionada['Nome Fantasia'] || lojaSelecionada.nome_fantasia || lojaSelecionada.Nome_Fantasia || 'LOJA DESCONHECIDA';
 
-    if (!dados.id) {
+    // 🔧 CORREÇÃO: usa a CHAVE para saber se é cadastro novo
+    if (dados[CHAVE] === null || dados[CHAVE] === undefined) {
         const prefixo = String(idDaLoja).padStart(2, '0');
         const usuariosDaLoja = usuarios.filter(u => String(u.codigo_loja) === String(idDaLoja));
         const proximoNumero = (usuariosDaLoja.length + 1).toString().padStart(2, '0');
@@ -98,6 +110,7 @@ export default function Usuarios() {
     }
   };
 
+  // 🔧 CORREÇÃO: INSERT para novo, UPDATE para existente (não usa mais upsert)
   async function salvar() {
     if (!dados.nome.trim()) return alert("⚠️ NOME é obrigatório!");
     if (!dados.codigo_loja) return alert("⚠️ SELECIONE UMA LOJA!");
@@ -117,28 +130,54 @@ export default function Usuarios() {
         codigo_loja: dados.codigo_loja
     };
 
-    if (dados.id) {
-        payload.id = dados.id;
+    const temChave = dados[CHAVE] !== null && dados[CHAVE] !== undefined;
+    let erro = null;
+
+    if (temChave) {
+        // EDITAR usuário existente
+        const { data, error } = await supabase
+          .from('usuarios').update(payload).eq(CHAVE, dados[CHAVE]).select();
+        erro = error;
+        if (!error && (!data || data.length === 0)) {
+          erro = { message: "Nenhuma linha foi alterada. Confira a chave e as permissões (RLS) no Supabase." };
+        }
+    } else if (usuarioAberto?.novo) {
+        // CRIAR novo usuário
+        const { error } = await supabase.from('usuarios').insert([payload]);
+        erro = error;
+    } else {
+        return alert("Erro: este usuário veio sem a coluna chave '" + CHAVE + "'. Veja o Console (F12).");
     }
 
-    const { error } = await supabase.from('usuarios').upsert([payload]);
-    
-    if (!error) { 
+    if (!erro) { 
       alert("✅ V.I.R.T.U.S: Cadastro atualizado com sucesso!"); 
       setUsuarioAberto(null); 
       carregarDados(); 
     } else { 
-      alert("Erro Crítico: " + error.message); 
+      alert("Erro Crítico: " + erro.message); 
     }
   }
 
+  // 🔧 CORREÇÃO: usa a CHAVE, trata status nulo e avisa quando nada foi alterado
   async function alternarStatus() {
-    if (!dados.id) return alert("Erro: ID não localizado.");
-    const novoStatus = !dados.status;
-    if (window.confirm(novoStatus ? "REATIVAR acesso?" : "BLOQUEAR acesso?")) {
-      const { error } = await supabase.from('usuarios').update({ status: novoStatus }).eq('id', dados.id);
-      if (!error) { setDados({ ...dados, status: novoStatus }); carregarDados(); }
+    const valorChave = dados[CHAVE];
+    if (valorChave === null || valorChave === undefined) {
+      return alert("Erro: não achei a coluna '" + CHAVE + "'. Colunas disponíveis: " + Object.keys(dados).join(", "));
     }
+
+    const ativoAgora = dados.status !== false;   // mesma regra que a tela usa
+    const novoStatus = !ativoAgora;
+
+    if (!window.confirm(novoStatus ? "REATIVAR acesso?" : "BLOQUEAR acesso?")) return;
+
+    const { data, error } = await supabase
+      .from('usuarios').update({ status: novoStatus }).eq(CHAVE, valorChave).select();
+
+    if (error) return alert("Erro ao alterar status: " + error.message);
+    if (!data || data.length === 0) return alert("Nada foi alterado. Provável bloqueio de permissão (RLS) no Supabase.");
+
+    setDados({ ...dados, status: novoStatus });
+    carregarDados();
   }
 
   const lojasOrdenadas = [...listaLojas].sort((a, b) => 
@@ -153,8 +192,9 @@ export default function Usuarios() {
     return matchesBusca && matchesLoja;
   });
 
+  // 🔧 CORREÇÃO: compara pela CHAVE em vez de "id"
   const usuariosFiltradosNome = dados.nome && dados.nome.length > 2 
-    ? usuarios.filter(u => u.nome?.toLowerCase().includes(dados.nome.toLowerCase()) && u.id !== dados.id) 
+    ? usuarios.filter(u => u.nome?.toLowerCase().includes(dados.nome.toLowerCase()) && u[CHAVE] !== dados[CHAVE]) 
     : [];
 
   const cssLabel = { fontSize: design.inputs.labelTamanho, fontWeight: '900', color: design.inputs.labelCor, display: 'block', marginBottom: '6px' };
@@ -223,7 +263,7 @@ export default function Usuarios() {
       {/* LISTAGEM DE USUÁRIOS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
         {usuariosExibidos.map(u => (
-          <div key={u.id || u.codigo} onClick={() => { setUsuarioAberto(u); setDados({ ...u }); setEditando(false); }} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: design.geral.raioBordaGlobal, boxShadow: design.geral.sombraPadrao, display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', opacity: u.status !== false ? 1 : 0.6 }}>
+          <div key={u[CHAVE] ?? u.codigo} onClick={() => { setUsuarioAberto(u); setDados({ ...u }); setEditando(false); }} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: design.geral.raioBordaGlobal, boxShadow: design.geral.sombraPadrao, display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', opacity: u.status !== false ? 1 : 0.6 }}>
             <div style={{ width: '50px', height: '50px', backgroundColor: '#f1f5f9', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', color: design.botoes.primario }}>{u.nome?.charAt(0)}</div>
             <div style={{ flex: 1 }}>
               <strong style={{ display: 'block', textTransform: 'uppercase', fontSize: '13px' }}>{u.nome}</strong>
@@ -257,7 +297,7 @@ export default function Usuarios() {
                     <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', backgroundColor: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', borderRadius: '12px', zIndex: 99999, maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0' }}>
                       <div style={{ padding: '10px', fontSize: '11px', color: '#f97316', fontWeight: 'bold' }}>Possível Duplicata:</div>
                       {usuariosFiltradosNome.map(u => (
-                        <div key={u.id} onClick={() => { setDados(u); setUsuarioAberto(u); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px' }}>
+                        <div key={u[CHAVE] ?? u.codigo} onClick={() => { setDados(u); setUsuarioAberto(u); setMostrarSugestoesNome(false); }} style={{ padding: '15px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '13px' }}>
                           {u.nome} ({u.loja})
                         </div>
                       ))}
