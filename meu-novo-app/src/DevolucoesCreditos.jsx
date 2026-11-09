@@ -46,6 +46,12 @@ const extrairValorNumerico = (str) => {
   return apenasDigitos ? parseFloat(apenasDigitos) / 100 : 0;
 };
 
+// Converte a data do registro (yyyy-mm-dd) para dd/mm/yyyy.
+const formatarDataBr = (data) => {
+  if (!data) return '';
+  return String(data).slice(0, 10).split('-').reverse().join('/');
+};
+
 export default function DevolucoesCreditos() {
   const obterDataLocal = () => {
     const data = new Date();
@@ -160,6 +166,12 @@ export default function DevolucoesCreditos() {
     return apenasNumeros !== '' ? parseInt(apenasNumeros, 10) : null;
   };
 
+  // Um registro é "pendência de dia anterior" quando não foi marcado como feito e foi lançado antes da data que está sendo vista.
+  const ehPendenciaAnterior = (c) => {
+    if (c.status === 'resolvido' || !c.data_registro) return false;
+    return String(c.data_registro).slice(0, 10) < dataFiltro;
+  };
+
   const carregarDados = async () => {
     try {
       setCarregando(true);
@@ -178,8 +190,18 @@ export default function DevolucoesCreditos() {
       const { data: dForn } = await supabase.from('fornecedores').select('*').order('nome_fantasia', { ascending: true });
       setFornecedoresBd(dForn || []);
 
+      // Registros da data escolhida.
       const { data: crd } = await supabase.from('perdas_creditos').select('*').eq('data_registro', dataFiltro);
-      setCreditos(crd || []);
+
+      // Pendências de dias anteriores: tudo que foi lançado antes e ainda não foi marcado como feito continua aparecendo.
+      const { data: crdAnteriores } = await supabase
+        .from('perdas_creditos')
+        .select('*')
+        .lt('data_registro', dataFiltro)
+        .or('status.is.null,status.neq.resolvido')
+        .order('data_registro', { ascending: true });
+
+      setCreditos([...(crdAnteriores || []), ...(crd || [])]);
     } catch (err) {
       console.error("Erro ao carregar dados:", err);
     } finally {
@@ -485,6 +507,8 @@ export default function DevolucoesCreditos() {
     return c.status === 'resolvido';
   });
 
+  const qtdPendenciasAnteriores = creditos.filter(ehPendenciaAnterior).length;
+
   const alertaSemPeso = novoCredito.e_kg && (!novoCredito.peso_cx_padrao || parseFloat(novoCredito.peso_cx_padrao) === 0);
 
   return (
@@ -696,6 +720,24 @@ export default function DevolucoesCreditos() {
           </button>
         </div>
       </div>
+
+      {/* AVISO DE PENDÊNCIAS DE DIAS ANTERIORES (aparece nas duas abas até serem marcadas como feitas) */}
+      {qtdPendenciasAnteriores > 0 && (
+        <div
+          onClick={() => { setAbaPrincipal('conferencia'); setAbaCreditos('pendentes'); }}
+          style={{ backgroundColor: '#fff7ed', border: '2px solid #f97316', borderRadius: '16px', padding: '14px 18px', marginBottom: '20px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px' }}
+        >
+          <span style={{ fontSize: '22px' }}>⏰</span>
+          <div style={{ flex: 1 }}>
+            <strong style={{ color: '#c2410c', fontSize: '14px', display: 'block' }}>
+              {qtdPendenciasAnteriores === 1 ? 'Você tem 1 pendência de dia anterior' : `Você tem ${qtdPendenciasAnteriores} pendências de dias anteriores`}
+            </strong>
+            <span style={{ color: '#9a3412', fontSize: '12px' }}>
+              Esses registros ainda não foram marcados como feitos e precisam ser descontados. Clique para ver.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* CONTEÚDO DA ABA 1: ADICIONAR CRÉDITO OU COBRANÇA */}
       {abaPrincipal === 'cadastro' && (
@@ -1023,7 +1065,10 @@ export default function DevolucoesCreditos() {
 
           {/* ABAS DE STATUS */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
-            <h3 style={{ margin: 0, color: '#1e293b', fontSize: '16px' }}>Registros Salvos em {dataFiltro.split('-').reverse().join('/')}</h3>
+            <h3 style={{ margin: 0, color: '#1e293b', fontSize: '16px' }}>
+              Registros Salvos em {dataFiltro.split('-').reverse().join('/')}
+              {qtdPendenciasAnteriores > 0 && <span style={{ fontSize: '12px', color: '#c2410c', fontWeight: 'bold' }}> (+ {qtdPendenciasAnteriores} pendência(s) de dias anteriores)</span>}
+            </h3>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button 
                 onClick={() => setAbaCreditos('pendentes')}
@@ -1051,6 +1096,7 @@ export default function DevolucoesCreditos() {
                   const lojaObj = lojas.find(l => String(l.codigo_loja) === String(c.loja_id));
                   const nomeLoja = lojaObj ? lojaObj.nome_fantasia : `Loja ${c.loja_id}`;
                   const resolvido = c.status === 'resolvido';
+                  const pendenciaAnterior = ehPendenciaAnterior(c);
                   const isCobranca = String(c.nome_produto || '').includes('[COBRANCA]') || String(c.nome_produto || '').includes('[COBRANÇA]');
                   const nomeProdutoLimpo = isCobranca ? c.nome_produto.replace('[COBRANCA]', '').replace('[COBRANÇA]', '').trim() : c.nome_produto;
 
@@ -1058,12 +1104,17 @@ export default function DevolucoesCreditos() {
                   const totalItemCalc = Number(c.quantidade || 0) * pUnitItem;
 
                   return (
-                    <div key={c.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', backgroundColor: resolvido ? '#f1f5f9' : (isCobranca ? '#fef2f2' : '#f8fafc'), borderRadius: '14px', border: isCobranca ? '1px solid #fca5a5' : '1px solid #e2e8f0', opacity: resolvido ? 0.7 : 1, flexWrap: 'wrap', gap: '12px' }}>
+                    <div key={c.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', backgroundColor: resolvido ? '#f1f5f9' : (pendenciaAnterior ? '#fff7ed' : (isCobranca ? '#fef2f2' : '#f8fafc')), borderRadius: '14px', border: pendenciaAnterior ? '2px solid #f97316' : (isCobranca ? '1px solid #fca5a5' : '1px solid #e2e8f0'), opacity: resolvido ? 0.7 : 1, flexWrap: 'wrap', gap: '12px' }}>
                       <div style={{ flex: 1, minWidth: '260px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
                           <span style={{ fontSize: '10px', fontWeight: '900', padding: '2px 8px', borderRadius: '6px', background: isCobranca ? '#fee2e2' : '#dcfce7', color: isCobranca ? '#991b1b' : '#166534' }}>
                             {isCobranca ? '⚠️ COBRANÇA' : '🔄 CRÉDITO'}
                           </span>
+                          {pendenciaAnterior && (
+                            <span style={{ fontSize: '10px', fontWeight: '900', padding: '2px 8px', borderRadius: '6px', background: '#f97316', color: '#fff' }}>
+                              ⏰ PENDÊNCIA DE {formatarDataBr(c.data_registro)} — ainda não foi marcado como feito
+                            </span>
+                          )}
                         </div>
 
                         <div style={{ fontSize: '16px', fontWeight: '800', color: '#0f172a', marginBottom: '4px' }}>

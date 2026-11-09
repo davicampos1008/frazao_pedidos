@@ -68,11 +68,10 @@ export default function PlanilhaCompras({ usuario }) {
   // Texto de busca ao selecionar itens para agrupar por fornecedor.
   const [buscaSelecionar, setBuscaSelecionar] = useState(''); 
 
-  // Guarda, por fornecedor, o que foi enviado por loja (foto), se o envio está completo e se foi conferido. Salvo por data.
- // Registro compartilhado de envios por fornecedor (vem do Supabase): completo, conferido, para2Ok e foto das lojas.
-const [enviosForn, setEnviosForn] = useState({});
-// Data a que pertencem os dados carregados; evita gravar dados de uma data em outra ao trocar o filtro.
-const [dataCarregada, setDataCarregada] = useState(null);
+  // Registro compartilhado de envios por fornecedor (vem dos próprios pedidos no Supabase): completo, conferido, para2Ok e foto das lojas.
+  const [enviosForn, setEnviosForn] = useState({});
+  // Data a que pertencem os dados carregados; evita gravar dados de uma data em outra ao trocar o filtro.
+  const [dataCarregada, setDataCarregada] = useState(null);
 
   // Filtro ativo no guia da aba Fornecedores: 'todos' ou uma categoria.
   const [filtroForn, setFiltroForn] = useState('todos');
@@ -246,8 +245,6 @@ const [dataCarregada, setDataCarregada] = useState(null);
     });
   }, [fornecedoresBd, enviosForn, dataCarregada, dataFiltro]);
 
-
-
   // Extrai números de códigos vindos como texto; usado para comparar loja_id/codigo_loja.
 
   const extrairNum = (valor) => {
@@ -290,222 +287,199 @@ const [dataCarregada, setDataCarregada] = useState(null);
     setTimeout(() => { setNotificacoes(prev => prev.filter(n => n.id !== id)); }, 3000);
   };
 
+  // Tira uma "foto" da loja: { NOME_DO_ITEM: quantidade }.
+  const tirarFotoLoja = (loja) => {
+    const foto = {};
+    loja.itens.forEach(i => { foto[i.nome] = (foto[i.nome] || 0) + Number(i.qtd || 0); });
+    return foto;
+  };
 
-// Tira uma "foto" da loja: { NOME_DO_ITEM: quantidade }.
-const tirarFotoLoja = (loja) => {
-  const foto = {};
-  loja.itens.forEach(i => { foto[i.nome] = (foto[i.nome] || 0) + Number(i.qtd || 0); });
-  return foto;
-};
+  // Compara o pedido atual do fornecedor com o que foi enviado e diz quais lojas mudaram.
+  const calcularModificacoes = (f) => {
+    const resultado = { lojas: {}, removidas: [] };
+    const reg = enviosForn[f.nome];
+    if (!reg || !reg.completo) return resultado;
+    const lojasSnap = reg.lojas || {};
 
-// Quando todas as lojas de um fornecedor já foram copiadas, marca o envio como completo e guarda a foto atual.
-// Edições feitas antes desse momento não geram aviso.
-useEffect(() => {
-  setEnviosForn(prev => {
-    let mudou = false;
-    const novo = { ...prev };
-    fornecedoresBd.forEach(f => {
-      const lojasArr = Object.values(f.lojas);
-      const todas = lojasArr.length > 0 && lojasArr.every(l => l.wpp_enviado);
-      if (todas && !(novo[f.nome] && novo[f.nome].completo)) {
-        const lojasSnap = {};
-        lojasArr.forEach(l => { lojasSnap[l.nome] = tirarFotoLoja(l); });
-        novo[f.nome] = { ...(novo[f.nome] || {}), completo: true, conferido: false, lojas: lojasSnap };
-        mudou = true;
+    Object.values(f.lojas).forEach(loja => {
+      const atual = tirarFotoLoja(loja);
+      const antiga = lojasSnap[loja.nome];
+      if (!antiga) {
+        resultado.lojas[loja.nome] = { tipo: 'NOVA LOJA', detalhes: Object.entries(atual).map(([n, q]) => `+${q} ${n}`) };
+        return;
+      }
+      const detalhes = [];
+      let add = false, red = false;
+      Object.keys({ ...antiga, ...atual }).sort().forEach(nome => {
+        const dif = Math.round(((atual[nome] || 0) - (antiga[nome] || 0)) * 1000) / 1000;
+        if (dif > 0) { add = true; detalhes.push(`+${dif} ${nome}`); }
+        else if (dif < 0) { red = true; detalhes.push(`${dif} ${nome}`); }
+      });
+      if (detalhes.length > 0) {
+        resultado.lojas[loja.nome] = { tipo: add && red ? 'ALTERADA' : (add ? 'ADICIONADO' : 'REDUZIDO'), detalhes };
       }
     });
-    return mudou ? novo : prev;
-  });
-}, [fornecedoresBd]);
 
-// Compara o pedido atual do fornecedor com o que foi enviado e diz quais lojas mudaram.
-const calcularModificacoes = (f) => {
-  const resultado = { lojas: {}, removidas: [] };
-  const reg = enviosForn[f.nome];
-  if (!reg || !reg.completo) return resultado;
-  const lojasSnap = reg.lojas || {};
-
-  Object.values(f.lojas).forEach(loja => {
-    const atual = tirarFotoLoja(loja);
-    const antiga = lojasSnap[loja.nome];
-    if (!antiga) {
-      resultado.lojas[loja.nome] = { tipo: 'NOVA LOJA', detalhes: Object.entries(atual).map(([n, q]) => `+${q} ${n}`) };
-      return;
-    }
-    const detalhes = [];
-    let add = false, red = false;
-    Object.keys({ ...antiga, ...atual }).sort().forEach(nome => {
-      const dif = Math.round(((atual[nome] || 0) - (antiga[nome] || 0)) * 1000) / 1000;
-      if (dif > 0) { add = true; detalhes.push(`+${dif} ${nome}`); }
-      else if (dif < 0) { red = true; detalhes.push(`${dif} ${nome}`); }
+    Object.keys(lojasSnap).forEach(nomeLoja => {
+      if (!f.lojas[nomeLoja]) {
+        resultado.removidas.push({ nome: nomeLoja, detalhes: Object.entries(lojasSnap[nomeLoja]).map(([n, q]) => `-${q} ${n}`) });
+      }
     });
-    if (detalhes.length > 0) {
-      resultado.lojas[loja.nome] = { tipo: add && red ? 'ALTERADA' : (add ? 'ADICIONADO' : 'REDUZIDO'), detalhes };
+    return resultado;
+  };
+
+  // Registra um envio no banco: marca enviado, guarda a "foto" (qtd_enviada) e limpa conferência se houve mudança.
+  const registrarEnvio = async (f, geral, nomesLojas = []) => {
+    const mods = calcularModificacoes(f);
+    const houveMod = Object.keys(mods.lojas).length > 0 || mods.removidas.length > 0;
+    const daLoja = (p) => geral || nomesLojas.includes(nomeLojaDoPedido(p));
+    const ativos = pedidosAtivosForn(f.nome);
+    const idsAtivos = new Set(ativos.map(p => p.id));
+    const promessas = [];
+
+    ativos.filter(daLoja).forEach(p => promessas.push(
+      supabase.from('pedidos').update({ wpp_enviado: true, qtd_enviada: Number(p.qtd_atendida) || 0, forn_enviado: f.nome }).eq('id', p.id)
+    ));
+
+    // Pedidos que saíram deste fornecedor: esquece o que foi enviado deles.
+    pedidosRaw.filter(p => String(p.forn_enviado || '').toUpperCase().trim() === f.nome && !idsAtivos.has(p.id) && daLoja(p))
+      .forEach(p => promessas.push(supabase.from('pedidos').update({ qtd_enviada: 0, forn_enviado: '' }).eq('id', p.id)));
+
+    if (houveMod && ativos.length > 0) {
+      promessas.push(supabase.from('pedidos').update({ conferido: false, para2_ok: false }).in('id', ativos.map(p => p.id)));
     }
-  });
 
-  Object.keys(lojasSnap).forEach(nomeLoja => {
-    if (!f.lojas[nomeLoja]) {
-      resultado.removidas.push({ nome: nomeLoja, detalhes: Object.entries(lojasSnap[nomeLoja]).map(([n, q]) => `-${q} ${n}`) });
+    await Promise.all(promessas);
+    carregarDados(true);
+  };
+
+  // Liga/desliga a conferência.
+  const alternarConferencia = (nomeForn) => {
+    const novo = !(enviosForn[nomeForn] && enviosForn[nomeForn].conferido);
+    salvarFlagsForn(nomeForn, { conferido: novo }, { conferido: novo });
+  };
+
+  // Preço curto de um item do fornecedor para o resumo do topo (ex.: R$10 ou R$7,50).
+  const precoCurtoResumo = (f, nomeItem) => {
+    for (const loja of Object.values(f.lojas)) {
+      const it = loja.itens.find(i => i.nome === nomeItem);
+      if (it) {
+        if (it.isBoleto) return 'BOL';
+        const n = tratarPrecoNum(it.valor_unit);
+        if (!n) return '';
+        return `R$${n % 1 === 0 ? n : n.toFixed(2).replace('.', ',')}`;
+      }
     }
-  });
-  return resultado;
-};
+    return '';
+  }; 
 
-// Registra um envio: de uma ou mais lojas, ou do pedido geral (que atualiza todas).
-// Registra um envio no banco: marca enviado, guarda a "foto" (qtd_enviada) e limpa conferência se houve mudança.
-const registrarEnvio = async (f, geral, nomesLojas = []) => {
-  const mods = calcularModificacoes(f);
-  const houveMod = Object.keys(mods.lojas).length > 0 || mods.removidas.length > 0;
-  const daLoja = (p) => geral || nomesLojas.includes(nomeLojaDoPedido(p));
-  const ativos = pedidosAtivosForn(f.nome);
-  const idsAtivos = new Set(ativos.map(p => p.id));
-  const promessas = [];
+  // Diz se o fornecedor (cadastro oficial) exige envio para 2 pessoas (coluna enviar_para_2).
+  const fornecedorEnviaPara2 = (f) => {
+    const oficial = fornecedoresOficiais.find(o =>
+      String(o.nome_fantasia || '').toUpperCase().trim() === f.nome ||
+      String(o.nome_completo || '').toUpperCase().trim() === f.nome
+    );
+    return !!oficial && (oficial.enviar_para_2 === true || String(oficial.enviar_para_2).toLowerCase() === 'true');
+  };
 
-  ativos.filter(daLoja).forEach(p => promessas.push(
-    supabase.from('pedidos').update({ wpp_enviado: true, qtd_enviada: Number(p.qtd_atendida) || 0, forn_enviado: f.nome }).eq('id', p.id)
-  ));
+  // Nome da pessoa do segundo envio (coluna segundo_envio do cadastro do fornecedor).
+  const nomeSegundoEnvio = (f) => {
+    const oficial = fornecedoresOficiais.find(o =>
+      String(o.nome_fantasia || '').toUpperCase().trim() === f.nome ||
+      String(o.nome_completo || '').toUpperCase().trim() === f.nome
+    );
+    return oficial && oficial.segundo_envio ? String(oficial.segundo_envio).trim() : '';
+  };
 
-  // Pedidos que saíram deste fornecedor: esquece o que foi enviado deles.
-  pedidosRaw.filter(p => String(p.forn_enviado || '').toUpperCase().trim() === f.nome && !idsAtivos.has(p.id) && daLoja(p))
-    .forEach(p => promessas.push(supabase.from('pedidos').update({ qtd_enviada: 0, forn_enviado: '' }).eq('id', p.id)));
+  // Marca/desmarca "enviado para a 2ª pessoa". Desmarcar também desfaz a conferência.
+  const alternarPara2 = (nomeForn) => {
+    const novoOk = !(enviosForn[nomeForn] && enviosForn[nomeForn].para2Ok);
+    salvarFlagsForn(
+      nomeForn,
+      novoOk ? { para2_ok: true } : { para2_ok: false, conferido: false },
+      novoOk ? { para2Ok: true } : { para2Ok: false, conferido: false }
+    );
+  };
 
-  if (houveMod && ativos.length > 0) {
-    promessas.push(supabase.from('pedidos').update({ conferido: false, para2_ok: false }).in('id', ativos.map(p => p.id)));
-  }
+  // Situação de envio/conferência de um fornecedor (usada no resumo final).
+  const statusEnvioForn = (f) => {
+    const lojasArr = Object.values(f.lojas);
+    const todas = lojasArr.length > 0 && lojasArr.every(l => l.wpp_enviado);
+    const mods = calcularModificacoes(f);
+    const reenviar = Object.keys(mods.lojas).length > 0 || mods.removidas.length > 0;
+    const enviado = todas && !reenviar;
+    const conferido = enviado && !!(enviosForn[f.nome] && enviosForn[f.nome].conferido);
+    return { enviado, conferido };
+  };
 
-  await Promise.all(promessas);
-  carregarDados(true);
-};
-// Liga/desliga a conferência.
-const alternarConferencia = (nomeForn) => {
-  const novo = !(enviosForn[nomeForn] && enviosForn[nomeForn].conferido);
-  salvarFlagsForn(nomeForn, { conferido: novo }, { conferido: novo });
-};
+  // Monta o resumo da conferência concluída e copia para a área de transferência.
+  const gerarResumoConferencia = () => {
+    const hora = new Date().getHours();
+    const saudacao = hora < 12 ? 'Bom dia' : (hora < 18 ? 'Boa tarde' : 'Boa noite');
 
+    const ativos = fornecedoresBd.filter(f => Object.keys(f.lojas).length > 0 || calcularModificacoes(f).removidas.length > 0);
+    const todosEnviados = ativos.length > 0 && ativos.every(f => statusEnvioForn(f).enviado);
+    const todosConferidos = ativos.length > 0 && ativos.every(f => statusEnvioForn(f).conferido);
+    // Conferido implica enviado.
+    const marcaEnviados = todosEnviados || todosConferidos;
 
-// Preço curto de um item do fornecedor para o resumo do topo (ex.: R$10 ou R$7,50).
-const precoCurtoResumo = (f, nomeItem) => {
-  for (const loja of Object.values(f.lojas)) {
-    const it = loja.itens.find(i => i.nome === nomeItem);
-    if (it) {
-      if (it.isBoleto) return 'BOL';
-      const n = tratarPrecoNum(it.valor_unit);
-      if (!n) return '';
-      return `R$${n % 1 === 0 ? n : n.toFixed(2).replace('.', ',')}`;
+    const paraDois = ativos.filter(f => fornecedorEnviaPara2(f));
+
+    let msg = `${saudacao},\n\n`;
+    msg += `*Pedidos Enviados:* ${marcaEnviados ? '✅' : '❌'}\n`;
+    msg += `*Pedidos Conferidos:* ${todosConferidos ? '✅' : '❌'}\n\n`;
+    msg += `*Lista de fornecedores enviados para 2*\n\n`;
+
+    if (paraDois.length === 0) {
+      msg += `Nenhum fornecedor hoje`;
+    } else {
+      paraDois.forEach(f => {
+        const n2 = nomeSegundoEnvio(f);
+        const envio2Ok = !!(enviosForn[f.nome] && enviosForn[f.nome].para2Ok);
+        msg += `${f.nome}${n2 ? '/' + n2 : ''}: ${envio2Ok ? '✅' : '❌'}\n`;
+      });
     }
-  }
-  return '';
-}; 
 
-// Diz se o fornecedor (cadastro oficial) exige envio para 2 pessoas (coluna enviar_para_2).
-const fornecedorEnviaPara2 = (f) => {
-  const oficial = fornecedoresOficiais.find(o =>
-    String(o.nome_fantasia || '').toUpperCase().trim() === f.nome ||
-    String(o.nome_completo || '').toUpperCase().trim() === f.nome
-  );
-  return !!oficial && (oficial.enviar_para_2 === true || String(oficial.enviar_para_2).toLowerCase() === 'true');
-};
+    navigator.clipboard.writeText(msg.trim());
+    mostrarNotificacao('✅ Resumo da conferência copiado!', 'sucesso');
+  };
 
-// Nome da pessoa do segundo envio (coluna segundo_envio do cadastro do fornecedor).
-const nomeSegundoEnvio = (f) => {
-  const oficial = fornecedoresOficiais.find(o =>
-    String(o.nome_fantasia || '').toUpperCase().trim() === f.nome ||
-    String(o.nome_completo || '').toUpperCase().trim() === f.nome
-  );
-  return oficial && oficial.segundo_envio ? String(oficial.segundo_envio).trim() : '';
-};
+  // Classifica o fornecedor na mesma ordem de prioridade das bordas: reenviar > alerta > conferido > enviado > não enviado.
+  const categoriaForn = (f) => {
+    const lojasArr = Object.values(f.lojas);
+    const todasCopiadas = lojasArr.length > 0 && lojasArr.every(l => l.wpp_enviado);
+    const mods = calcularModificacoes(f);
+    const reenviar = Object.keys(mods.lojas).length > 0 || mods.removidas.length > 0;
+    const conferido = !!(enviosForn[f.nome] && enviosForn[f.nome].conferido) && todasCopiadas && !reenviar;
+    if (reenviar) return 'reenviar';
+    if (f.precisaRefazer) return 'alerta';
+    if (conferido) return 'conferido';
+    if (todasCopiadas) return 'enviado';
+    return 'nao_enviado';
+  };
 
-// Marca/desmarca "enviado para a 2ª pessoa". Desmarcar também desfaz a conferência.
-const alternarPara2 = (nomeForn) => {
-  const novoOk = !(enviosForn[nomeForn] && enviosForn[nomeForn].para2Ok);
-  salvarFlagsForn(
-    nomeForn,
-    novoOk ? { para2_ok: true } : { para2_ok: false, conferido: false },
-    novoOk ? { para2Ok: true } : { para2Ok: false, conferido: false }
-  );
-};
+  // Fornecedor que exige envio para 2 pessoas e ainda não foi marcado.
+  const pendentePara2 = (f) => fornecedorEnviaPara2(f) && !(enviosForn[f.nome] && enviosForn[f.nome].para2Ok);
 
+  // Define as abas do guia, na ordem de exibição.
+  const ABAS_FORN = [
+    { id: 'nao_enviado', label: '⚪ Não enviados', cor: '#64748b', fundo: '#f1f5f9' },
+    { id: 'reenviar', label: '🔁 Reenviar', cor: '#ea580c', fundo: '#ffedd5' },
+    { id: 'alerta', label: '⚠️ Alerta', cor: '#ef4444', fundo: '#fef2f2' },
+    { id: 'para2', label: '👥 Enviar p/ 2', cor: '#7c3aed', fundo: '#ede9fe' },
+    { id: 'enviado', label: '✅ Enviados', cor: '#16a34a', fundo: '#dcfce7' },
+    { id: 'conferido', label: '🔵 Conferidos', cor: '#1d4ed8', fundo: '#dbeafe' },
+  ];
 
-// Situação de envio/conferência de um fornecedor (usada no resumo final).
-const statusEnvioForn = (f) => {
-  const lojasArr = Object.values(f.lojas);
-  const todas = lojasArr.length > 0 && lojasArr.every(l => l.wpp_enviado);
-  const mods = calcularModificacoes(f);
-  const reenviar = Object.keys(mods.lojas).length > 0 || mods.removidas.length > 0;
-  const enviado = todas && !reenviar;
-  const conferido = enviado && !!(enviosForn[f.nome] && enviosForn[f.nome].conferido);
-  return { enviado, conferido };
-};
+  // Confere se o fornecedor pertence a uma aba.
+  const pertenceAba = (f, abaId) => abaId === 'todos' || (abaId === 'para2' ? pendentePara2(f) : categoriaForn(f) === abaId);
 
-// Monta o resumo da conferência concluída e copia para a área de transferência.
-const gerarResumoConferencia = () => {
-  const hora = new Date().getHours();
-  const saudacao = hora < 12 ? 'Bom dia' : (hora < 18 ? 'Boa tarde' : 'Boa noite');
-
-  const ativos = fornecedoresBd.filter(f => Object.keys(f.lojas).length > 0);
-  const todosEnviados = ativos.length > 0 && ativos.every(f => statusEnvioForn(f).enviado);
-  const todosConferidos = ativos.length > 0 && ativos.every(f => statusEnvioForn(f).conferido);
-  // Conferido implica enviado.
-  const marcaEnviados = todosEnviados || todosConferidos;
-
-  const paraDois = ativos.filter(f => fornecedorEnviaPara2(f));
-
-  let msg = `${saudacao},\n\n`;
-  msg += `*Pedidos Enviados:* ${marcaEnviados ? '✅' : '❌'}\n`;
-  msg += `*Pedidos Conferidos:* ${todosConferidos ? '✅' : '❌'}\n\n`;
-  msg += `*Lista de fornecedores enviados para 2*\n\n`;
-
-  if (paraDois.length === 0) {
-    msg += `Nenhum fornecedor hoje`;
-  } else {
-    paraDois.forEach(f => {
-      const n2 = nomeSegundoEnvio(f);
-      const envio2Ok = !!(enviosForn[f.nome] && enviosForn[f.nome].para2Ok);
-      msg += `${f.nome}${n2 ? '/' + n2 : ''}: ${envio2Ok ? '✅' : '❌'}\n`;
-    });
-  }
-
-  navigator.clipboard.writeText(msg.trim());
-  mostrarNotificacao('✅ Resumo da conferência copiado!', 'sucesso');
-};
-
-// Classifica o fornecedor na mesma ordem de prioridade das bordas: reenviar > alerta > conferido > enviado > não enviado.
-const categoriaForn = (f) => {
-  const lojasArr = Object.values(f.lojas);
-  const todasCopiadas = lojasArr.length > 0 && lojasArr.every(l => l.wpp_enviado);
-  const mods = calcularModificacoes(f);
-  const reenviar = Object.keys(mods.lojas).length > 0 || mods.removidas.length > 0;
-  const conferido = !!(enviosForn[f.nome] && enviosForn[f.nome].conferido) && todasCopiadas && !reenviar;
-  if (reenviar) return 'reenviar';
-  if (f.precisaRefazer) return 'alerta';
-  if (conferido) return 'conferido';
-  if (todasCopiadas) return 'enviado';
-  return 'nao_enviado';
-};
-
-// Fornecedor que exige envio para 2 pessoas e ainda não foi marcado.
-const pendentePara2 = (f) => fornecedorEnviaPara2(f) && !(enviosForn[f.nome] && enviosForn[f.nome].para2Ok);
-
-// Define as abas do guia, na ordem de exibição.
-const ABAS_FORN = [
-  { id: 'nao_enviado', label: '⚪ Não enviados', cor: '#64748b', fundo: '#f1f5f9' },
-  { id: 'reenviar', label: '🔁 Reenviar', cor: '#ea580c', fundo: '#ffedd5' },
-  { id: 'alerta', label: '⚠️ Alerta', cor: '#ef4444', fundo: '#fef2f2' },
-  { id: 'para2', label: '👥 Enviar p/ 2', cor: '#7c3aed', fundo: '#ede9fe' },
-  { id: 'enviado', label: '✅ Enviados', cor: '#16a34a', fundo: '#dcfce7' },
-  { id: 'conferido', label: '🔵 Conferidos', cor: '#1d4ed8', fundo: '#dbeafe' },
-];
-
-// Confere se o fornecedor pertence a uma aba.
-const pertenceAba = (f, abaId) => abaId === 'todos' || (abaId === 'para2' ? pendentePara2(f) : categoriaForn(f) === abaId);
-
-// Se a aba escolhida ficar vazia (ex.: tudo foi reenviado), volta para "Todos".
-useEffect(() => {
-  if (filtroForn !== 'todos' && !fornecedoresBd.some(f => pertenceAba(f, filtroForn))) {
-    setFiltroForn('todos');
-  }
-}, [fornecedoresBd, enviosForn, fornecedoresOficiais, filtroForn]);
+  // Se a aba escolhida ficar vazia (ex.: tudo foi reenviado), volta para "Todos".
+  useEffect(() => {
+    if (filtroForn !== 'todos' && !fornecedoresBd.some(f => pertenceAba(f, filtroForn))) {
+      setFiltroForn('todos');
+    }
+  }, [fornecedoresBd, enviosForn, fornecedoresOficiais, filtroForn]);
 
   // Confere se o fornecedor existe; se não existir, pede confirmação antes de lançar.
 
@@ -787,7 +761,7 @@ useEffect(() => {
       
       const { data: pedData } = await supabase.from('pedidos').select('*').eq('data_pedido', dataFiltro);
       setPedidosRaw(pedData || []);
-
+      
       const mapaPendentes = {};
       const mapaFeitos = {};
       const mapaGeralItens = {}; 
@@ -966,11 +940,6 @@ useEffect(() => {
 
       setDemandas(arrayPendentes);
       setPedidosFeitos(Object.values(mapaFeitos).sort((a, b) => a.nome.localeCompare(b.nome)));
-      
-      const fornProcessados = Object.values(mapaForn).map(f => {
-         f.precisaRefazer = f.alertas && f.alertas.length > 0;
-         return f;
-      }).sort((a, b) => a.nome.localeCompare(b.nome));
 
       // Lê os estados de envio diretamente da tabela pedidos, para compartilhar os dados entre usuários.
       // A foto enviada é reconstruída com forn_enviado e qtd_enviada, inclusive quando o pedido foi desfeito.
@@ -1021,6 +990,18 @@ useEffect(() => {
         delete r._p;
       });
 
+      // Se TODOS os itens de um fornecedor já enviado foram removidos, ele continua na lista (laranja) até o reenvio.
+      Object.entries(mapaEnvios).forEach(([nomeF, r]) => {
+        if (r.completo && Object.keys(r.lojas).length > 0 && !mapaForn[nomeF]) {
+          mapaForn[nomeF] = { nome: nomeF, chavePix: '', totalPix: 0, totalBoleto: 0, totalBruto: 0, totalDescontoBonif: 0, qtdBonificadaGeral: 0, totalGeral: 0, lojas: {}, alertas: [], resumo: {} };
+        }
+      });
+
+      const fornProcessados = Object.values(mapaForn).map(f => {
+         f.precisaRefazer = f.alertas && f.alertas.length > 0;
+         return f;
+      }).sort((a, b) => a.nome.localeCompare(b.nome));
+
       setEnviosForn(mapaEnvios);
       setDataCarregada(dataFiltro);
       setFornecedoresBd(fornProcessados);
@@ -1044,35 +1025,34 @@ useEffect(() => {
     mostrarNotificacao('🔄 Lista atualizada com os dados mais recentes!', 'sucesso');
   };
 
+  // Nome da loja de um pedido (mesma regra usada na tela).
+  const nomeLojaDoPedido = (p) => {
+    const idL = extrairNum(p.loja_id);
+    const l = lojasBd.find(x => extrairNum(x.codigo_loja) === idL);
+    return l ? l.nome_fantasia : `Loja ${idL}`;
+  };
+
+  // Pedidos ativos (comprados) de um fornecedor.
+  const pedidosAtivosForn = (nomeForn) => pedidosRaw.filter(p =>
+    (p.status_compra === 'atendido' || p.status_compra === 'boleto') &&
+    !p.apenas_cobranca && p.bloqueado !== true &&
+    String(p.fornecedor_compra || '').toUpperCase().replace('ALERTA|', '').trim() === nomeForn
+  );
+
+  // Grava flags (conferido, para2_ok) em todos os pedidos do fornecedor, como o wpp_enviado.
+  const salvarFlagsForn = async (nomeForn, campos, regLocal) => {
+    setEnviosForn(prev => ({ ...prev, [nomeForn]: { ...(prev[nomeForn] || {}), ...regLocal } }));
+    const ids = pedidosAtivosForn(nomeForn).map(p => p.id);
+    if (ids.length === 0) return;
+    const { error } = await supabase.from('pedidos').update(campos).in('id', ids);
+    if (error) {
+      console.error('Erro ao salvar:', error);
+      mostrarNotificacao('❌ Não foi possível salvar. Verifique o SQL das colunas novas.', 'alerta');
+    }
+    carregarDados(true);
+  };
+
   // Zera compras, boletos e faltas do dia e devolve tudo para pendentes.
-
-// Nome da loja de um pedido (mesma regra usada na tela).
-// Nome da loja de um pedido (mesma regra usada na tela).
-const nomeLojaDoPedido = (p) => {
-  const idL = extrairNum(p.loja_id);
-  const l = lojasBd.find(x => extrairNum(x.codigo_loja) === idL);
-  return l ? l.nome_fantasia : `Loja ${idL}`;
-};
-
-// Pedidos ativos (comprados) de um fornecedor.
-const pedidosAtivosForn = (nomeForn) => pedidosRaw.filter(p =>
-  (p.status_compra === 'atendido' || p.status_compra === 'boleto') &&
-  !p.apenas_cobranca && p.bloqueado !== true &&
-  String(p.fornecedor_compra || '').toUpperCase().replace('ALERTA|', '').trim() === nomeForn
-);
-
-// Grava flags (conferido, para2_ok) em todos os pedidos do fornecedor, como o wpp_enviado.
-const salvarFlagsForn = async (nomeForn, campos, regLocal) => {
-  setEnviosForn(prev => ({ ...prev, [nomeForn]: { ...(prev[nomeForn] || {}), ...regLocal } }));
-  const ids = pedidosAtivosForn(nomeForn).map(p => p.id);
-  if (ids.length === 0) return;
-  const { error } = await supabase.from('pedidos').update(campos).in('id', ids);
-  if (error) {
-    console.error('Erro ao salvar:', error);
-    mostrarNotificacao('❌ Não foi possível salvar. Verifique o SQL das colunas novas.', 'alerta');
-  }
-  carregarDados(true);
-};
 
   const resetarPedidosDoDia = async () => {
     if (!window.confirm(`🚨 ATENÇÃO: Isso vai ZERAR todos os pedidos, boletos e faltas da data ${dataBr}.\n\nTudo voltará para a aba de PENDENTES.\n\nDeseja realmente recomeçar?`)) return;
@@ -1345,9 +1325,8 @@ const salvarFlagsForn = async (nomeForn, campos, regLocal) => {
      return limparNomeParaWhatsapp(formatarNomeItem(itemName));
   };
 
-  // Monta e copia o pedido geral do fornecedor para WhatsApp, incluindo totais.
-
-
+  // Monta e copia o pedido geral do fornecedor para WhatsApp.
+  // "ENVIAR TOTAL?" desmarcado: formato antigo (loja titular, itens com preço, placa e total), sem a linha de Qtd Lojas.
   // "ENVIAR TOTAL?" marcado: formato *TOTAL*, com valores ou, se "SEM TOTAL" marcado, só quantidades.
   const gerarPedidoGeral = async (f) => {
     if (!localCompra) return alert("⚠️ Selecione CEASA ou CEILÂNDIA no topo da tela antes de copiar os pedidos!");
@@ -2175,22 +2154,22 @@ const salvarFlagsForn = async (nomeForn, campos, regLocal) => {
           </button>
 
           {fornecedoresBd.length > 0 && (
-  <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '5px' }}>
-    <button onClick={() => setFiltroForn('todos')} style={{ flexShrink: 0, padding: '8px 12px', borderRadius: '10px', border: filtroForn === 'todos' ? '2px solid #111' : '1px solid #cbd5e1', background: filtroForn === 'todos' ? '#111' : '#fff', color: filtroForn === 'todos' ? '#fff' : '#334155', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
-      Todos ({fornecedoresBd.length})
-    </button>
-    {ABAS_FORN.map(aba => {
-      const qtd = fornecedoresBd.filter(f => pertenceAba(f, aba.id)).length;
-      if (qtd === 0) return null;
-      const ativa = filtroForn === aba.id;
-      return (
-        <button key={aba.id} onClick={() => setFiltroForn(ativa ? 'todos' : aba.id)} style={{ flexShrink: 0, padding: '8px 12px', borderRadius: '10px', border: `2px solid ${aba.cor}`, background: ativa ? aba.cor : aba.fundo, color: ativa ? '#fff' : aba.cor, fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
-          {aba.label} ({qtd})
-        </button>
-      );
-    })}
-  </div>
-)}
+            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '5px' }}>
+              <button onClick={() => setFiltroForn('todos')} style={{ flexShrink: 0, padding: '8px 12px', borderRadius: '10px', border: filtroForn === 'todos' ? '2px solid #111' : '1px solid #cbd5e1', background: filtroForn === 'todos' ? '#111' : '#fff', color: filtroForn === 'todos' ? '#fff' : '#334155', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
+                Todos ({fornecedoresBd.length})
+              </button>
+              {ABAS_FORN.map(aba => {
+                const qtd = fornecedoresBd.filter(f => pertenceAba(f, aba.id)).length;
+                if (qtd === 0) return null;
+                const ativa = filtroForn === aba.id;
+                return (
+                  <button key={aba.id} onClick={() => setFiltroForn(ativa ? 'todos' : aba.id)} style={{ flexShrink: 0, padding: '8px 12px', borderRadius: '10px', border: `2px solid ${aba.cor}`, background: ativa ? aba.cor : aba.fundo, color: ativa ? '#fff' : aba.cor, fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>
+                    {aba.label} ({qtd})
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {fornecedoresBd.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '20px' }}>Nenhum fornecedor acionado.</div>
@@ -2312,6 +2291,13 @@ const salvarFlagsForn = async (nomeForn, campos, regLocal) => {
                         ⚙️ Nomes Personalizados para o WhatsApp
                       </button>
 
+                      {Object.keys(f.lojas).length === 0 && reenviar && (
+                        <button onClick={async () => { await registrarEnvio(f, true); mostrarNotificacao('✅ Remoção informada ao fornecedor!', 'sucesso'); }} style={{ width: '100%', background: '#f97316', color: '#fff', border: 'none', padding: '15px', borderRadius: '10px', fontWeight: '900', fontSize: '12px', cursor: 'pointer', marginBottom: '20px' }}>
+                          ✅ AVISEI O FORNECEDOR (TODOS OS ITENS FORAM REMOVIDOS)
+                        </button>
+                      )}
+
+                      {Object.keys(f.lojas).length > 0 && (
                       <div style={{ backgroundColor: '#f1f5f9', padding: '15px', borderRadius: '12px', marginBottom: '20px' }}>
                         <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#111' }}>🛍️ PEDIDO GERAL DA BANCA</h4>
                         
@@ -2356,25 +2342,25 @@ const salvarFlagsForn = async (nomeForn, campos, regLocal) => {
                           </button>
                         </div>
                       </div>
-                      
+                      )}
 
-                     {todasLojasCopiadas && !reenviar && (
-  <>
-                        {exigePara2 && (
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', borderRadius: '10px', cursor: 'pointer', fontWeight: '900', fontSize: '12px', marginBottom: '10px', backgroundColor: para2Ok ? '#ede9fe' : '#faf5ff', color: '#5b21b6', border: '2px solid #7c3aed' }}>
-                            <input type="checkbox" checked={para2Ok} onChange={() => alternarPara2(f.nome)} style={{ width: '18px', height: '18px', accentColor: '#7c3aed' }} />
-                            👥 ENVIADO PARA {nome2 ? nome2.toUpperCase() : 'A 2ª PESSOA'}
-                          </label>
-                        )}
-                        <button
-                          onClick={() => alternarConferencia(f.nome)}
-                          disabled={exigePara2 && !para2Ok && !conferido}
-                          style={{ width: '100%', background: (exigePara2 && !para2Ok && !conferido) ? '#ccc' : (conferido ? '#dbeafe' : '#3b82f6'), color: conferido ? '#1e40af' : '#fff', border: conferido ? '1px solid #93c5fd' : 'none', padding: '14px', borderRadius: '10px', fontWeight: '900', fontSize: '12px', cursor: (exigePara2 && !para2Ok && !conferido) ? 'not-allowed' : 'pointer', marginBottom: '20px' }}
-                        >
-                          {conferido ? '🔵 CONFERIDO (clique para desfazer)' : ((exigePara2 && !para2Ok) ? '👥 MARQUE O ENVIO PARA A 2ª PESSOA' : '🔵 CONFIRMAR CONFERÊNCIA')}
-                        </button>
-                      </>
-                    )}
+                      {todasLojasCopiadas && !reenviar && (
+                        <>
+                          {exigePara2 && (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', borderRadius: '10px', cursor: 'pointer', fontWeight: '900', fontSize: '12px', marginBottom: '10px', backgroundColor: para2Ok ? '#ede9fe' : '#faf5ff', color: '#5b21b6', border: '2px solid #7c3aed' }}>
+                              <input type="checkbox" checked={para2Ok} onChange={() => alternarPara2(f.nome)} style={{ width: '18px', height: '18px', accentColor: '#7c3aed' }} />
+                              👥 ENVIADO PARA {nome2 ? nome2.toUpperCase() : 'A 2ª PESSOA'}
+                            </label>
+                          )}
+                          <button
+                            onClick={() => alternarConferencia(f.nome)}
+                            disabled={exigePara2 && !para2Ok && !conferido}
+                            style={{ width: '100%', background: (exigePara2 && !para2Ok && !conferido) ? '#ccc' : (conferido ? '#dbeafe' : '#3b82f6'), color: conferido ? '#1e40af' : '#fff', border: conferido ? '1px solid #93c5fd' : 'none', padding: '14px', borderRadius: '10px', fontWeight: '900', fontSize: '12px', cursor: (exigePara2 && !para2Ok && !conferido) ? 'not-allowed' : 'pointer', marginBottom: '20px' }}
+                          >
+                            {conferido ? '🔵 CONFERIDO (clique para desfazer)' : ((exigePara2 && !para2Ok) ? '👥 MARQUE O ENVIO PARA A 2ª PESSOA' : '🔵 CONFIRMAR CONFERÊNCIA')}
+                          </button>
+                        </>
+                      )}
 
                       {mods.removidas.length > 0 && (
                         <div style={{ backgroundColor: '#fff7ed', border: '2px solid #f97316', padding: '12px', borderRadius: '12px', marginBottom: '15px' }}>
@@ -2384,7 +2370,6 @@ const salvarFlagsForn = async (nomeForn, campos, regLocal) => {
                           ))}
                         </div>
                       )}
-
 
                       <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#111', paddingLeft: '5px' }}>📦 PEDIDOS SEPARADOS POR LOJA</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
