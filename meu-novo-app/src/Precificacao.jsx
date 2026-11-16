@@ -36,7 +36,7 @@ const MenuHorizontal = ({ children, style }) => {
 // ============================================================================
 // COMPONENTE: LINHA DO PRODUTO
 // ============================================================================
-const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBorda, fornecedoresBd }) => {
+const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBorda, fornecedoresBd, modoSelecao, selecionado, aoSelecionar }) => {
   const [preco, setPreco] = useState(produto.preco && produto.preco !== 'R$ 0,00' ? produto.preco.replace('R$ ', '') : '');
   const [pesoCaixa, setPesoCaixa] = useState(produto.peso_caixa || '');
   const [fornecedor, setFornecedor] = useState(produto.fornecedor_nome || '');
@@ -159,9 +159,10 @@ const LinhaProduto = React.memo(({ produto, index, abrirModal, aoSalvar, corBord
   };
 
   return (
-    <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '12px 15px', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', borderLeft: `5px solid ${corBorda}` }}>
-      <div onClick={() => abrirModal(produto)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+    <div style={{ backgroundColor: selecionado ? '#f5f3ff' : '#fff', borderRadius: '12px', padding: '12px 15px', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', borderLeft: `5px solid ${corBorda}`, outline: selecionado ? '2px solid #8b5cf6' : 'none' }}>
+      <div onClick={() => (modoSelecao ? aoSelecionar(produto.id) : abrirModal(produto))} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '80%' }}>
+          {modoSelecao && <input type="checkbox" checked={!!selecionado} readOnly style={{ width: '20px', height: '20px', accentColor: '#8b5cf6', pointerEvents: 'none', flexShrink: 0 }} />}
           <div style={{ width: '35px', height: '35px', borderRadius: '6px', backgroundImage: `url(${(produto.foto_url || '').split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#f1f5f9' }} />
           <div style={{ overflow: 'hidden' }}>
             <strong style={{ display: 'block', fontSize: '14px', color: '#111', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{produto.nome}</strong>
@@ -298,6 +299,9 @@ export default function Precificacao() {
   const categoriasPossiveis = ['TODOS', 'Frutas', 'Verduras & Fungos', 'Legumes', 'Raízes, Tubérculos & Grãos', 'Bandejados', 'Avulsos', 'Folhagens', 'Caixaria', 'BRADISBA', 'POTY COCOS', 'MEGA', 'Outros'];
   const [categoriaFiltro, setCategoriaFiltro] = useState('TODOS');
 
+  // Na aba PROMOÇÃO: quando ligado, mostra só os produtos já marcados como promoção.
+  const [somenteMarcados, setSomenteMarcados] = useState(false);
+
   const [modalAberto, setModalAberto] = useState(false);
   const [prodModal, setProdModal] = useState(null);
   
@@ -311,6 +315,28 @@ export default function Precificacao() {
     data_teste: '' 
   });
   const [testeAtivo, setTesteAtivo] = useState(false);
+
+  // Salvando do modal: mostra só o botão "SALVANDO..." sem esconder a página inteira.
+  const [salvandoModal, setSalvandoModal] = useState(false);
+
+  // Seleção em lote (abas PENDENTES e PRONTOS).
+  const [modoSelecao, setModoSelecao] = useState(false);
+  const [selecionados, setSelecionados] = useState([]);
+
+  // Última ação em massa, guardada por 30 segundos para poder desfazer.
+  const [desfazer, setDesfazer] = useState(null);
+  const desfazerTimerRef = useRef(null);
+
+  // Ao trocar de aba, sai do modo de seleção.
+  useEffect(() => {
+    setModoSelecao(false);
+    setSelecionados([]);
+  }, [abaAtiva]);
+
+  // Limpa o temporizador do "desfazer" ao sair da tela.
+  useEffect(() => {
+    return () => { if (desfazerTimerRef.current) clearTimeout(desfazerTimerRef.current); };
+  }, []);
 
   useEffect(() => { 
     carregarDados(); 
@@ -404,7 +430,8 @@ export default function Precificacao() {
     prontos: produtos.filter(p => p.status_cotacao === 'ativo' && !isZerado(p.preco)),
     mantidos: produtos.filter(p => p.status_cotacao === 'mantido'),
     sem_preco: produtos.filter(p => p.status_cotacao === 'sem_preco'),
-    falta: produtos.filter(p => p.status_cotacao === 'falta')
+    falta: produtos.filter(p => p.status_cotacao === 'falta'),
+    promocao: produtos.filter(p => p.promocao)
   };
 
   const qtdPendentes = listas.pendentes.length;
@@ -446,6 +473,15 @@ export default function Precificacao() {
     if (!window.confirm("🚨 TEM CERTEZA?\nIsso vai apagar os preços atuais, promoções e novidades, mas manterá as FOTOS. Todos os itens irão para Pendentes.")) return;
     
     setCarregando(true);
+
+    // Guarda o estado atual para poder desfazer.
+    const snapshotAntes = produtos.map(p => ({ id: p.id, status_cotacao: p.status_cotacao, preco: p.preco, promocao: !!p.promocao, novidade: !!p.novidade }));
+    let liberadosAntes = null;
+    try {
+      const { data: cfgAntes } = await supabase.from('configuracoes').select('precos_liberados').eq('id', 1).single();
+      if (cfgAntes) liberadosAntes = cfgAntes.precos_liberados;
+    } catch (e) { console.error(e); }
+
     await supabase.from('configuracoes').update({ precos_liberados: false }).eq('id', 1);
 
     const payloadGeral = produtos.map(p => {
@@ -475,7 +511,8 @@ export default function Precificacao() {
     }
 
     if (!deuErro) {
-      alert("✅ Cotação Zerada! A Loja foi fechada para os clientes (Preços Ocultos) e todos os itens foram para Pendentes."); 
+      alert("✅ Cotação Zerada! A Loja foi fechada para os clientes (Preços Ocultos) e todos os itens foram para Pendentes.\n\nSe foi sem querer, use o botão DESFAZER que aparece na parte de baixo da tela."); 
+      registrarDesfazer({ texto: 'Cotação zerada.', snapshot: snapshotAntes, precosLiberados: liberadosAntes });
       carregarDados(); 
       setAbaAtiva('pendentes');
     } else {
@@ -498,6 +535,150 @@ export default function Precificacao() {
 
   const handleAtualizarLista = (id, payload) => {
     setProdutos(prev => prev.map(p => p.id === id ? { ...p, ...payload } : p));
+  };
+
+  // 🔥 Marca ou desmarca um produto como promoção direto da aba PROMOÇÃO (salva na hora).
+  const alternarPromocao = async (produto) => {
+    const novoValor = !produto.promocao;
+    handleAtualizarLista(produto.id, { promocao: novoValor });
+
+    const { error } = await supabase.from('produtos').update({ promocao: novoValor }).eq('id', produto.id);
+    if (error) {
+      handleAtualizarLista(produto.id, { promocao: !novoValor });
+      alert("Erro ao salvar a promoção: " + error.message);
+    }
+  };
+
+  // 🧹 Remove a promoção de todos os produtos marcados.
+  const limparPromocoes = async () => {
+    const idsMarcados = produtos.filter(p => p.promocao).map(p => p.id);
+    if (idsMarcados.length === 0) return;
+    if (!window.confirm(`Remover a promoção de ${idsMarcados.length} produto(s)?`)) return;
+
+    setProdutos(prev => prev.map(p => p.promocao ? { ...p, promocao: false } : p));
+    const { error } = await supabase.from('produtos').update({ promocao: false }).in('id', idsMarcados);
+    if (error) {
+      alert("Erro ao limpar promoções: " + error.message);
+      carregarDados(true);
+    } else {
+      registrarDesfazer({ texto: `Promoção removida de ${idsMarcados.length} produto(s).`, snapshot: idsMarcados.map(id => ({ id, promocao: true })) });
+    }
+  };
+
+  // ↩ Guarda a última ação em massa por 30 segundos para poder desfazer.
+  const registrarDesfazer = (info) => {
+    if (desfazerTimerRef.current) clearTimeout(desfazerTimerRef.current);
+    setDesfazer(info);
+    desfazerTimerRef.current = setTimeout(() => setDesfazer(null), 30000);
+  };
+
+  const fecharDesfazer = () => {
+    if (desfazerTimerRef.current) clearTimeout(desfazerTimerRef.current);
+    setDesfazer(null);
+  };
+
+  // Restaura os valores que os produtos tinham antes da última ação em massa.
+  const executarDesfazer = async () => {
+    if (!desfazer) return;
+    const info = desfazer;
+    fecharDesfazer();
+
+    const mapa = {};
+    info.snapshot.forEach(item => { mapa[item.id] = item; });
+    setProdutos(prev => prev.map(p => (mapa[p.id] ? { ...p, ...mapa[p.id] } : p)));
+
+    let deuErro = false;
+    for (let i = 0; i < info.snapshot.length; i += 25) {
+      const lote = info.snapshot.slice(i, i + 25);
+      const resultados = await Promise.all(lote.map(({ id, ...campos }) => supabase.from('produtos').update(campos).eq('id', id)));
+      if (resultados.some(r => r.error)) deuErro = true;
+    }
+
+    if (info.precosLiberados !== undefined && info.precosLiberados !== null) {
+      await supabase.from('configuracoes').update({ precos_liberados: info.precosLiberados }).eq('id', 1);
+    }
+
+    if (deuErro) alert("Alguns itens não puderam ser restaurados. Atualize a página e confira.");
+    carregarDados(true);
+  };
+
+  // ☑️ Marca ou desmarca um produto na seleção em lote.
+  const alternarSelecao = (id) => {
+    setSelecionados(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  };
+
+  // ⚡ Aplica uma ação em todos os produtos selecionados.
+  const aplicarEmLote = async (acao) => {
+    const alvos = produtos.filter(p => selecionados.includes(p.id));
+    if (alvos.length === 0) return;
+
+    const nomesAcao = { mantido: '🔒 MANTER', sem_preco: '⏸️ S/ PREÇO', falta: '🚫 FALTA', promo_on: '🔥 marcar como PROMOÇÃO', promo_off: 'tirar da PROMOÇÃO' };
+    if (!window.confirm(`Aplicar "${nomesAcao[acao]}" em ${alvos.length} produto(s)?`)) return;
+
+    const atualizacoes = [];
+    let ignorados = 0;
+
+    alvos.forEach(p => {
+      if (acao === 'mantido') {
+        const anterior = p.preco_anterior && !isZerado(p.preco_anterior) ? p.preco_anterior : null;
+        if (!anterior) { ignorados++; return; }
+        atualizacoes.push({ id: p.id, campos: { status_cotacao: 'mantido', preco: anterior, preco_anterior: anterior } });
+      } else if (acao === 'sem_preco' || acao === 'falta') {
+        atualizacoes.push({ id: p.id, campos: { status_cotacao: acao, preco: 'R$ 0,00' } });
+      } else {
+        atualizacoes.push({ id: p.id, campos: { promocao: acao === 'promo_on' } });
+      }
+    });
+
+    if (atualizacoes.length === 0) {
+      alert("Nenhum dos produtos selecionados tem preço anterior para manter.");
+      return;
+    }
+
+    const mapa = {};
+    atualizacoes.forEach(a => { mapa[a.id] = a.campos; });
+
+    // Guarda o estado atual só dos produtos que serão alterados.
+    const snapshot = alvos.filter(p => mapa[p.id]).map(p => ({
+      id: p.id,
+      status_cotacao: p.status_cotacao,
+      preco: p.preco,
+      preco_anterior: p.preco_anterior === undefined ? null : p.preco_anterior,
+      promocao: !!p.promocao
+    }));
+
+    setProdutos(prev => prev.map(p => (mapa[p.id] ? { ...p, ...mapa[p.id] } : p)));
+
+    let deuErro = false;
+    if (acao === 'mantido') {
+      for (let i = 0; i < atualizacoes.length; i += 25) {
+        const lote = atualizacoes.slice(i, i + 25);
+        const resultados = await Promise.all(lote.map(a => supabase.from('produtos').update(a.campos).eq('id', a.id)));
+        if (resultados.some(r => r.error)) deuErro = true;
+      }
+    } else {
+      const ids = atualizacoes.map(a => a.id);
+      for (let i = 0; i < ids.length; i += 100) {
+        const { error } = await supabase.from('produtos').update(atualizacoes[0].campos).in('id', ids.slice(i, i + 100));
+        if (error) deuErro = true;
+      }
+    }
+
+    if (deuErro) {
+      alert("Erro ao aplicar a ação em alguns produtos. Os dados foram recarregados, confira a lista.");
+      carregarDados(true);
+      return;
+    }
+
+    registrarDesfazer({ texto: `${nomesAcao[acao]} aplicado em ${atualizacoes.length} produto(s).`, snapshot });
+    setModoSelecao(false);
+    setSelecionados([]);
+
+    if (ignorados > 0) alert(`${ignorados} produto(s) ficaram de fora porque não têm preço anterior para manter.`);
+    if (acao === 'promo_on') {
+      const semFoto = alvos.filter(p => !(p.foto_url && String(p.foto_url).split(',').some(f => f.trim()))).length;
+      if (semFoto > 0) alert(`Atenção: ${semFoto} produto(s) em promoção estão sem foto.`);
+    }
   };
 
   const abrirEdicaoCompleta = (produto) => {
@@ -576,6 +757,7 @@ export default function Precificacao() {
   };
 
   const salvarModal = async () => {
+    if (salvandoModal) return;
     let v = String(formModal.preco || '').replace(/\./g, ',').replace(/[^\d,]/g, '').trim();
     let precoFinal = 'R$ 0,00';
     if (v) {
@@ -621,7 +803,7 @@ export default function Precificacao() {
       payload.preco_anterior = payload.preco;
     }
 
-    setCarregando(true);
+    setSalvandoModal(true);
     const { error } = await supabase.from('produtos').update(payload).eq('id', prodModal.id);
     
     if (error) {
@@ -630,7 +812,7 @@ export default function Precificacao() {
       handleAtualizarLista(prodModal.id, payload);
     }
     
-    setCarregando(false);
+    setSalvandoModal(false);
     setModalAberto(false);
   };
 
@@ -643,15 +825,20 @@ export default function Precificacao() {
     { id: 'mantidos', nomeStr: 'MANTIDOS', cor: '#eab308', icone: '🔒', itens: listas.mantidos },
     { id: 'sem_preco', nomeStr: 'S/ PREÇO', cor: '#f97316', icone: '⏸️', itens: listas.sem_preco },
     { id: 'falta', nomeStr: 'FALTA', cor: '#ef4444', icone: '🚫', itens: listas.falta },
+    { id: 'promocao', nomeStr: 'PROMOÇÃO', cor: '#ec4899', icone: '🔥', itens: listas.promocao },
   ];
 
-  const listaDaAbaAtual = listas[abaAtiva] || [];
+  // Na aba PROMOÇÃO a lista base são TODOS os produtos, para poder pesquisar e marcar qualquer um.
+  const listaDaAbaAtual = abaAtiva === 'promocao' ? produtos : (listas[abaAtiva] || []);
+  const abaPermiteSelecao = abaAtiva === 'pendentes' || abaAtiva === 'prontos';
   
   const produtosRenderizados = listaDaAbaAtual.filter(p => {
       const termoBusca = normalizarParaBusca(busca);
       const nomeProduto = normalizarParaBusca(p.nome);
       
       const bateuBusca = nomeProduto.includes(termoBusca);
+
+      if (abaAtiva === 'promocao' && somenteMarcados && !p.promocao) return false;
       
       if (categoriaFiltro === 'TODOS') return bateuBusca;
       return bateuBusca && (p.categoria === categoriaFiltro);
@@ -768,23 +955,152 @@ export default function Precificacao() {
         <span>🔍</span><input placeholder="Buscar item..." value={busca} onChange={e => setBusca(e.target.value)} style={{ border: 'none', background: 'transparent', width: '100%', outline: 'none', fontSize: '14px' }} />
       </div>
 
-      {/* 📝 LISTA RENDERIZADA */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {produtosRenderizados.map((p, index) => (
-           <LinhaProduto 
-             key={p.id} 
-             index={index}
-             produto={p} 
-             corBorda={CONFIG_ABAS.find(a => a.id === p.status_cotacao)?.cor || '#3b82f6'}
-             abrirModal={abrirEdicaoCompleta} 
-             aoSalvar={handleAtualizarLista}
-             fornecedoresBd={fornecedoresBd} 
-           />
-        ))}
-        {produtosRenderizados.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '16px' }}>Nenhum item atende aos filtros atuais.</div>
-        )}
-      </div>
+      {/* 🔥 ABA PROMOÇÃO: lista todos os produtos para marcar/desmarcar o destaque, já mostrando o preço */}
+      {abaAtiva === 'promocao' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+
+          <div style={{ backgroundColor: '#fdf2f8', border: '1px solid #fbcfe8', borderRadius: '12px', padding: '12px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <div>
+              <strong style={{ fontSize: '14px', color: '#be185d', display: 'block' }}>🔥 {listas.promocao.length} produto(s) em promoção</strong>
+              <span style={{ fontSize: '11px', color: '#9d174d' }}>Clique no produto para marcar ou desmarcar. Salva na hora.</span>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => setSomenteMarcados(!somenteMarcados)}
+                style={{ padding: '8px 12px', borderRadius: '8px', border: somenteMarcados ? '2px solid #ec4899' : '1px solid #f9a8d4', background: somenteMarcados ? '#ec4899' : '#fff', color: somenteMarcados ? '#fff' : '#be185d', fontWeight: '900', fontSize: '10px', cursor: 'pointer' }}
+              >
+                {somenteMarcados ? '👁️ MOSTRANDO SÓ MARCADOS' : '👁️ VER SÓ MARCADOS'}
+              </button>
+              <button
+                onClick={limparPromocoes}
+                disabled={listas.promocao.length === 0}
+                style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #fecaca', background: '#fef2f2', color: '#ef4444', fontWeight: '900', fontSize: '10px', cursor: listas.promocao.length === 0 ? 'not-allowed' : 'pointer', opacity: listas.promocao.length === 0 ? 0.5 : 1 }}
+              >
+                🧹 LIMPAR TODAS
+              </button>
+            </div>
+          </div>
+
+          {produtosRenderizados.map(p => {
+            const marcado = !!p.promocao;
+            const semPreco = isZerado(p.preco);
+            const temFoto = !!(p.foto_url && String(p.foto_url).split(',').filter(f => f.trim()).length > 0);
+            const mostrarAnterior = p.preco_anterior && !isZerado(p.preco_anterior) && p.preco_anterior !== p.preco;
+
+            return (
+              <div
+                key={p.id}
+                onClick={() => alternarPromocao(p)}
+                style={{ backgroundColor: marcado ? '#fef9c3' : '#fff', borderRadius: '12px', padding: '12px 15px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', border: marcado ? '2px solid #f59e0b' : '2px solid transparent', transition: '0.15s' }}
+              >
+                <input type="checkbox" checked={marcado} readOnly style={{ width: '20px', height: '20px', accentColor: '#ec4899', pointerEvents: 'none', flexShrink: 0 }} />
+
+                <div style={{ width: '40px', height: '40px', borderRadius: '8px', backgroundImage: `url(${(p.foto_url || '').split(',')[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#f1f5f9', flexShrink: 0 }} />
+
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <strong style={{ display: 'block', fontSize: '14px', color: '#111', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.nome}</strong>
+                  <div style={{ display: 'flex', gap: '5px', marginTop: '3px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '9px', background: '#f1f5f9', color: '#64748b', padding: '2px 4px', borderRadius: '4px', fontWeight: 'bold' }}>{p.unidade_medida || 'UN'}</span>
+                    {p.categoria && <span style={{ fontSize: '9px', background: '#e2e8f0', color: '#475569', padding: '2px 4px', borderRadius: '4px', fontWeight: 'bold' }}>{p.categoria}</span>}
+                    {p.status_cotacao === 'falta' && <span style={{ fontSize: '9px', background: '#fef2f2', color: '#ef4444', padding: '2px 4px', borderRadius: '4px', fontWeight: 'bold' }}>🚫 Falta</span>}
+                    {marcado && !temFoto && <span style={{ fontSize: '9px', background: '#fff7ed', color: '#ea580c', padding: '2px 4px', borderRadius: '4px', fontWeight: '900' }}>📷 SEM FOTO</span>}
+                  </div>
+                </div>
+
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  {semPreco ? (
+                    <span style={{ fontSize: '11px', fontWeight: '900', color: '#ef4444', background: '#fef2f2', padding: '4px 8px', borderRadius: '6px' }}>SEM PREÇO</span>
+                  ) : (
+                    <strong style={{ fontSize: '16px', color: '#16a34a' }}>{p.preco}</strong>
+                  )}
+                  {mostrarAnterior && (
+                    <span style={{ display: 'block', fontSize: '10px', color: '#94a3b8', textDecoration: 'line-through', marginTop: '2px' }}>{p.preco_anterior}</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {produtosRenderizados.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '16px' }}>Nenhum item atende aos filtros atuais.</div>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* ☑️ BARRA DE SELEÇÃO EM LOTE (PENDENTES e PRONTOS) */}
+          {abaPermiteSelecao && (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '12px' }}>
+              <button
+                onClick={() => { setModoSelecao(!modoSelecao); setSelecionados([]); }}
+                style={{ padding: '10px 14px', borderRadius: '10px', border: modoSelecao ? '2px solid #8b5cf6' : '1px solid #cbd5e1', background: modoSelecao ? '#8b5cf6' : '#fff', color: modoSelecao ? '#fff' : '#475569', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}
+              >
+                {modoSelecao ? '✖ SAIR DA SELEÇÃO' : '☑️ SELECIONAR VÁRIOS'}
+              </button>
+              {modoSelecao && (
+                <>
+                  <button
+                    onClick={() => setSelecionados(prev => Array.from(new Set([...prev, ...produtosRenderizados.map(p => p.id)])))}
+                    style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid #c4b5fd', background: '#f5f3ff', color: '#6d28d9', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}
+                  >
+                    ☑️ TODOS OS FILTRADOS ({produtosRenderizados.length})
+                  </button>
+                  <button
+                    onClick={() => setSelecionados([])}
+                    style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}
+                  >
+                    LIMPAR
+                  </button>
+                  <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#6d28d9' }}>{selecionados.length} selecionado(s)</span>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* 📝 LISTA RENDERIZADA */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {produtosRenderizados.map((p, index) => (
+               <LinhaProduto 
+                 key={p.id} 
+                 index={index}
+                 produto={p} 
+                 corBorda={CONFIG_ABAS.find(a => a.id === p.status_cotacao)?.cor || '#3b82f6'}
+                 abrirModal={abrirEdicaoCompleta} 
+                 aoSalvar={handleAtualizarLista}
+                 modoSelecao={modoSelecao}
+                 selecionado={selecionados.includes(p.id)}
+                 aoSelecionar={alternarSelecao}
+                 fornecedoresBd={fornecedoresBd} 
+               />
+            ))}
+            {produtosRenderizados.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#999', backgroundColor: '#fff', borderRadius: '16px' }}>Nenhum item atende aos filtros atuais.</div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ⚡ BARRA DE AÇÕES DA SELEÇÃO EM LOTE */}
+      {modoSelecao && abaPermiteSelecao && selecionados.length > 0 && (
+        <div style={{ position: 'fixed', bottom: 0, left: 0, width: '100%', backgroundColor: '#fff', padding: '14px 16px', boxShadow: '0 -10px 30px rgba(0,0,0,0.12)', zIndex: 9000, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <strong style={{ fontSize: '13px', color: '#6d28d9' }}>{selecionados.length} produto(s) selecionado(s)</strong>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            <button onClick={() => aplicarEmLote('mantido')} style={{ flex: 1, minWidth: '90px', padding: '12px 8px', background: '#fefce8', color: '#ca8a04', border: '1px solid #fef08a', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>🔒 MANTER</button>
+            <button onClick={() => aplicarEmLote('sem_preco')} style={{ flex: 1, minWidth: '90px', padding: '12px 8px', background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>⏸️ S/ PREÇO</button>
+            <button onClick={() => aplicarEmLote('falta')} style={{ flex: 1, minWidth: '90px', padding: '12px 8px', background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>🚫 FALTA</button>
+            <button onClick={() => aplicarEmLote('promo_on')} style={{ flex: 1, minWidth: '90px', padding: '12px 8px', background: '#fdf2f8', color: '#be185d', border: '1px solid #fbcfe8', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>🔥 PROMOÇÃO</button>
+            <button onClick={() => aplicarEmLote('promo_off')} style={{ flex: 1, minWidth: '90px', padding: '12px 8px', background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', borderRadius: '10px', fontWeight: '900', fontSize: '11px', cursor: 'pointer' }}>❌ TIRAR PROMO</button>
+          </div>
+        </div>
+      )}
+
+      {/* ↩ AVISO PARA DESFAZER A ÚLTIMA AÇÃO EM MASSA */}
+      {desfazer && (
+        <div style={{ position: 'fixed', bottom: modoSelecao && selecionados.length > 0 ? '130px' : '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 9500, backgroundColor: '#111', color: '#fff', padding: '12px 16px', borderRadius: '14px', boxShadow: '0 10px 30px rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '92%', boxSizing: 'border-box' }}>
+          <span style={{ fontSize: '12px', fontWeight: 'bold' }}>{desfazer.texto}</span>
+          <button onClick={executarDesfazer} style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: '900', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}>↩ DESFAZER</button>
+          <button onClick={fecharDesfazer} style={{ background: 'transparent', color: '#94a3b8', border: 'none', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}>✕</button>
+        </div>
+      )}
 
       {/* 🛠️ MODAL DE EDIÇÃO COMPLETA */}
       {modalAberto && prodModal && (
@@ -914,8 +1230,8 @@ export default function Precificacao() {
               ))}
             </MenuHorizontal>
 
-            <button onClick={salvarModal} style={{ width: '100%', padding: '20px', backgroundColor: '#111', color: 'white', border: 'none', borderRadius: '16px', fontWeight: '900', fontSize: '16px', marginTop: '10px', cursor: 'pointer' }}>
-              💾 SALVAR E FECHAR
+            <button onClick={salvarModal} disabled={salvandoModal} style={{ width: '100%', padding: '20px', opacity: salvandoModal ? 0.6 : 1, backgroundColor: '#111', color: 'white', border: 'none', borderRadius: '16px', fontWeight: '900', fontSize: '16px', marginTop: '10px', cursor: 'pointer' }}>
+              {salvandoModal ? '⏳ SALVANDO...' : '💾 SALVAR E FECHAR'}
             </button>
           </div>
         </div>
