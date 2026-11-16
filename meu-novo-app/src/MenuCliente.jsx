@@ -68,7 +68,18 @@ export default function MenuCliente({ usuario, tema }) {
   const [modoVisualizacao, setModoVisualizacao] = useState(false); 
   const [itemEditandoId, setItemEditandoId] = useState(null);
 
+  // Quantidade que o cliente está digitando no carrinho (só é gravada ao confirmar com OK).
+  const [qtdRascunho, setQtdRascunho] = useState('');
+
   const [textoCopiado, setTextoCopiado] = useState(false); 
+
+  // Aviso da LISTA PADRÃO ao enviar: lista completa dos itens que ficaram de fora.
+  const [modalListaPadraoAberto, setModalListaPadraoAberto] = useState(false);
+  const [itensPadraoFaltando, setItensPadraoFaltando] = useState([]);
+  const [listaFaltandoCopiada, setListaFaltandoCopiada] = useState(false);
+
+  // Avisos de mudança de preço (aparecem no topo quando um item do carrinho ou aberto na tela muda de preço).
+  const [avisosPreco, setAvisosPreco] = useState([]);
 
   const [navState, setNavState] = useState({ show: true, shrink: false });
   const ultimoScroll = useRef(0);
@@ -100,6 +111,20 @@ export default function MenuCliente({ usuario, tema }) {
   const produtosCarregadosRef = useRef(false);
   const dataUltimoCarregamento = useRef(0);
   const enviandoRef = useRef(false);
+
+  // Sempre guarda a lista de produtos mais recente (usado pela atualização automática).
+  const produtosRef = useRef([]);
+  useEffect(() => { produtosRef.current = produtos; }, [produtos]);
+
+  // IDs dos itens do carrinho e do produto aberto na tela (usados para avisar mudança de preço).
+  const carrinhoIdsRef = useRef([]);
+  useEffect(() => { carrinhoIdsRef.current = carrinho.map(i => i.id); }, [carrinho]);
+  const produtoAbertoIdRef = useRef(null);
+  useEffect(() => { produtoAbertoIdRef.current = produtoExpandido ? produtoExpandido.id : null; }, [produtoExpandido]);
+
+  // Enquanto o cliente edita a quantidade no carrinho, a sincronização automática fica em pausa.
+  const editandoCarrinhoRef = useRef(false);
+  useEffect(() => { editandoCarrinhoRef.current = itemEditandoId !== null; }, [itemEditandoId]);
 
   useEffect(() => {
     document.body.style.backgroundColor = configDesign.cores.fundoGeral;
@@ -242,29 +267,78 @@ export default function MenuCliente({ usuario, tema }) {
     return `${qFinal} ${u}S`;
   };
 
-  const carregarDados = useCallback(async (silencioso = false) => {
+  // 💲 Mostra no topo da tela que o preço de um item mudou.
+  const avisarMudancaPreco = (nome, de, para) => {
+    const id = Date.now() + Math.random();
+    setAvisosPreco(prev => [...prev, { id, nome, de, para }].slice(-3));
+    setTimeout(() => setAvisosPreco(prev => prev.filter(a => a.id !== id)), 10000);
+  };
+
+  const carregarDados = useCallback(async (silencioso = false, forcar = false) => {
     if (enviandoRef.current) return;
 
     const agora = Date.now();
-    if (agora - dataUltimoCarregamento.current < 2000) return;
+    if (!forcar && agora - dataUltimoCarregamento.current < 2000) return;
     
     dataUltimoCarregamento.current = agora;
 
     try {
       // 💡 ATUALIZAÇÃO SILENCIOSA (POLLING LEVE DE 5 EM 5 SEGUNDOS)
+      // Traz preços, status, promoções, loja aberta/fechada e produtos novos sem o cliente precisar atualizar a página.
       if (silencioso) {
-        const { data: pUpdates } = await supabase.from('produtos').select('id, preco, status_cotacao, promocao, novidade');
+        const [respProdutos, respConfig] = await Promise.all([
+          supabase.from('produtos').select('id, preco, status_cotacao, promocao, novidade, peso_caixa, unidade_medida, foto_url, lista_padrao').eq('status', true),
+          supabase.from('configuracoes').select('precos_liberados').eq('id', 1).single()
+        ]);
+
+        if (respConfig && respConfig.data) setPrecosLiberados(respConfig.data.precos_liberados);
+
+        const pUpdates = respProdutos ? respProdutos.data : null;
         if (pUpdates) {
-           setProdutos(prevProdutos => {
-               const mapUpdates = new Map(pUpdates.map(u => [u.id, u]));
-               return prevProdutos.map(p => {
-                   const upd = mapUpdates.get(p.id);
-                   if (upd) {
-                       return { ...p, preco: upd.preco, status_cotacao: upd.status_cotacao, promocao: upd.promocao, novidade: upd.novidade };
-                   }
-                   return p;
-               });
-           });
+          // Avisa o cliente quando muda o preço de um item que está no carrinho ou aberto na tela.
+          const lojaAberta = respConfig && respConfig.data ? respConfig.data.precos_liberados : true;
+          if (lojaAberta) {
+            const mapaAntigos = new Map(produtosRef.current.map(p => [p.id, p]));
+            const idsMonitorados = new Set([...carrinhoIdsRef.current, produtoAbertoIdRef.current].filter(Boolean));
+            pUpdates.forEach(upd => {
+              const antigo = mapaAntigos.get(upd.id);
+              if (!antigo || !idsMonitorados.has(upd.id)) return;
+              if (antigo.preco === upd.preco && antigo.peso_caixa === upd.peso_caixa) return;
+              const textoAntigo = tratarInfosDeVenda(antigo).textoPreco;
+              const textoNovo = tratarInfosDeVenda({ ...antigo, preco: upd.preco, peso_caixa: upd.peso_caixa }).textoPreco;
+              if (textoAntigo !== textoNovo) avisarMudancaPreco(antigo.nome, textoAntigo, textoNovo);
+            });
+          }
+
+          // Se entrou ou saiu algum produto, recarrega a lista completa.
+          const idsAtuais = new Set(produtosRef.current.map(p => p.id));
+          const mudouLista = produtosRef.current.length !== pUpdates.length || pUpdates.some(u => !idsAtuais.has(u.id));
+
+          if (mudouLista) {
+            const { data: pCompleto } = await supabase.from('produtos').select('*').eq('status', true).order('nome', { ascending: true });
+            if (pCompleto) setProdutos(pCompleto);
+          } else {
+            setProdutos(prevProdutos => {
+                const mapUpdates = new Map(pUpdates.map(u => [u.id, u]));
+                return prevProdutos.map(p => {
+                    const upd = mapUpdates.get(p.id);
+                    if (upd) {
+                        return {
+                          ...p,
+                          preco: upd.preco,
+                          status_cotacao: upd.status_cotacao,
+                          promocao: upd.promocao,
+                          novidade: upd.novidade,
+                          peso_caixa: upd.peso_caixa,
+                          unidade_medida: upd.unidade_medida,
+                          foto_url: upd.foto_url,
+                          lista_padrao: upd.lista_padrao
+                        };
+                    }
+                    return p;
+                });
+            });
+          }
         }
         return; // Encerra aqui na atualização silenciosa para não recarregar banners e loja
       }
@@ -281,7 +355,7 @@ export default function MenuCliente({ usuario, tema }) {
           setBanners({ topo: bMap.topo || '', logo: bMap.logo || '', tematico: bMap.tematico || '' });
         }
         
-        const { data: pData } = await supabase.from('produtos').select('*').order('nome', { ascending: true });
+        const { data: pData } = await supabase.from('produtos').select('*').eq('status', true).order('nome', { ascending: true });
         if (pData) {
           setProdutos(pData);
           produtosCarregadosRef.current = true;
@@ -327,30 +401,103 @@ export default function MenuCliente({ usuario, tema }) {
       syncCarrinhoNuvem(); 
   }, [carregarDados, syncCarrinhoNuvem]);
   
-  // 💡 ATUALIZAÇÃO SILENCIOSA: A cada 5 segundos
+  // 💡 ATUALIZAÇÃO SILENCIOSA: A cada 5 segundos (e na hora em que o cliente volta para o app)
   useEffect(() => {
     const radar = setInterval(() => {
-        carregarDados(true);
-    }, 5000);
-    return () => clearInterval(radar);
+        if (!document.hidden) carregarDados(true);
+    }, 10000);
+
+    const aoVoltarParaApp = () => {
+        if (!document.hidden) carregarDados(true);
+    };
+    document.addEventListener('visibilitychange', aoVoltarParaApp);
+
+    return () => {
+        clearInterval(radar);
+        document.removeEventListener('visibilitychange', aoVoltarParaApp);
+    };
   }, [carregarDados]);
 
   useEffect(() => {
      const intervaloSync = setInterval(() => {
+         // Em pausa enquanto o cliente digita a quantidade no carrinho, para os números não pularem.
+         if (editandoCarrinhoRef.current) return;
          syncCarrinhoNuvem();
-     }, 1000);
+     }, 3000);
      return () => clearInterval(intervaloSync);
   }, [syncCarrinhoNuvem]);
 
-  const carrinhoSeguro = carrinho.filter(i => i && typeof i === 'object' && i.id && i.nome);
+  // ⚡ TEMPO REAL: o Supabase avisa na hora quando preço, loja aberta/fechada ou carrinho mudam.
+  // As consultas periódicas acima continuam como segurança caso o tempo real esteja desligado.
+  useEffect(() => {
+    let tProdutos = null;
+    let tCarrinho = null;
+    let canal = null;
+
+    const agendarProdutos = () => {
+      clearTimeout(tProdutos);
+      tProdutos = setTimeout(() => carregarDados(true, true), 700);
+    };
+    const agendarCarrinho = () => {
+      clearTimeout(tCarrinho);
+      tCarrinho = setTimeout(() => { if (!editandoCarrinhoRef.current) syncCarrinhoNuvem(); }, 300);
+    };
+
+    try {
+      canal = supabase
+        .channel(`menu-cliente-${codLoja || 'geral'}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'produtos' }, agendarProdutos)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'configuracoes' }, agendarProdutos);
+
+      if (codLoja) {
+        canal = canal.on('postgres_changes', { event: '*', schema: 'public', table: 'carrinho_nuvem', filter: `loja_id=eq.${codLoja}` }, agendarCarrinho);
+      }
+
+      canal.subscribe();
+    } catch (e) { console.error("Tempo real indisponível:", e); }
+
+    return () => {
+      clearTimeout(tProdutos);
+      clearTimeout(tCarrinho);
+      if (canal) { try { supabase.removeChannel(canal); } catch (e) {} }
+    };
+  }, [carregarDados, syncCarrinhoNuvem, codLoja]);
+
+  // Carrinho com os preços sempre atualizados conforme a tabela de preços do momento.
+  const mapaProdutosPorId = new Map(produtos.map(p => [p.id, p]));
+  const carrinhoSeguro = carrinho
+    .filter(i => i && typeof i === 'object' && i.id && i.nome)
+    .map(item => {
+      const prodAtual = mapaProdutosPorId.get(item.id);
+      if (!prodAtual) return item;
+      const infosAtuais = tratarInfosDeVenda(prodAtual);
+      const bonif = Number(item.qtd_bonificada) || 0;
+      const cobrada = Math.max(0, (Number(item.quantidade) || 0) - bonif);
+      return { ...item, valorUnit: infosAtuais.precoBase, total: infosAtuais.precoBase * cobrada };
+    });
   const valorTotalCarrinho = carrinhoSeguro.reduce((acc, item) => acc + (Number(item.total) || 0), 0);
   const edicaoLiberadaBD = listaEnviadaHoje?.some(item => item.liberado_edicao === true);
   
   const isAppTravado = !precosLiberados || (listaEnviadaHoje && !edicaoLiberadaBD);
 
+  // Identificadores desta loja (código, nome da loja, login) para comparar com a lista padrão.
+  const normalizarIdLoja = (v) => {
+    const texto = removerAcentos(String(v === undefined || v === null ? '' : v)).toLowerCase().trim();
+    return /^\d+$/.test(texto) ? String(parseInt(texto, 10)) : texto;
+  };
+  const idsDestaLoja = [codLoja, usuario?.loja, nomeLojaLimpo, usuario?.nome]
+    .filter(v => v !== undefined && v !== null && v !== '' && !(typeof v === 'number' && isNaN(v)))
+    .map(normalizarIdLoja);
+  const itemDaListaEhDestaLoja = (item) => idsDestaLoja.includes(normalizarIdLoja(item));
+  const listaPadraoPorLoja = produtos.some(p => Array.isArray(p.lista_padrao) && p.lista_padrao.some(itemDaListaEhDestaLoja));
+
   const verificarSePadrao = (valorPadrao) => {
     if (valorPadrao === true || valorPadrao === 'true') return true;
-    if (Array.isArray(valorPadrao) && valorPadrao.length > 0) return true;
+    if (Array.isArray(valorPadrao) && valorPadrao.length > 0) {
+      // Formato desconhecido (nenhum produto cita esta loja): mantém o comportamento antigo.
+      if (!listaPadraoPorLoja) return true;
+      return valorPadrao.some(itemDaListaEhDestaLoja);
+    }
     return false;
   };
 
@@ -362,14 +509,17 @@ export default function MenuCliente({ usuario, tema }) {
     setTemBonificacao(!!itemExistente?.qtd_bonificada && itemExistente.qtd_bonificada > 0);
   };
   
+  // 💡 Aceita só números (sem setas, sem roda do mouse, sem letras), no máximo 9999.
   const tratarInputQuantidade = (valorDigitado) => {
-    const val = parseInt(valorDigitado, 10);
-    setQuantidade(isNaN(val) || val < 1 ? '' : val);
+    const somenteNumeros = String(valorDigitado).replace(/\D/g, '');
+    const val = parseInt(somenteNumeros, 10);
+    setQuantidade(isNaN(val) || val < 1 ? '' : Math.min(val, 9999));
   };
 
   const tratarInputBonificacao = (valorDigitado) => {
-    const val = parseInt(valorDigitado, 10);
-    setQtdBonificada(isNaN(val) || val < 0 ? 0 : val);
+    const somenteNumeros = String(valorDigitado).replace(/\D/g, '');
+    const val = parseInt(somenteNumeros, 10);
+    setQtdBonificada(isNaN(val) || val < 0 ? 0 : Math.min(val, 9999));
   };
 
   // 💡 BLINDAGEM DE CARRINHO: Contra Multiplicação e Aberturas Acidentais
@@ -382,15 +532,17 @@ export default function MenuCliente({ usuario, tema }) {
     const bonificacaoSegura = Math.min(qtdFinal, bonifFinal);
     const qtdCobrada = Math.max(0, qtdFinal - bonificacaoSegura);
 
-    const infosVenda = tratarInfosDeVenda(produtoExpandido);
+    // Usa sempre o preço e o status mais recentes do produto.
+    const prodVivo = produtos.find(p => p.id === produtoExpandido.id) || produtoExpandido;
+    const infosVenda = tratarInfosDeVenda(prodVivo);
     
-    if (produtoExpandido.status_cotacao === 'falta') {
-      if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está marcado como EM FALTA. Deseja adicionar ao pedido mesmo assim?`)) {
+    if (prodVivo.status_cotacao === 'falta') {
+      if (!window.confirm(`⚠️ AVISO: O item "${prodVivo.nome}" está marcado como EM FALTA. Deseja adicionar ao pedido mesmo assim?`)) {
           setBloqueiaCliqueProduto(false); 
           return;
       }
-    } else if (produtoExpandido.status_cotacao === 'sem_preco' || infosVenda.precoBase === 0) {
-      if (!window.confirm(`⚠️ AVISO: O item "${produtoExpandido.nome}" está SEM PREÇO definido hoje. O valor final será atualizado posteriormente. Deseja confirmar?`)) {
+    } else if (prodVivo.status_cotacao === 'sem_preco' || infosVenda.precoBase === 0) {
+      if (!window.confirm(`⚠️ AVISO: O item "${prodVivo.nome}" está SEM PREÇO definido hoje. O valor final será atualizado posteriormente. Deseja confirmar?`)) {
           setBloqueiaCliqueProduto(false); 
           return;
       }
@@ -484,6 +636,38 @@ export default function MenuCliente({ usuario, tema }) {
     } catch(e) { console.error(e); }
   };
 
+  // ✏️ Começa a editar a quantidade de um item no carrinho (o valor digitado fica só na tela até confirmar).
+  const iniciarEdicaoItem = (item) => {
+    setQtdRascunho(String(item.quantidade || 1));
+    setItemEditandoId(item.id);
+  };
+
+  const tratarRascunhoQtd = (valorDigitado) => {
+    const somenteNumeros = String(valorDigitado).replace(/\D/g, '');
+    if (somenteNumeros === '') { setQtdRascunho(''); return; }
+    setQtdRascunho(String(Math.min(parseInt(somenteNumeros, 10), 9999)));
+  };
+
+  const ajustarRascunhoQtd = (delta) => {
+    const atual = parseInt(qtdRascunho, 10) || 0;
+    setQtdRascunho(String(Math.max(1, atual + delta)));
+  };
+
+  // ✅ Grava a quantidade digitada (só quando o cliente confirma).
+  const confirmarEdicaoItem = async () => {
+    const item = carrinhoSeguro.find(i => i.id === itemEditandoId);
+    const novaQtd = parseInt(qtdRascunho, 10) || 1;
+    if (item && Number(item.quantidade) !== novaQtd) {
+      await alterarQtdCartInput(item.id, novaQtd);
+    }
+    setItemEditandoId(null);
+  };
+
+  const fecharCarrinho = async () => {
+    if (itemEditandoId !== null) await confirmarEdicaoItem();
+    setModalCarrinhoAberto(false);
+  };
+
   const removerItemCarrinho = async (item) => {
     try {
         await supabase.from('carrinho_nuvem').delete().eq('loja_id', codLoja).eq('produto_id', item.id);
@@ -497,9 +681,35 @@ export default function MenuCliente({ usuario, tema }) {
       try {
           await supabase.from('carrinho_nuvem').delete().eq('loja_id', codLoja);
           registrarLogCarrinho('ZEROU CARRINHO', 'Todos os Itens', 0);
+          setItemEditandoId(null);
           setModalCarrinhoAberto(false);
           syncCarrinhoNuvem();
       } catch(e) { console.error(e); }
+    }
+  };
+
+  // 📋 Copia um texto (usa a área de transferência moderna e, se não der, o método antigo).
+  const copiarTextoSeguro = async (texto) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(texto);
+        return true;
+      }
+    } catch (e) { /* tenta o método antigo */ }
+
+    try {
+      const textArea = document.createElement("textarea");
+      textArea.value = texto;
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.select();
+      textArea.setSelectionRange(0, 99999);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return ok;
+    } catch (e) {
+      return false;
     }
   };
 
@@ -510,16 +720,39 @@ export default function MenuCliente({ usuario, tema }) {
     const itensFaltando = itensPadrao.filter(pPadrao => !carrinhoSeguro.some(c => c.id === pPadrao.id));
 
     if (itensFaltando.length > 0) {
-      const listaNomes = itensFaltando.map(i => `- ${i.nome}`).join('\n');
-      const confirma = window.confirm(`⚠️ AVISO DE LISTA PADRÃO\n\nVocê esqueceu de adicionar os seguintes itens da sua lista padrão:\n\n${listaNomes}\n\nDeseja revisar o pedido antes de enviar? (Clique em Cancelar para revisar, ou OK para ignorar e enviar mesmo assim)`);
-      
-      if (!confirma) {
-        setCategoriaAtiva('⭐ LISTA PADRÃO');
-        setModalCarrinhoAberto(false);
-        return;
-      }
+      // Mostra a lista COMPLETA em uma tela própria (o alerta do navegador cortava a lista em alguns aparelhos).
+      setItensPadraoFaltando(itensFaltando.map(i => i.nome).sort((a, b) => a.localeCompare(b, 'pt-BR')));
+      setListaFaltandoCopiada(false);
+      setModalListaPadraoAberto(true);
+      return;
     }
 
+    setModalRevisaoAberto(true);
+  };
+
+  // Copia só os itens da lista padrão que ficaram de fora.
+  const copiarListaPadraoFaltando = async () => {
+    const dataBr = new Date().toLocaleDateString('pt-BR');
+    let msg = `*LISTA PADRÃO - ITENS QUE FALTARAM*\nLoja: *${nomeLojaLimpo}*\nData: *${dataBr}*\n\n`;
+    itensPadraoFaltando.forEach(nome => { msg += `- ${nome}\n`; });
+
+    const ok = await copiarTextoSeguro(msg);
+    if (ok) {
+      setListaFaltandoCopiada(true);
+      setTimeout(() => setListaFaltandoCopiada(false), 3000);
+    } else {
+      alert("Não foi possível copiar. Tente novamente.");
+    }
+  };
+
+  const revisarListaPadrao = () => {
+    setModalListaPadraoAberto(false);
+    setCategoriaAtiva('⭐ LISTA PADRÃO');
+    setModalCarrinhoAberto(false);
+  };
+
+  const enviarMesmoAssim = () => {
+    setModalListaPadraoAberto(false);
     setModalRevisaoAberto(true);
   };
 
@@ -529,6 +762,19 @@ export default function MenuCliente({ usuario, tema }) {
     enviandoRef.current = true; 
     
     try {
+      // Trava: se outro aparelho da mesma loja já enviou o pedido de hoje, não sobrescreve.
+      const { data: jaEnviados } = await supabase.from('pedidos').select('*').eq('data_pedido', hoje).eq('loja_id', codLoja);
+      if (jaEnviados && jaEnviados.length > 0 && !jaEnviados.some(i => i.liberado_edicao === true)) {
+        enviandoRef.current = false;
+        setListaEnviadaHoje(jaEnviados);
+        setModalRevisaoAberto(false);
+        setModalCarrinhoAberto(false);
+        setModoVisualizacao(false);
+        window.scrollTo(0, 0);
+        alert("⚠️ O pedido de hoje desta loja já foi enviado por outro aparelho. Seu carrinho não foi enviado para não sobrescrever o pedido existente.");
+        return;
+      }
+
       const mapaFinal = {};
       carrinhoSeguro.forEach(item => {
         if (!mapaFinal[item.nome]) {
@@ -690,7 +936,9 @@ export default function MenuCliente({ usuario, tema }) {
     } catch (err) { setErroSenha(err.message); } finally { setCarregandoSenha(false); }
   };
 
-  const infosVendaExpandido = produtoExpandido ? tratarInfosDeVenda(produtoExpandido) : null;
+  // O produto aberto no modal sempre usa o preço mais recente da lista (atualiza sozinho).
+  const produtoAtual = produtoExpandido ? (mapaProdutosPorId.get(produtoExpandido.id) || produtoExpandido) : null;
+  const infosVendaExpandido = produtoAtual ? tratarInfosDeVenda(produtoAtual) : null;
   const qtdFinalExp = parseInt(quantidade) || 1;
   const bonifFinalExp = temBonificacao ? (parseInt(qtdBonificada) || 0) : 0;
   const bonifSeguraExp = Math.min(qtdFinalExp, bonifFinalExp);
@@ -704,7 +952,7 @@ export default function MenuCliente({ usuario, tema }) {
 
     return (
       <div style={{ padding: '20px', fontFamily: configDesign.geral.fontePadrao, textAlign: 'center', backgroundColor: configDesign.cores.fundoGeral, minHeight: '100vh', paddingBottom: '50px' }}>
-        <div style={{ background: edicaoLiberada ? configDesign.cores.sucesso : (aguardandoLiberacao ? configDesign.cores.promocoes : configDesign.cores.textoForte), color: isEscuro && !edicaoLiberada && !aguardandoLiberacao ? '#000' : '#fff', padding: '40px 30px', borderRadius: '30px', marginTop: '20px' }}>
+        <div style={{ background: edicaoLiberada ? configDesign.cores.sucesso : (aguardandoLiberacao ? configDesign.cores.promocao : configDesign.cores.textoForte), color: isEscuro && !edicaoLiberada && !aguardandoLiberacao ? '#000' : '#fff', padding: '40px 30px', borderRadius: '30px', marginTop: '20px' }}>
           <div style={{fontSize: '50px', marginBottom: '10px'}}>{edicaoLiberada ? '🔓' : (aguardandoLiberacao ? '⏳' : '✅')}</div>
           <h2 style={{ margin: 0 }}>{edicaoLiberada ? 'EDIÇÃO LIBERADA' : (aguardandoLiberacao ? 'AGUARDANDO ADMIN' : 'PEDIDO ENVIADO!')}</h2>
         </div>
@@ -866,6 +1114,22 @@ export default function MenuCliente({ usuario, tema }) {
         </button>
       )}
 
+      {/* 💲 AVISO DE MUDANÇA DE PREÇO */}
+      {avisosPreco.length > 0 && (
+        <div style={{ position: 'fixed', top: '12px', left: '50%', transform: 'translateX(-50%)', zIndex: 9000, width: '92%', maxWidth: '420px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {avisosPreco.map(aviso => (
+            <div key={aviso.id} style={{ background: configDesign.cores.promocao, color: '#111', padding: '12px 14px', borderRadius: '12px', boxShadow: '0 8px 25px rgba(0,0,0,0.35)', display: 'flex', alignItems: 'flex-start', gap: '10px', fontSize: '12px', fontWeight: 'bold' }}>
+              <span style={{ fontSize: '16px' }}>💲</span>
+              <div style={{ flex: 1 }}>
+                Preço atualizado: <b>{aviso.nome}</b><br />
+                de {aviso.de} para <b>{aviso.para}</b>
+              </div>
+              <button onClick={() => setAvisosPreco(prev => prev.filter(x => x.id !== aviso.id))} style={{ background: 'transparent', border: 'none', fontWeight: '900', fontSize: '14px', cursor: 'pointer', color: '#111' }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* MODAL CONFIG GERAIS */}
       {modalConfiguracoesAberto && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 6500, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
@@ -951,7 +1215,7 @@ export default function MenuCliente({ usuario, tema }) {
                   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px' }}>
                     <span style={{fontSize: '12px', fontWeight: 'bold', color: configDesign.cores.textoSuave}}>QTD. TOTAL:</span>
                     <button onClick={() => tratarInputQuantidade(Math.max(1, (parseInt(quantidade) || 0) - 1))} style={{ width: '45px', height: '45px', fontSize: '20px', borderRadius: '12px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>-</button>
-                    <input type="number" value={quantidade} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '60px', height: '45px', fontSize: '20px', fontWeight: '900', textAlign: 'center', borderRadius: '12px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
+                    <input type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" value={quantidade} onFocus={(e) => e.target.select()} onChange={(e) => tratarInputQuantidade(e.target.value)} style={{ width: '60px', height: '45px', fontSize: '20px', fontWeight: '900', textAlign: 'center', borderRadius: '12px', border: `2px solid ${configDesign.cores.primaria}`, outline: 'none', color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
                     <button onClick={() => tratarInputQuantidade((parseInt(quantidade) || 0) + 1)} style={{ width: '45px', height: '45px', fontSize: '20px', borderRadius: '12px', border: 'none', background: configDesign.cores.inputFundo, color: configDesign.cores.textoForte }}>+</button>
                   </div>
 
@@ -966,7 +1230,7 @@ export default function MenuCliente({ usuario, tema }) {
                           <span style={{fontSize: '12px', fontWeight: 'bold', color: isEscuro ? '#86efac' : '#166534'}}>Qtd Bonificada:</span>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                              <button onClick={() => tratarInputBonificacao(Math.max(0, (parseInt(qtdBonificada) || 0) - 1))} style={{ width: '35px', height: '35px', fontSize: '18px', borderRadius: '8px', border: 'none', background: '#bbf7d0', color: '#166534' }}>-</button>
-                             <input type="number" value={qtdBonificada} onChange={(e) => tratarInputBonificacao(e.target.value)} style={{ width: '50px', height: '35px', fontSize: '16px', fontWeight: '900', textAlign: 'center', borderRadius: '8px', border: `1px solid #22c55e`, outline: 'none', color: '#166534', background: '#fff' }} />
+                             <input type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" value={qtdBonificada} onFocus={(e) => e.target.select()} onChange={(e) => tratarInputBonificacao(e.target.value)} style={{ width: '50px', height: '35px', fontSize: '16px', fontWeight: '900', textAlign: 'center', borderRadius: '8px', border: `1px solid #22c55e`, outline: 'none', color: '#166534', background: '#fff' }} />
                              <button onClick={() => tratarInputBonificacao((parseInt(qtdBonificada) || 0) + 1)} style={{ width: '35px', height: '35px', fontSize: '18px', borderRadius: '8px', border: 'none', background: '#bbf7d0', color: '#166534' }}>+</button>
                           </div>
                        </div>
@@ -993,7 +1257,7 @@ export default function MenuCliente({ usuario, tema }) {
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100dvh', backgroundColor: configDesign.cores.fundoCards, zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ margin: 0, fontWeight: '900', color: configDesign.cores.textoForte }}>Meu Carrinho</h2>
-            <button onClick={() => { setModalCarrinhoAberto(false); setItemEditandoId(null); }} style={{ border: 'none', background: configDesign.cores.inputFundo, borderRadius: '50%', width: '40px', height: '40px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>✕</button>
+            <button onClick={fecharCarrinho} style={{ border: 'none', background: configDesign.cores.inputFundo, borderRadius: '50%', width: '40px', height: '40px', fontWeight: 'bold', color: configDesign.cores.textoForte }}>✕</button>
           </div>
           
           <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
@@ -1006,13 +1270,13 @@ export default function MenuCliente({ usuario, tema }) {
                 <div key={`cart-${item.id}`} style={{ padding: '15px 0', borderBottom: `1px solid ${configDesign.cores.borda}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   {itemEditandoId === item.id ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-                       <button onClick={() => alterarQtdCart(item.id, -1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>-</button>
-                       <input type="number" value={item.quantidade || 1} onChange={(e) => alterarQtdCartInput(item.id, e.target.value)} style={{ width: '45px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
-                       <button onClick={() => alterarQtdCart(item.id, 1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>+</button>
-                       <button onClick={() => setItemEditandoId(null)} style={{marginLeft: 'auto', background: configDesign.cores.sucesso, color: 'white', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold'}}>OK</button>
+                       <button onClick={() => ajustarRascunhoQtd(-1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>-</button>
+                       <input type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" autoFocus value={qtdRascunho} onFocus={(e) => e.target.select()} onChange={(e) => tratarRascunhoQtd(e.target.value)} style={{ width: '55px', height: '35px', textAlign: 'center', fontWeight: '900', borderRadius: '8px', border: `1px solid ${configDesign.cores.borda}`, color: configDesign.cores.textoForte, background: configDesign.cores.fundoCards }} />
+                       <button onClick={() => ajustarRascunhoQtd(1)} style={{width: '35px', height: '35px', borderRadius: '8px', border: 'none', background: configDesign.cores.inputFundo, fontSize: '18px', color: configDesign.cores.textoForte}}>+</button>
+                       <button onClick={confirmarEdicaoItem} style={{marginLeft: 'auto', background: configDesign.cores.sucesso, color: 'white', border: 'none', padding: '8px 15px', borderRadius: '8px', fontWeight: 'bold'}}>OK</button>
                     </div>
                   ) : (
-                    <div onClick={() => setItemEditandoId(item.id)} style={{ cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: '10px' }}>
+                    <div onClick={() => iniciarEdicaoItem(item)} style={{ cursor: 'pointer', flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: '10px' }}>
                       <div style={{ flex: 1 }}>
                         <span style={{ fontSize: '13px', color: configDesign.cores.textoForte }}><b style={{color: configDesign.cores.primaria, fontSize: '15px'}}>{formatarQtdUnidade(item?.quantidade, item?.unidade_medida)}</b> de {item?.nome || 'Item'}</span>
                         <div style={{ fontSize: '11px', color: configDesign.cores.textoSuave, marginTop: '2px' }}>{formatarMoeda(item?.valorUnit)} / {item?.unidade_medida || 'UN'} • Toque para editar</div>
@@ -1030,7 +1294,40 @@ export default function MenuCliente({ usuario, tema }) {
           <div style={{ padding: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoGeral }}>
             {carrinhoSeguro.length > 0 && <button onClick={zerarCarrinho} style={{ width: '100%', padding: '12px', background: isEscuro ? '#450a0a' : '#fef2f2', color: configDesign.cores.alerta, border: 'none', borderRadius: '12px', fontWeight: '900', marginBottom: '15px' }}>🗑️ ESVAZIAR CARRINHO</button>}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontWeight: '900', fontSize: '18px', color: configDesign.cores.textoForte }}><span>Total Estimado:</span><span style={{color: configDesign.cores.primaria}}>{formatarMoeda(valorTotalCarrinho)}</span></div>
-            <button onClick={abrirRevisao} style={{ width: '100%', padding: '22px', background: carrinhoSeguro.length > 0 ? configDesign.cores.textoForte : configDesign.cores.borda, color: configDesign.cores.fundoGeral, borderRadius: '18px', fontWeight: '900', fontSize: '15px', border: 'none' }}>REVISAR E ENVIAR</button>
+            <button onClick={abrirRevisao} disabled={itemEditandoId !== null} style={{ width: '100%', padding: '22px', background: carrinhoSeguro.length > 0 && itemEditandoId === null ? configDesign.cores.textoForte : configDesign.cores.borda, color: configDesign.cores.fundoGeral, borderRadius: '18px', fontWeight: '900', fontSize: '15px', border: 'none' }}>{itemEditandoId !== null ? 'CONFIRME A QUANTIDADE (OK)' : 'REVISAR E ENVIAR'}</button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL AVISO LISTA PADRÃO (lista completa dos itens que ficaram de fora) */}
+      {modalListaPadraoAberto && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100dvh', backgroundColor: configDesign.cores.fundoGeral, zIndex: 3500, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '20px', borderBottom: `1px solid ${configDesign.cores.borda}` }}>
+            <h3 style={{ margin: 0, fontWeight: '900', color: configDesign.cores.textoForte, fontSize: '18px' }}>⚠️ Itens da Lista Padrão que ficaram de fora</h3>
+            <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: configDesign.cores.textoSuave, fontWeight: 'bold' }}>
+              Você não adicionou {itensPadraoFaltando.length} {itensPadraoFaltando.length === 1 ? 'item' : 'itens'} da sua lista padrão. Confira abaixo antes de enviar.
+            </p>
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '10px 20px' }}>
+            {itensPadraoFaltando.map((nome, i) => (
+              <div key={`faltando-${i}`} style={{ padding: '12px 0', borderBottom: `1px dashed ${configDesign.cores.borda}`, display: 'flex', alignItems: 'center', gap: '10px', color: configDesign.cores.textoForte, fontSize: '14px', fontWeight: 'bold' }}>
+                <span style={{ color: configDesign.cores.textoSuave, fontSize: '11px', minWidth: '26px' }}>{i + 1}.</span>
+                <span>{nome}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ padding: '20px', borderTop: `1px solid ${configDesign.cores.borda}`, background: configDesign.cores.fundoCards, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <button onClick={copiarListaPadraoFaltando} style={{ width: '100%', padding: '16px', background: listaFaltandoCopiada ? '#16a34a' : '#25d366', color: '#fff', border: 'none', borderRadius: '14px', fontWeight: '900', fontSize: '14px', transition: '0.3s' }}>
+              {listaFaltandoCopiada ? '✅ LISTA COPIADA!' : '📋 COPIAR LISTA QUE FALTOU'}
+            </button>
+            <button onClick={revisarListaPadrao} style={{ width: '100%', padding: '16px', background: configDesign.cores.primaria, color: '#fff', border: 'none', borderRadius: '14px', fontWeight: '900', fontSize: '14px' }}>
+              ✏️ REVISAR LISTA PADRÃO
+            </button>
+            <button onClick={enviarMesmoAssim} style={{ width: '100%', padding: '16px', background: configDesign.cores.textoForte, color: configDesign.cores.fundoGeral, border: 'none', borderRadius: '14px', fontWeight: '900', fontSize: '14px' }}>
+              🚀 ENVIAR MESMO ASSIM
+            </button>
           </div>
         </div>
       )}
